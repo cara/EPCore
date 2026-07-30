@@ -3,22 +3,24 @@
 <head>
 <meta charset="UTF-8">
 <title>EPTrace - Patient Data Anonymizer</title>
+<link href="../vendor/fonts/fonts.css" rel="stylesheet">
+<link href="../shared/epcore.css" rel="stylesheet">
 <style>
   * { box-sizing: border-box; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     background: #f4f4f7;
-    color: #222;
+    color: var(--text);
     margin: 0;
     padding: 24px;
     line-height: 1.45;
   }
   .container { max-width: 880px; margin: 0 auto; }
   h1 { margin: 0 0 4px; font-size: 22px; }
-  .lead { color: #555; margin: 0 0 20px; font-size: 14px; }
+  .lead { color: var(--text-dim); margin: 0 0 20px; font-size: 14px; }
   .card {
-    background: #fff;
-    border: 1px solid #ddd;
+    background: var(--bg-1);
+    border: 1px solid var(--line);
     border-radius: 8px;
     padding: 16px 20px;
     margin-bottom: 14px;
@@ -27,7 +29,7 @@
   .muted { color: #777; font-size: 13px; }
   button {
     background: #2a5db0;
-    color: white;
+    color: var(--bg-1);
     border: none;
     padding: 8px 16px;
     border-radius: 5px;
@@ -35,7 +37,7 @@
     cursor: pointer;
   }
   button:hover { background: #1f4a8c; }
-  button:disabled { background: #aaa; cursor: not-allowed; }
+  button:disabled { background: var(--text-faint); cursor: not-allowed; }
   button.secondary { background: #6c757d; }
   button.secondary:hover { background: #555c63; }
   select {
@@ -43,16 +45,16 @@
     padding: 7px 10px;
     border: 1px solid #bbb;
     border-radius: 5px;
-    background: #fff;
-    color: #222;
+    background: var(--bg-1);
+    color: var(--text);
   }
   table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
   th { background: #f8f8fb; font-weight: 600; }
-  td.arrow { color: #999; width: 30px; text-align: center; }
+  td.arrow { color: var(--text-faint); width: 30px; text-align: center; }
   td.dst { color: #2a5db0; font-family: ui-monospace, Menlo, monospace; }
   td.src { font-family: ui-monospace, Menlo, monospace; }
-  td.skipped { color: #999; }
+  td.skipped { color: var(--text-faint); }
   .badge {
     display: inline-block;
     padding: 1px 6px;
@@ -63,18 +65,18 @@
   }
   .badge.patient { background: #e0f0e0; color: #2a662a; }
   .badge.skip { background: #f0e0e0; color: #803333; }
-  .badge.passthru { background: #eee; color: #555; }
+  .badge.passthru { background: var(--line); color: var(--text-dim); }
   progress { width: 100%; height: 16px; }
   #log {
     background: #1a1a24;
-    color: #ccc;
+    color: var(--line);
     padding: 10px 14px;
     border-radius: 5px;
     font-family: ui-monospace, Menlo, monospace;
     font-size: 12px;
     height: 220px;
     overflow-y: auto;
-    white-space: pre-wrap;
+    var(--bg-1)-space: pre-wrap;
   }
   .privacy {
     background: #fff8e1;

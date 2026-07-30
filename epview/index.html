@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>EPView · 3D Map Viewer</title>
 <link href="../vendor/fonts/fonts.css" rel="stylesheet">
+<link href="../shared/epcore.css" rel="stylesheet">
 <style>
   :root {
     --bg-0: #05080b;
@@ -708,7 +709,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=95f5f6f1cfa8",
+    "three": "../vendor/three/three.module.js?v=8751d6b5ff67",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -718,8 +719,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import * as EP from './epconv.js?v=95f5f6f1cfa8';
-import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=95f5f6f1cfa8';
+import * as EP from './epconv.js?v=8751d6b5ff67';
+import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=8751d6b5ff67';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1530,7 +1531,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=95f5f6f1cfa8'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=8751d6b5ff67'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -1646,7 +1647,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=95f5f6f1cfa8');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=8751d6b5ff67');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -2086,7 +2087,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=95f5f6f1cfa8');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=8751d6b5ff67');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -2117,7 +2118,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=95f5f6f1cfa8';
+import '../shared/bridge.js?v=8751d6b5ff67';
 
 window.epcoreNotify = (msg) => { console.warn('[epcore]', msg); alert(msg); };
 

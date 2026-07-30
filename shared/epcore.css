@@ -1,0 +1,235 @@
+/* EPCore — one visual language for both modules.
+ *
+ * The three parts came from three places and looked like it: the map view had a
+ * considered dark theme with its own tokens, the signal view a different dark
+ * theme with hard-coded hex values, and the anonymisers were light pages on
+ * white. Same program, three designs.
+ *
+ * The tokens below are the map view's, because that was the most developed of
+ * the three and its fonts are already vendored. Everything else adopts them.
+ *
+ * Signal colours are deliberately NOT in here. Trace colours carry meaning —
+ * a channel's colour identifies it, and green-for-ECG is a convention the
+ * reader relies on. They come from the recording and stay out of the theme.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces, back to front. */
+  --bg-0: #05080b;
+  --bg-1: #0a1016;
+  --bg-2: #111a22;
+  --bg-3: #17232d;
+
+  /* Ink. */
+  --text: #d7e3ea;
+  --text-dim: #8fa3b0;
+  --text-faint: #5b6d79;
+
+  --line: #1e2c37;
+  --line-strong: #2b3d4a;
+
+  --accent: #45c6da;
+  --accent-dim: #2b8294;
+  --accent-wash: rgba(69, 198, 218, 0.12);
+
+  --warn: #e0b341;
+  --warn-wash: rgba(224, 179, 65, 0.10);
+  --bad: #e2564a;
+
+  --ui: "Saira", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --radius: 4px;
+  --gap: 12px;
+}
+
+/* --- base ---------------------------------------------------------------- */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg-0);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+a { color: var(--accent); }
+a:hover { color: var(--text); }
+
+code, kbd { font-family: var(--mono); color: var(--text-dim); }
+
+h1, h2, h3 { font-family: var(--ui); font-weight: 500; letter-spacing: .2px; }
+
+/* --- the tab bar --------------------------------------------------------- */
+/* Both modules stay loaded; switching hides one and shows the other. Reloading
+ * would throw away a decoded recording and a built mesh — the two most
+ * expensive things the app produces. */
+
+.epcore-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line);
+  padding: 0 10px;
+  flex-shrink: 0;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.epcore-tabs .brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 14px;
+  margin-right: 4px;
+  border-right: 1px solid var(--line);
+  font-family: var(--ui);
+  font-size: 13px;
+  letter-spacing: .4px;
+  color: var(--accent);
+}
+
+.epcore-tabs button {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-faint);
+  font: inherit;
+  font-family: var(--ui);
+  font-size: 12.5px;
+  padding: 9px 14px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.epcore-tabs button:hover { color: var(--text-dim); }
+.epcore-tabs button[aria-selected="true"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: var(--accent-wash);
+}
+.epcore-tabs button .sub {
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  margin-left: 6px;
+}
+.epcore-tabs button[aria-selected="true"] .sub { color: var(--accent-dim); }
+
+.epcore-tabs .spacer { flex: 1; }
+.epcore-tabs .meta {
+  display: flex;
+  align-items: center;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  padding-left: 10px;
+}
+
+/* --- panels, tiles, rows -------------------------------------------------- */
+
+.panel {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.tiles {
+  display: grid;
+  gap: var(--gap);
+  grid-template-columns: repeat(auto-fit, minmax(258px, 1fr));
+}
+
+a.tile, button.tile {
+  display: block;
+  width: 100%;
+  text-align: left;
+  text-decoration: none;
+  color: inherit;
+  font: inherit;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+a.tile:hover, button.tile:hover { border-color: var(--accent-dim); background: var(--bg-2); }
+.tile .t { font-family: var(--ui); font-size: 13.5px; color: var(--accent); margin-bottom: 3px; }
+.tile .d { color: var(--text-dim); }
+.tile .f { color: var(--text-faint); font-size: 10.5px; margin-top: 8px; }
+
+.rows { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.row {
+  display: flex; gap: var(--gap); align-items: baseline; width: 100%; text-align: left;
+  background: var(--bg-1); color: var(--text); border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 8px 14px; cursor: pointer; font: inherit;
+}
+.row:last-child { border-bottom: 0; }
+.row:hover { background: var(--bg-2); }
+.row .p {
+  color: var(--text-faint); font-size: 10.5px; margin-left: auto;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%;
+}
+
+/* --- controls ------------------------------------------------------------- */
+
+button.btn, .btn {
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 5px 11px;
+  font: inherit;
+  cursor: pointer;
+}
+button.btn:hover, .btn:hover { background: var(--bg-3); border-color: var(--accent-dim); }
+button.btn.primary {
+  background: var(--accent-wash);
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+button.btn:disabled { color: var(--text-faint); cursor: default; background: var(--bg-1); }
+
+select, input[type=text], input[type=number], input[type=file] {
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 4px 7px;
+  font: inherit;
+}
+select:focus, input:focus { outline: none; border-color: var(--accent-dim); }
+
+label { color: var(--text-dim); }
+
+/* --- notes ---------------------------------------------------------------- */
+
+.note, .warn {
+  border-radius: var(--radius);
+  padding: 11px 14px;
+  margin: 16px 0;
+}
+.note { background: var(--bg-1); border: 1px solid var(--line); color: var(--text-dim); }
+.warn { background: var(--warn-wash); border: 1px solid #3a3524; color: var(--warn); }
+.warn strong { color: var(--warn); }
+
+.muted { color: var(--text-faint); }
+
+/* --- section headings ----------------------------------------------------- */
+
+.section {
+  color: var(--text-faint);
+  font-family: var(--ui);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 1.1px;
+  font-weight: normal;
+  margin: 22px 0 8px;
+}
