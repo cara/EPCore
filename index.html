@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EPCore — Web-Werkzeuge</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { background:#0a0a14; color:#ccc; font-family:'Consolas','Monaco',monospace;
+         font-size:13px; margin:0; padding:24px 16px 40px; line-height:1.55; }
+  main { max-width: 900px; margin: 0 auto; }
+  h1 { color:#8f8; font-size:18px; margin:0 0 4px; letter-spacing:.5px; }
+  .sub { color:#667; margin:0 0 22px; }
+  h2 { color:#778; font-size:11px; text-transform:uppercase; letter-spacing:1px;
+       font-weight:normal; margin:24px 0 8px; }
+  .tiles { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); }
+  a.tile { display:block; text-decoration:none; color:inherit; background:#14141e;
+           border:1px solid #333; border-radius:4px; padding:14px 16px;
+           transition:border-color .12s, background .12s; }
+  a.tile:hover { border-color:#5a5; background:#191926; }
+  a.tile .t { color:#8f8; font-size:13px; margin-bottom:4px; }
+  a.tile .d { color:#778; }
+  .note { border:1px solid #3a3a2a; background:#1a1a12; border-radius:4px;
+          padding:12px 14px; margin:22px 0 0; color:#cc9; }
+  footer { margin-top:28px; padding-top:14px; border-top:1px solid #23232f; color:#445; }
+  footer a { color:#7a7; }
+</style>
+</head>
+<body>
+<main>
+  <h1>EPCore — Web-Werkzeuge</h1>
+  <p class="sub">Elektrophysiologische Studiendaten anonymisieren und Karten ansehen.
+     Alles läuft lokal im Browser; es wird nichts hochgeladen.</p>
+
+  <h2>Karten</h2>
+  <div class="tiles">
+    <a class="tile" href="epview/">
+      <div class="t">3D-Kartenviewer</div>
+      <div class="d">Rhythmia-, CARTO- und EnSite-Rohexporte direkt im Browser
+        umwandeln und als Voltage- oder LAT-Karte ansehen. Export als PLY/OBJ/STL.</div>
+    </a>
+  </div>
+
+  <h2>Anonymisieren</h2>
+  <div class="tiles">
+    <a class="tile" href="tools/anonymize-classic.html">
+      <div class="t">Aufnahmen</div>
+      <div class="d">LabSystem PRO, GE CardioLab, Abbott EP-WorkMate.</div>
+    </a>
+    <a class="tile" href="tools/anonymize-rhythmia.html">
+      <div class="t">Rhythmia</div>
+      <div class="d">HDx-Mapping-Archive (.000/.001/…).</div>
+    </a>
+    <a class="tile" href="tools/anonymize-carto.html">
+      <div class="t">CARTO 3</div>
+      <div class="d">Studien-Export (.zip).</div>
+    </a>
+    <a class="tile" href="tools/anonymize-ensite.html">
+      <div class="t">EnSite</div>
+      <div class="d">NavX / Velocity / Precision XML.</div>
+    </a>
+  </div>
+
+  <div class="note">
+    Ergebnisse vor der Weitergabe stets selbst prüfen. Für GE, Abbott und Rhythmia
+    liegt kein geprüfter Referenz-Export vor — die Werkzeuge weisen darauf hin.
+    EnSite-<em>Velocity-Studienarchive</em> tragen ihre Patientendaten in SQLite-
+    Datenbanken und DICOM-Dateien; dafür braucht es die Desktop-App bzw.
+    <code>epcore epview anonymize</code>, nicht diese Seite.
+  </div>
+
+  <footer>
+    Der Signal-Viewer braucht den Decoder und läuft nur in der App —
+    <a href="https://github.com/cara/EPCore/releases">Downloads</a>.
+  </footer>
+</main>
+</body>
+</html>

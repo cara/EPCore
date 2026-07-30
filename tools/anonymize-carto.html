@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CARTO 3 Anonymisierer</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 920px;
+    margin: 1.5em auto;
+    padding: 0 1em;
+    color: #2c3e50;
+    line-height: 1.5;
+  }
+  h1 { color: #1a5f8e; margin-bottom: 0.2em; }
+  h2 { color: #1a5f8e; border-bottom: 1px solid #ddd; padding-bottom: 0.2em; margin-top: 1.6em; }
+  .subtitle { color: #7f8c8d; margin-top: 0; }
+  .info, .warn { padding: 0.8em 1em; border-radius: 4px; margin: 1em 0; }
+  .info { background: #e8f4f8; border-left: 4px solid #1a5f8e; }
+  .warn { background: #fff3cd; border-left: 4px solid #f39c12; }
+  .dropzone {
+    border: 2px dashed #95a5a6; border-radius: 4px;
+    padding: 2em; text-align: center; color: #7f8c8d;
+    margin: 0.5em 0 1em 0; transition: background 0.15s, border-color 0.15s;
+  }
+  .dropzone.drag { background: #dff0d8; border-color: #2ecc71; color: #27ae60; }
+  fieldset { border: 1px solid #ddd; border-radius: 4px; margin: 0.6em 0; padding: 0.8em 1em; }
+  fieldset legend { font-weight: 600; padding: 0 0.4em; }
+  label { display: block; margin: 0.3em 0; }
+  input[type=text] {
+    padding: 0.3em 0.5em; border: 1px solid #bdc3c7; border-radius: 3px;
+    width: 26em; max-width: 100%; font-family: monospace;
+  }
+  textarea {
+    width: 100%; box-sizing: border-box; padding: 0.5em;
+    border: 1px solid #bdc3c7; border-radius: 3px;
+    font-family: monospace; font-size: 0.9em;
+  }
+  button {
+    padding: 0.7em 1.5em; font-size: 1em; cursor: pointer;
+    border-radius: 4px; border: 1px solid #bdc3c7; background: #ecf0f1;
+    margin-right: 0.5em;
+  }
+  button:hover { background: #d6dbdf; }
+  button.primary { background: #2ecc71; color: white; border-color: #27ae60; }
+  button.primary:hover { background: #27ae60; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  pre {
+    background: #f8f8f8; padding: 0.8em; border-radius: 3px; overflow: auto;
+    max-height: 18em; font-size: 0.85em; white-space: pre-wrap; word-break: break-all;
+  }
+  table { border-collapse: collapse; width: 100%; margin-top: 0.5em; font-size: 0.9em; }
+  th, td { padding: 0.4em 0.6em; text-align: left; border-bottom: 1px solid #eee; }
+  th { background: #f4f6f7; }
+  td.field { font-family: monospace; color: #1a5f8e; }
+  td.original, td.replacement { font-family: monospace; }
+  td.original { color: #c0392b; }
+  td.replacement { color: #27ae60; }
+  ul.files { padding-left: 1.5em; }
+  ul.files li { font-family: monospace; }
+  .row { display: flex; gap: 1em; flex-wrap: wrap; }
+  .row > fieldset { flex: 1; min-width: 280px; }
+  .footer {
+    margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd;
+    color: #7f8c8d; font-size: 0.85em;
+  }
+</style>
+</head>
+<body>
+
+<h1>CARTO 3 Daten Anonymisierer</h1>
+<p class="subtitle">
+  Entfernt Patientendaten aus Biosense Webster CARTO 3 Exporten
+  (.zip Archive oder einzelne .mesh Dateien).
+</p>
+
+<div class="info">
+  <strong>Datenschutz:</strong> Alles läuft lokal im Browser. Es werden keine
+  Daten an einen Server geschickt. Die Datei kann auch offline geöffnet werden.
+</div>
+
+<div class="warn">
+  <strong>Wichtig:</strong> CARTO-ZIP-Archive enthalten oft mehrere Dateien
+  (.mesh, .txt, .xml, ECG-Exports, …). Diese Seite anonymisiert <em>alle</em>
+  textbasierten Dateien im Archiv. Binärdaten werden unverändert übernommen.
+  Nach der Anonymisierung manuell verifizieren.
+</div>
+
+<h2>1. Datei wählen</h2>
+<input type="file" id="files" accept=".zip,.mesh">
+<div class="dropzone" id="dropzone">
+  Oder Datei hier ablegen (.zip oder .mesh)
+</div>
+<div id="fileList"></div>
+
+<h2>2. Ersatzwerte konfigurieren</h2>
+<div class="row">
+  <fieldset>
+    <legend>Patient</legend>
+    <label>PatientID: <input type="text" id="rep-patientid" value="ANON-001"></label>
+    <label>Vorname: <input type="text" id="rep-first" value="Anonym"></label>
+    <label>Nachname: <input type="text" id="rep-last" value="Patient"></label>
+    <label>Geburtsdatum: <input type="text" id="rep-dob" value="1900-01-01"></label>
+  </fieldset>
+  <fieldset>
+    <legend>Zusätzlich anonymisieren</legend>
+    <label><input type="checkbox" id="opt-physician" checked> Ärzte- &amp; Personalnamen</label>
+    <label><input type="checkbox" id="opt-institution" checked> Klinik- &amp; Standortnamen</label>
+    <label><input type="checkbox" id="opt-comments" checked> Kommentare &amp; Notizen leeren</label>
+    <label><input type="checkbox" id="opt-dates"> Datum/Zeitstempel auf Jahr kürzen</label>
+    <label><input type="checkbox" id="opt-meshname"> MeshName/MeshID ersetzen (kann Patientenname enthalten)</label>
+  </fieldset>
+</div>
+
+<fieldset>
+  <legend>Eigene zu ersetzende Begriffe</legend>
+  <p style="margin: 0.2em 0; font-size: 0.9em; color: #7f8c8d;">
+    Eine Zeichenkette pro Zeile (z.&nbsp;B. Patientenname). Wird in allen
+    Textdateien des Archivs durch <code>[REDACTED]</code> ersetzt.
+    Case-insensitive. Binärdateien werden NICHT durchsucht.
+  </p>
+  <textarea id="custom-patterns" rows="3"
+    placeholder="Müller, Hans&#10;1965-03-15&#10;Smith_Mapping_2024"></textarea>
+</fieldset>
+
+<h2>3. Vorschau und Anonymisieren</h2>
+<button id="analyze">Vorschau anzeigen</button>
+<button id="process" class="primary">Anonymisieren &amp; Herunterladen</button>
+
+<div id="preview"></div>
+<pre id="log" hidden></pre>
+
+<div class="footer">
+  Open-Source / Forschungswerkzeug. Nicht für klinische Anwendung zugelassen.
+</div>
+
+<script>
+"use strict";
+
+// ===========================================================================
+// DOM
+// ===========================================================================
+const $ = id => document.getElementById(id);
+const filesInput = $("files");
+const dropzone = $("dropzone");
+const fileList = $("fileList");
+const preview = $("preview");
+const logEl = $("log");
+
+let selectedFile = null;
+
+function log(m) { logEl.hidden = false; logEl.textContent += m + "\n"; }
+function clearLog() { logEl.textContent = ""; logEl.hidden = true; }
+
+function setFile(f) {
+  selectedFile = f; fileList.innerHTML = "";
+  if (!f) return;
+  const div = document.createElement("div");
+  div.style.fontFamily = "monospace";
+  div.style.marginTop = "0.4em";
+  div.textContent = `${f.name}  (${(f.size / 1024).toFixed(1)} KB)`;
+  fileList.appendChild(div);
+}
+
+filesInput.addEventListener("change", e => setFile(e.target.files[0]));
+["dragover", "dragenter"].forEach(t =>
+  dropzone.addEventListener(t, e => { e.preventDefault(); dropzone.classList.add("drag"); })
+);
+dropzone.addEventListener("dragleave", e => { e.preventDefault(); dropzone.classList.remove("drag"); });
+dropzone.addEventListener("drop", e => {
+  e.preventDefault(); dropzone.classList.remove("drag");
+  setFile(e.dataTransfer.files[0]);
+});
+dropzone.addEventListener("click", () => filesInput.click());
+
+// === SCRUB-CORE START ===
+// Alles zwischen den SCRUB-CORE-Markern ist frei von DOM-Zugriffen und wird
+// von test/scrub_core.js extrahiert und in node --test geprüft.
+// `coreLog` wird weiter unten von der UI auf `log` gesetzt.
+let coreLog = () => {};
+
+// ===========================================================================
+// Kodierung von Text-Einträgen
+// ===========================================================================
+// CARTO schreibt latin-1, aber neuere Exporte enthalten auch UTF-8-Einträge.
+// Deshalb pro Eintrag heuristisch entscheiden und in derselben Kodierung
+// zurückschreiben — sonst wird jedes Byte >= 0x80 zu U+FFFD (Datenverlust)
+// und eigene Suchbegriffe mit Umlaut greifen nicht mehr.
+function decodeTextBytes(bytes) {
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return { text, encoding: "utf-8" };
+  } catch (e) {
+    return { text: new TextDecoder("latin1").decode(bytes), encoding: "latin1" };
+  }
+}
+
+function encodeTextBytes(text, encoding) {
+  if (encoding !== "latin1") return new TextEncoder().encode(text);
+  const out = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    out[i] = c > 0xff ? 0x3f /* '?' */ : c;
+  }
+  return out;
+}
+
+// ===========================================================================
+// CRC-32 (für ZIP)
+// ===========================================================================
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let j = 0; j < 8; j++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    t[i] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(bytes) {
+  let c = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) {
+    c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+  }
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+// ===========================================================================
+// Minimaler ZIP-Reader/Writer (Methode 0 = stored, 8 = deflate)
+// ===========================================================================
+async function readZipEntries(bytes) {
+  // End of Central Directory finden (Signatur 0x06054b50, "PK\5\6")
+  let eocd = -1;
+  const maxBack = Math.min(bytes.length, 65557);
+  for (let i = bytes.length - 22; i >= bytes.length - maxBack && i >= 0; i--) {
+    if (bytes[i] === 0x50 && bytes[i+1] === 0x4b
+        && bytes[i+2] === 0x05 && bytes[i+3] === 0x06) {
+      eocd = i; break;
+    }
+  }
+  if (eocd < 0) throw new Error("Kein gültiges ZIP-Archiv (EOCD nicht gefunden).");
+
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const numEntries = dv.getUint16(eocd + 10, true);
+  const cdOffset = dv.getUint32(eocd + 16, true);
+
+  // ZIP64: die 32-Bit-Felder stehen dann auf "alle Bits gesetzt" und die echten
+  // Werte liegen im ZIP64-EOCD. Lieber klar abbrechen als still falsch lesen.
+  if (numEntries === 0xffff || cdOffset === 0xffffffff
+      || dv.getUint32(eocd + 12, true) === 0xffffffff) {
+    throw new Error("ZIP64-Archiv (> 65535 Einträge oder > 4 GB) wird nicht " +
+      "unterstützt. Bitte das Archiv vorher entpacken und die .mesh-Dateien " +
+      "einzeln anonymisieren.");
+  }
+
+  const entries = [];
+  let cur = cdOffset;
+  const utf8 = new TextDecoder("utf-8", { fatal: false });
+  const cp437 = new TextDecoder("latin1"); // Näherung für Nicht-UTF-8-Namen
+
+  for (let i = 0; i < numEntries; i++) {
+    if (dv.getUint32(cur, true) !== 0x02014b50) {
+      throw new Error(`Ungültiger Central Directory Eintrag bei Offset ${cur}`);
+    }
+    const flags = dv.getUint16(cur + 8, true);
+    const compMethod = dv.getUint16(cur + 10, true);
+    const lastModTime = dv.getUint16(cur + 12, true);
+    const lastModDate = dv.getUint16(cur + 14, true);
+    const crc = dv.getUint32(cur + 16, true);
+    const compSize = dv.getUint32(cur + 20, true);
+    const uncompSize = dv.getUint32(cur + 24, true);
+    const nameLen = dv.getUint16(cur + 28, true);
+    const extraLen = dv.getUint16(cur + 30, true);
+    const commentLen = dv.getUint16(cur + 32, true);
+    const externalAttrs = dv.getUint32(cur + 38, true);
+    const localOffset = dv.getUint32(cur + 42, true);
+    // Bit 11 = Name ist UTF-8; sonst historisch CP437.
+    const nameDec = (flags & 0x800) ? utf8 : cp437;
+    const name = nameDec.decode(bytes.subarray(cur + 46, cur + 46 + nameLen));
+
+    // Local-Header parsen, um Datenoffset zu bekommen
+    const lh = localOffset;
+    if (dv.getUint32(lh, true) !== 0x04034b50) {
+      throw new Error(`Ungültiger Local Header bei Offset ${lh}`);
+    }
+    const lhNameLen = dv.getUint16(lh + 26, true);
+    const lhExtraLen = dv.getUint16(lh + 28, true);
+    const dataOffset = lh + 30 + lhNameLen + lhExtraLen;
+
+    entries.push({
+      name, flags, compMethod, lastModTime, lastModDate, crc,
+      compSize, uncompSize, dataOffset, externalAttrs,
+      compressedData: bytes.subarray(dataOffset, dataOffset + compSize),
+    });
+
+    cur += 46 + nameLen + extraLen + commentLen;
+  }
+  return entries;
+}
+
+async function decompressEntry(entry) {
+  if (entry.compMethod === 0) return entry.compressedData; // stored
+  if (entry.compMethod === 8) {
+    const stream = new Blob([entry.compressedData]).stream()
+      .pipeThrough(new DecompressionStream("deflate-raw"));
+    const ab = await new Response(stream).arrayBuffer();
+    return new Uint8Array(ab);
+  }
+  throw new Error(`Kompressionsmethode ${entry.compMethod} nicht unterstützt`);
+}
+
+async function deflateRaw(bytes) {
+  const stream = new Blob([bytes]).stream()
+    .pipeThrough(new CompressionStream("deflate-raw"));
+  const ab = await new Response(stream).arrayBuffer();
+  return new Uint8Array(ab);
+}
+
+// Namen werden mit TextEncoder (UTF-8) geschrieben — dann muss Bit 11 gesetzt
+// sein, sonst zeigen Entpacker Umlaute in Dateinamen falsch an.
+const ZIP_FLAG_UTF8 = 0x800;
+
+async function writeZip(entries) {
+  // entries: [{ name, data: Uint8Array, lastModTime?, lastModDate?,
+  //             externalAttrs?, preferStored? }]
+  const enc = new TextEncoder();
+  const chunks = [];
+  const cd = [];
+  let offset = 0;
+
+  for (const e of entries) {
+    const nameBytes = enc.encode(e.name);
+    const crc = crc32(e.data);
+    let data, method;
+
+    if (e.preferStored) {
+      data = e.data;
+      method = 0;
+    } else {
+      const compressed = await deflateRaw(e.data);
+      if (compressed.length < e.data.length) {
+        data = compressed; method = 8;
+      } else {
+        data = e.data; method = 0;
+      }
+    }
+
+    // Local file header
+    const lh = new Uint8Array(30 + nameBytes.length);
+    const dv = new DataView(lh.buffer);
+    dv.setUint32(0, 0x04034b50, true);
+    dv.setUint16(4, 20, true);                 // version
+    dv.setUint16(6, ZIP_FLAG_UTF8, true);      // flags (Bit 11: Name ist UTF-8)
+    dv.setUint16(8, method, true);
+    dv.setUint16(10, e.lastModTime || 0, true);
+    dv.setUint16(12, e.lastModDate || 0x21, true); // 1980-01-01
+    dv.setUint32(14, crc, true);
+    dv.setUint32(18, data.length, true);
+    dv.setUint32(22, e.data.length, true);
+    dv.setUint16(26, nameBytes.length, true);
+    dv.setUint16(28, 0, true);
+    lh.set(nameBytes, 30);
+
+    chunks.push(lh, data);
+
+    cd.push({
+      nameBytes, method, crc,
+      lastModTime: e.lastModTime || 0,
+      lastModDate: e.lastModDate || 0x21,
+      compSize: data.length, uncompSize: e.data.length,
+      localOffset: offset, externalAttrs: e.externalAttrs || 0,
+    });
+    offset += lh.length + data.length;
+  }
+
+  // Central directory
+  const cdStart = offset;
+  for (const c of cd) {
+    const cdh = new Uint8Array(46 + c.nameBytes.length);
+    const dv = new DataView(cdh.buffer);
+    dv.setUint32(0, 0x02014b50, true);
+    dv.setUint16(4, 20, true);                 // version made by
+    dv.setUint16(6, 20, true);                 // version needed
+    dv.setUint16(8, ZIP_FLAG_UTF8, true);      // flags (Bit 11: Name ist UTF-8)
+    dv.setUint16(10, c.method, true);
+    dv.setUint16(12, c.lastModTime, true);
+    dv.setUint16(14, c.lastModDate, true);
+    dv.setUint32(16, c.crc, true);
+    dv.setUint32(20, c.compSize, true);
+    dv.setUint32(24, c.uncompSize, true);
+    dv.setUint16(28, c.nameBytes.length, true);
+    dv.setUint16(30, 0, true);                 // extra
+    dv.setUint16(32, 0, true);                 // comment
+    dv.setUint16(34, 0, true);                 // disk
+    dv.setUint16(36, 0, true);                 // internal attrs
+    dv.setUint32(38, c.externalAttrs, true);
+    dv.setUint32(42, c.localOffset, true);
+    cdh.set(c.nameBytes, 46);
+    chunks.push(cdh);
+    offset += cdh.length;
+  }
+  const cdSize = offset - cdStart;
+
+  // EOCD
+  const eocd = new Uint8Array(22);
+  const dv = new DataView(eocd.buffer);
+  dv.setUint32(0, 0x06054b50, true);
+  dv.setUint16(4, 0, true);
+  dv.setUint16(6, 0, true);
+  dv.setUint16(8, cd.length, true);
+  dv.setUint16(10, cd.length, true);
+  dv.setUint32(12, cdSize, true);
+  dv.setUint32(16, cdStart, true);
+  dv.setUint16(20, 0, true);
+  chunks.push(eocd);
+
+  const total = chunks.reduce((s, b) => s + b.length, 0);
+  const out = new Uint8Array(total);
+  let p = 0;
+  for (const b of chunks) { out.set(b, p); p += b.length; }
+  return out;
+}
+
+// ===========================================================================
+// PII-Felder (XML-Tag UND INI-Key=Value)
+// ===========================================================================
+function buildReplacementMap(opts) {
+  const m = new Map();
+  const set = (k, v) => m.set(k, v);
+
+  set("PatientID", opts.patientId);
+  set("Patient ID", opts.patientId);
+  set("PatientNumber", opts.patientId);
+  set("Patient Number", opts.patientId);
+  set("PatientName", `${opts.lastName}, ${opts.firstName}`);
+  set("Patient Name", `${opts.lastName}, ${opts.firstName}`);
+  set("FullName", `${opts.lastName}, ${opts.firstName}`);
+  set("Full Name", `${opts.lastName}, ${opts.firstName}`);
+  set("FirstName", opts.firstName);
+  set("First Name", opts.firstName);
+  set("NameFirst", opts.firstName);
+  set("LastName", opts.lastName);
+  set("Last Name", opts.lastName);
+  set("NameLast", opts.lastName);
+  set("MiddleName", "");
+  set("Middle Name", "");
+  set("GivenName", opts.firstName);
+  set("Given Name", opts.firstName);
+  set("FamilyName", opts.lastName);
+  set("Family Name", opts.lastName);
+  set("BirthDate", opts.dob);
+  set("Birth Date", opts.dob);
+  set("DateOfBirth", opts.dob);
+  set("Date of Birth", opts.dob);
+  set("Date Of Birth", opts.dob);
+  set("DOB", opts.dob);
+  set("Birthday", opts.dob);
+  set("Patient Birth Date", opts.dob);
+  set("PatientBirthDate", opts.dob);
+  set("Age", "");
+  set("Patient Age", "");
+  set("Sex", "");
+  set("Gender", "");
+  set("Patient Sex", "");
+  set("PatientSex", "");
+  set("SSN", "XXX-XX-XXXX");
+  set("MRN", "ANON");
+  set("MedicalRecordNumber", "ANON");
+  set("Medical Record Number", "ANON");
+  set("InsuranceNumber", "ANON");
+  set("Insurance Number", "ANON");
+  set("Address", "ANON");
+  set("Patient Address", "ANON");
+  set("Street", "ANON");
+  set("City", "ANON");
+  set("State", "ANON");
+  set("ZIP", "00000");
+  set("PostalCode", "00000");
+  set("Postal Code", "00000");
+  set("Country", "ANON");
+  set("Phone", "ANON");
+  set("PhoneNumber", "ANON");
+  set("Phone Number", "ANON");
+  set("Email", "anon@example.com");
+
+  if (opts.physician) {
+    ["PhysicianName","Physician Name","Physician","AttendingPhysician",
+     "Attending Physician","ReferringPhysician","Referring Physician",
+     "Operator","Operator Name","OperatorName","Doctor","DoctorName",
+     "Doctor Name","Surgeon","Nurse","Technician","Performer",
+     "PerformingPhysician","Performing Physician","RecordingClinician",
+     "Recording Clinician","User","UserName","User Name","OperatorID",
+     "Operator ID","Author","Reviewer"].forEach(f => set(f, "ANON"));
+  }
+  if (opts.institution) {
+    ["Hospital","Hospital Name","HospitalName","Institution",
+     "Institution Name","InstitutionName","Site","Site Name","SiteName",
+     "Department","Department Name","DepartmentName","Clinic","Clinic Name",
+     "ClinicName","Facility","Facility Name","FacilityName","Station Name",
+     "StationName"].forEach(f => set(f, "ANON"));
+  }
+  if (opts.comments) {
+    ["Comments","Comment","Notes","Note","Remark","Remarks",
+     "Description","FreeText","Free Text",
+     "ProcedureNotes","Procedure Notes"].forEach(f => set(f, ""));
+  }
+  if (opts.meshname) {
+    set("MeshName", "AnonMesh");
+    set("Mesh Name", "AnonMesh");
+    set("MeshID", "AnonMeshID");
+    set("Mesh ID", "AnonMeshID");
+    set("StudyName", "AnonStudy");
+    set("Study Name", "AnonStudy");
+    set("StudyID", "AnonStudy");
+    set("Study ID", "AnonStudy");
+  }
+  return m;
+}
+
+const DATE_FIELDS = ["StudyDate","Study Date","AcquisitionDate",
+  "Acquisition Date","RecordingDate","Recording Date","Date","Timestamp",
+  "DateTime","Date Time","CreationDate","Creation Date","ExportDate",
+  "Export Date","MapDate","Map Date","ProcedureDate","Procedure Date",
+  "StartTime","Start Time","EndTime","End Time"];
+
+function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function escapeXml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+// Anonymisiert einen Text (egal ob INI, XML oder gemischt)
+function anonymizeText(text, opts, found, fileLabel) {
+  let out = text;
+  const repMap = buildReplacementMap(opts);
+
+  // 1) XML-Tag-Form: <Tag>...</Tag>
+  for (const [field, replacement] of repMap) {
+    if (/\s/.test(field)) continue; // Tags haben keine Leerzeichen im Namen
+    const re = new RegExp(`(<${field}>)([^<]*)(</${field}>)`, "gi");
+    out = out.replace(re, (m, open, content, close) => {
+      if (content === "" || content === replacement) return m;
+      found.push({ field: open.replace(/[<>]/g, ""),
+        original: content, replacement, file: fileLabel });
+      return open + escapeXml(replacement) + close;
+    });
+  }
+
+  // 2) XML-Attribut-Form: Field="value"
+  for (const [field, replacement] of repMap) {
+    if (/\s/.test(field)) continue;
+    const re = new RegExp(`(\\b${field}\\s*=\\s*")([^"]*)(")`, "gi");
+    out = out.replace(re, (m, before, content, after) => {
+      if (content === "" || content === replacement) return m;
+      found.push({ field: field + "=…", original: content,
+        replacement, file: fileLabel });
+      return before + escapeXml(replacement) + after;
+    });
+  }
+
+  // 3) INI-Key=Value-Form (mit Leerzeichen im Key erlaubt):
+  //    "  Patient Name = Smith, John"
+  for (const [field, replacement] of repMap) {
+    const re = new RegExp(
+      `^([ \\t]*${escapeRe(field)}[ \\t]*=[ \\t]*)([^\\r\\n;]*?)([ \\t]*(?:;[^\\r\\n]*)?)$`,
+      "gmi"
+    );
+    out = out.replace(re, (m, before, content, after) => {
+      const trimmed = content.trim();
+      if (trimmed === "" || trimmed === replacement) return m;
+      found.push({ field, original: trimmed, replacement, file: fileLabel });
+      return before + replacement + after;
+    });
+  }
+
+  // 4) Datumsfelder auf Jahr kürzen
+  if (opts.dates) {
+    for (const tag of DATE_FIELDS) {
+      // XML
+      if (!/\s/.test(tag)) {
+        const reX = new RegExp(`(<${tag}>)([^<]*)(</${tag}>)`, "gi");
+        out = out.replace(reX, (m, open, content, close) => {
+          const yr = content.match(/\b(19|20)\d{2}\b/);
+          const newVal = (yr ? yr[0] : "1900") + "-01-01";
+          if (content.trim() === newVal) return m;
+          found.push({ field: open.replace(/[<>]/g, ""),
+            original: content, replacement: newVal, file: fileLabel });
+          return open + newVal + close;
+        });
+      }
+      // INI
+      const reI = new RegExp(
+        `^([ \\t]*${escapeRe(tag)}[ \\t]*=[ \\t]*)([^\\r\\n;]*?)([ \\t]*(?:;[^\\r\\n]*)?)$`,
+        "gmi"
+      );
+      out = out.replace(reI, (m, before, content, after) => {
+        const yr = content.match(/\b(19|20)\d{2}\b/);
+        const newVal = (yr ? yr[0] : "1900") + "-01-01";
+        if (content.trim() === newVal) return m;
+        found.push({ field: tag, original: content.trim(),
+          replacement: newVal, file: fileLabel });
+        return before + newVal + after;
+      });
+    }
+  }
+
+  // 5) Eigene Patterns
+  const patterns = (opts.customPatterns || "").split(/\r?\n/)
+    .map(s => s.trim()).filter(Boolean);
+  for (const pat of patterns) {
+    const re = new RegExp(escapeRe(pat), "gi");
+    let count = 0;
+    out = out.replace(re, () => { count++; return "[REDACTED]"; });
+    if (count > 0) {
+      found.push({ field: "(custom)", original: pat,
+        replacement: "[REDACTED]", file: fileLabel, count });
+    }
+  }
+
+  return out;
+}
+
+// ===========================================================================
+// Text-Datei-Erkennung
+// ===========================================================================
+const TEXT_EXTENSIONS = new Set([
+  "mesh","txt","xml","csv","car","ecg","log","ini","json",
+  "html","htm","md","yaml","yml","conf",
+]);
+
+function isTextEntry(name, data) {
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  if (TEXT_EXTENSIONS.has(ext)) return true;
+  // Heuristik: erste 1024 Bytes prüfen
+  const sample = data.subarray(0, Math.min(1024, data.length));
+  if (sample.length === 0) return false;
+  let nonText = 0;
+  for (let i = 0; i < sample.length; i++) {
+    const b = sample[i];
+    // Erlaubt: druckbare ASCII, TAB, LF, CR
+    if (b === 0) return false;
+    if (b < 0x20 && b !== 0x09 && b !== 0x0a && b !== 0x0d) nonText++;
+  }
+  return nonText / sample.length < 0.05;
+}
+
+// ===========================================================================
+// Dateinamen im Archiv
+// ===========================================================================
+// CARTO benennt Einträge nach Studien-/Mapnamen, die regelmäßig den
+// Patientennamen enthalten ("Mueller_Hans_1-LA.mesh"). Den echten Namen kennt
+// das Werkzeug nur aus zwei Quellen: den eigenen Suchbegriffen und den
+// Originalwerten, die beim Scrubben der Inhalte gefunden wurden.
+function sanitizeNameFragment(s) {
+  return String(s).replace(/[^\w.\-]/g, "_") || "ANON";
+}
+
+function buildNameRules(opts, found) {
+  const rules = [];
+  const seen = new Set();
+  const add = (needle, replacement) => {
+    const s = String(needle == null ? "" : needle).trim();
+    // Kurze oder rein numerische Treffer würden Dateinamen zerschreddern.
+    if (s.length < 4 || !/[A-Za-zÀ-ɏ]/.test(s)) return;
+    const key = s.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    rules.push({ needle: s, replacement: sanitizeNameFragment(replacement) });
+  };
+
+  for (const pat of (opts.customPatterns || "").split(/\r?\n/)
+       .map(s => s.trim()).filter(Boolean)) {
+    add(pat, "REDACTED");
+  }
+  for (const f of found) {
+    if (f.field === "(custom)" || f.field === "(Dateiname)") continue;
+    add(f.original, f.replacement);
+  }
+  rules.sort((a, b) => b.needle.length - a.needle.length);
+  return rules;
+}
+
+function anonymizeEntryName(name, rules, found) {
+  let out = name;
+  for (const r of rules) {
+    out = out.replace(new RegExp(escapeRe(r.needle), "gi"), r.replacement);
+  }
+  if (out !== name) {
+    found.push({ field: "(Dateiname)", original: name, replacement: out,
+      file: name, count: 1 });
+  }
+  return out;
+}
+
+// ===========================================================================
+// Verarbeitung: ZIP-Archiv ODER einzelne .mesh-Datei
+// ===========================================================================
+async function processFile(file, opts) {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const found = [];
+
+  // ZIP-Magic prüfen: "PK\3\4"
+  const isZip = buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b
+                && buf[2] === 0x03 && buf[3] === 0x04;
+
+  if (isZip) {
+    coreLog(`ZIP-Archiv erkannt: ${file.name}`);
+    const entries = await readZipEntries(buf);
+    coreLog(`  ${entries.length} Datei(en) im Archiv:`);
+
+    const newEntries = [];
+
+    for (const e of entries) {
+      const data = await decompressEntry(e);
+      const text = isTextEntry(e.name, data);
+      coreLog(`    ${e.name}  (${data.length} bytes, ${text ? "Text" : "Binär"})`);
+
+      if (text && data.length > 0) {
+        // Kodierung pro Eintrag bestimmen und identisch zurückschreiben.
+        const { text: decoded, encoding } = decodeTextBytes(data);
+        const anon = anonymizeText(decoded, opts, found, e.name);
+        newEntries.push({
+          name: e.name, data: encodeTextBytes(anon, encoding),
+          lastModTime: e.lastModTime, lastModDate: e.lastModDate,
+          externalAttrs: e.externalAttrs,
+        });
+      } else {
+        newEntries.push({
+          name: e.name, data,
+          lastModTime: e.lastModTime, lastModDate: e.lastModDate,
+          externalAttrs: e.externalAttrs,
+          preferStored: e.compMethod === 0,
+        });
+      }
+    }
+
+    // Erst jetzt umbenennen: die Regeln entstehen aus den Inhaltstreffern.
+    const rules = buildNameRules(opts, found);
+    const usedNames = new Set();
+    for (const ne of newEntries) {
+      let name = anonymizeEntryName(ne.name, rules, found);
+      if (usedNames.has(name)) {
+        // Kollision durch Umbenennung: eindeutig halten.
+        const dot = name.lastIndexOf(".");
+        const base = dot > 0 ? name.slice(0, dot) : name;
+        const ext = dot > 0 ? name.slice(dot) : "";
+        let i = 2;
+        while (usedNames.has(`${base}_${i}${ext}`)) i++;
+        name = `${base}_${i}${ext}`;
+      }
+      usedNames.add(name);
+      ne.name = name;
+    }
+
+    coreLog(`  ${countReplacements(found)} Ersetzung(en) durchgeführt.`);
+    const outBytes = await writeZip(newEntries);
+    coreLog(`  Ausgabegröße: ${(outBytes.length / 1024).toFixed(1)} KB`);
+    return { bytes: outBytes, found, isZip: true };
+  } else {
+    // Einzelne .mesh-Datei: Kodierung wie im ZIP-Pfad bestimmen.
+    const { text, encoding } = decodeTextBytes(buf);
+    coreLog(`Einzelne Textdatei: ${file.name} (${text.length} Zeichen, ${encoding})`);
+    const anon = anonymizeText(text, opts, found, file.name);
+    coreLog(`  ${countReplacements(found)} Ersetzung(en).`);
+    return { bytes: encodeTextBytes(anon, encoding), found, isZip: false };
+  }
+}
+
+// Ein Eintrag in `found` kann für mehrere Vorkommen stehen (eigene Patterns
+// tragen `count`), deshalb nicht `found.length` als Ersetzungszahl melden.
+function countReplacements(found) {
+  return found.reduce((s, f) => s + (f.count || 1), 0);
+}
+
+// === SCRUB-CORE END ===
+// === SCRUB-CORE EXPORTS: buildReplacementMap, anonymizeText, processFile,
+//     readZipEntries, writeZip, decompressEntry, isTextEntry, decodeTextBytes,
+//     encodeTextBytes, buildNameRules, anonymizeEntryName, countReplacements ===
+
+// ===========================================================================
+// Optionen + UI
+// ===========================================================================
+function getOptions() {
+  return {
+    patientId: $("rep-patientid").value || "ANON",
+    firstName: $("rep-first").value || "Anonym",
+    lastName: $("rep-last").value || "Patient",
+    dob: $("rep-dob").value || "1900-01-01",
+    physician: $("opt-physician").checked,
+    institution: $("opt-institution").checked,
+    comments: $("opt-comments").checked,
+    dates: $("opt-dates").checked,
+    meshname: $("opt-meshname").checked,
+    customPatterns: $("custom-patterns").value,
+  };
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Kern-Code loggt über diesen Haken (damit er DOM-frei testbar bleibt).
+coreLog = log;
+
+function renderPreview(found) {
+  if (!found.length) {
+    preview.innerHTML = '<p style="color:#7f8c8d">Keine personenbezogenen ' +
+      'Felder gefunden. Falls die Datei trotzdem PII enthält, fügen Sie ' +
+      'diese unter "Eigene zu ersetzende Begriffe" hinzu.</p>';
+    return;
+  }
+  const agg = new Map();
+  for (const f of found) {
+    const key = `${f.file || ""}::${f.field}::${f.original}`;
+    if (!agg.has(key)) agg.set(key, { ...f, count: 0 });
+    agg.get(key).count += f.count || 1;
+  }
+  let html = `<h3>${countReplacements(found)} Ersetzung(en):</h3>` +
+    "<table><thead><tr><th>Datei</th><th>Feld</th><th>Original</th>" +
+    "<th>Ersatz</th><th>Anzahl</th></tr></thead><tbody>";
+  for (const [, f] of agg) {
+    html += "<tr>" +
+      `<td style="font-family:monospace;font-size:0.85em">${escapeHtml(f.file || "")}</td>` +
+      `<td class="field">${escapeHtml(f.field)}</td>` +
+      `<td class="original">${escapeHtml(f.original) || "<em>(leer)</em>"}</td>` +
+      `<td class="replacement">${escapeHtml(f.replacement) || "<em>(leer)</em>"}</td>` +
+      `<td>${f.count}</td></tr>`;
+  }
+  html += "</tbody></table>";
+  preview.innerHTML = html;
+}
+
+$("analyze").addEventListener("click", async () => {
+  if (!selectedFile) { alert("Bitte zuerst eine Datei wählen."); return; }
+  clearLog(); preview.innerHTML = "";
+  try {
+    const r = await processFile(selectedFile, getOptions());
+    renderPreview(r.found);
+  } catch (e) {
+    log("FEHLER: " + e.message); console.error(e);
+  }
+});
+
+$("process").addEventListener("click", async () => {
+  if (!selectedFile) { alert("Bitte zuerst eine Datei wählen."); return; }
+  clearLog(); preview.innerHTML = "";
+  try {
+    const opts = getOptions();
+    const r = await processFile(selectedFile, opts);
+    renderPreview(r.found);
+
+    const ext = r.isZip ? ".zip" : ".mesh";
+    const safeName = (opts.patientId || "ANON").replace(/[^\w.\-]/g, "_") + ext;
+    const blob = new Blob([r.bytes], {
+      type: r.isZip ? "application/zip" : "text/plain",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = safeName;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+    log(`\nFertig! "${safeName}" wurde heruntergeladen.`);
+  } catch (e) {
+    log("FEHLER: " + e.message); console.error(e);
+  }
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,2130 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>EPView · 3D Map Viewer</title>
+<link href="../vendor/fonts/fonts.css" rel="stylesheet">
+<style>
+  :root {
+    --bg-0: #05080b;
+    --bg-1: #0a1016;
+    --bg-2: #111a22;
+    --panel: rgba(13, 21, 28, 0.72);
+    --panel-solid: #0d151c;
+    --line: rgba(108, 196, 214, 0.16);
+    --line-strong: rgba(108, 196, 214, 0.34);
+    --accent: #45c6da;
+    --accent-dim: #2b8294;
+    --text: #d8e6ec;
+    --muted: #6f8893;
+    --warn: #e0a33a;
+    --shadow: 0 10px 40px rgba(0, 0, 0, 0.55);
+    --ui: "Saira", "Segoe UI", system-ui, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { height: 100%; overflow: hidden; }
+
+  body {
+    font-family: var(--ui);
+    color: var(--text);
+    background: var(--bg-0);
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+
+  #stage { position: fixed; inset: 0; }
+  canvas { display: block; outline: none; touch-action: none; }
+
+  /* ----- background atmosphere (behind canvas, canvas is transparent) ----- */
+  #stage::before {
+    content: "";
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(120% 90% at 50% 8%, var(--bg-2) 0%, var(--bg-1) 38%, var(--bg-0) 78%),
+      radial-gradient(80% 60% at 80% 100%, rgba(40, 90, 104, 0.18), transparent 60%);
+    z-index: -2;
+  }
+  /* subtle grain */
+  #stage::after {
+    content: "";
+    position: absolute; inset: 0;
+    pointer-events: none;
+    opacity: 0.035;
+    z-index: -1;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* ----------------------------- chrome ----------------------------- */
+  .brand {
+    position: fixed; top: 22px; left: 26px; z-index: 10;
+    pointer-events: none;
+  }
+  .brand h1 {
+    font-weight: 600; font-size: 20px; letter-spacing: 0.42em;
+    text-transform: uppercase; color: var(--text);
+  }
+  .brand h1 b { color: var(--accent); font-weight: 600; }
+  .brand .sub {
+    margin-top: 5px; font-family: var(--mono); font-size: 10.5px;
+    letter-spacing: 0.24em; text-transform: uppercase; color: var(--muted);
+  }
+
+  /* control panel */
+  .panel {
+    position: fixed; z-index: 10;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(14px) saturate(1.2);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  }
+  .panel::before {
+    content: ""; position: absolute; inset: 0; border-radius: 12px;
+    padding: 1px; pointer-events: none;
+    background: linear-gradient(160deg, var(--line-strong), transparent 42%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor; mask-composite: exclude;
+  }
+
+  #controls {
+    left: 26px; bottom: 26px; width: 270px;
+    padding: 16px 16px 18px;
+    max-height: calc(100vh - 130px);
+    overflow-y: auto;
+  }
+
+  .grp { margin-bottom: 12px; }
+  .grp:last-child { margin-bottom: 0; }
+  .grp > label {
+    display: block; font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 7px;
+  }
+
+  /* collapsible "Erweitert" disclosure inside a control group */
+  details.advanced { margin-top: 8px; }
+  details.advanced > summary {
+    cursor: pointer; list-style: none;
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--muted);
+    padding: 5px 0 4px; border-top: 1px solid var(--line);
+    display: flex; align-items: center; gap: 6px;
+    transition: color 0.14s;
+  }
+  details.advanced > summary::-webkit-details-marker { display: none; }
+  details.advanced > summary::before {
+    content: '▸'; color: var(--accent-dim);
+    display: inline-block; transition: transform 0.15s; font-size: 10px;
+  }
+  details.advanced[open] > summary::before { transform: rotate(90deg); }
+  details.advanced > summary:hover { color: var(--text); }
+  details.advanced > *:not(summary) { margin-top: 8px; }
+
+  /* compact area readout */
+  #area-summary {
+    font-family: var(--mono); font-size: 12px; color: var(--text);
+    display: flex; justify-content: space-between; gap: 8px;
+  }
+  #area-summary b { color: var(--accent); font-weight: 500; }
+  #area-readout { font-family: var(--mono); font-size: 11px; line-height: 1.7; color: var(--text); }
+
+  select, .seg {
+    width: 100%; font-family: var(--ui); font-size: 13px; color: var(--text);
+    background: rgba(5, 9, 12, 0.65);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 10px; cursor: pointer; appearance: none;
+    transition: border-color 0.15s;
+  }
+  select:hover { border-color: var(--line-strong); }
+  select:focus { outline: none; border-color: var(--accent-dim); }
+  select option { background: var(--panel-solid); }
+
+  .seg { display: flex; gap: 4px; padding: 4px; }
+  .seg button {
+    flex: 1; font-family: var(--ui); font-size: 12px; color: var(--muted);
+    background: transparent; border: 0; border-radius: 6px;
+    padding: 6px 4px; cursor: pointer; transition: all 0.14s; letter-spacing: 0.04em;
+  }
+  .seg button:hover { color: var(--text); }
+  .seg button.on { background: rgba(69, 198, 218, 0.14); color: var(--accent); }
+
+  .range-row { display: flex; gap: 10px; }
+  .range-row .field { flex: 1; }
+  .field small {
+    display: block; font-family: var(--mono); font-size: 9px; color: var(--muted);
+    letter-spacing: 0.1em; margin-bottom: 4px; text-transform: uppercase;
+  }
+  input[type=number] {
+    width: 100%; font-family: var(--mono); font-size: 12.5px; color: var(--text);
+    background: rgba(5, 9, 12, 0.65);
+    border: 1px solid var(--line); border-radius: 7px; padding: 7px 8px;
+  }
+  input[type=number]:focus { outline: none; border-color: var(--accent-dim); }
+
+  input[type=range] {
+    width: 100%; appearance: none; height: 3px; border-radius: 2px;
+    background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+    margin: 8px 0 2px;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: var(--text); border: 2px solid var(--accent-dim); cursor: pointer;
+    box-shadow: 0 0 8px rgba(69, 198, 218, 0.5);
+  }
+
+  /* dual-handle window slider: two transparent range inputs over one gradient track */
+  .dual { position: relative; height: 22px; margin: 6px 0 2px; }
+  .dual::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 9px; height: 3px;
+    border-radius: 2px; background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+  }
+  .dual input[type=range] {
+    position: absolute; left: 0; right: 0; top: 0; width: 100%; margin: 0;
+    background: transparent; pointer-events: none; height: 22px;
+  }
+  .dual input[type=range]::-webkit-slider-thumb { pointer-events: auto; }
+  .dual input[type=range]::-moz-range-thumb { pointer-events: auto; }
+  .dual input[type=range]::-moz-range-track { background: transparent; }
+
+  .anim-row { display: flex; gap: 8px; margin-top: 8px; }
+  .anim-row .chip { flex: 1; text-align: center; }
+
+  .toggles { display: flex; flex-wrap: wrap; gap: 7px; }
+  .chip {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+    color: var(--muted); background: rgba(5, 9, 12, 0.5);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 9px; cursor: pointer; transition: all 0.14s; text-transform: uppercase;
+  }
+  .chip:hover { color: var(--text); border-color: var(--line-strong); }
+  .chip.on { color: var(--accent); border-color: var(--accent-dim); background: rgba(69, 198, 218, 0.1); }
+
+  /* colorbar */
+  #legend {
+    right: 26px; top: 50%; transform: translateY(-50%);
+    z-index: 10; padding: 14px 14px 14px 12px; display: none;
+  }
+  #legend.show { display: block; }
+  .legend-inner { display: flex; gap: 10px; height: 280px; }
+  #cbar {
+    width: 16px; height: 100%; border-radius: 4px;
+    border: 1px solid var(--line-strong);
+  }
+  .ticks {
+    display: flex; flex-direction: column; justify-content: space-between;
+    font-family: var(--mono); font-size: 10.5px; color: var(--text); text-align: left;
+  }
+  .ticks span { line-height: 1; }
+  .ticks span small { display: block; color: var(--muted); font-size: 8.5px; letter-spacing: 0.15em; }
+  #legend .cap {
+    margin-top: 10px; text-align: center; font-family: var(--mono);
+    font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted);
+  }
+
+  /* readout (hover value) */
+  #readout {
+    position: fixed; z-index: 11; pointer-events: none; display: none;
+    transform: translate(14px, -50%);
+    font-family: var(--mono); font-size: 12px; color: var(--text);
+    background: rgba(5, 9, 12, 0.85); border: 1px solid var(--line-strong);
+    border-radius: 7px; padding: 6px 10px; box-shadow: var(--shadow);
+    white-space: nowrap;
+  }
+  #readout b { color: var(--accent); font-weight: 500; }
+
+  /* stats */
+  #stats {
+    position: fixed; top: 24px; right: 26px; z-index: 10; text-align: right;
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em;
+    color: var(--muted); line-height: 1.7;
+  }
+  #stats b { color: var(--text); font-weight: 500; }
+
+  /* toolbar (top-center actions) */
+  #toolbar {
+    position: fixed; top: 22px; left: 50%; transform: translateX(-50%);
+    z-index: 10; display: flex; gap: 8px;
+  }
+  .tool {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
+    color: var(--muted); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 13px; cursor: pointer; transition: all 0.14s;
+    backdrop-filter: blur(10px); text-transform: uppercase;
+  }
+  .tool:hover { color: var(--accent); border-color: var(--accent-dim); }
+  .tool-sep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 4px; }
+  .tdrop { position: relative; display: inline-block; }
+  .tmenu { position: absolute; top: 116%; left: 0; min-width: 170px; padding: 8px;
+    display: none; flex-direction: column; gap: 4px; z-index: 14; }
+  .tmenu.show { display: flex; }
+  .tmenu .tool { width: 100%; text-align: left; background: transparent; border: 0; }
+  .tmenu .tool:hover { color: var(--accent); }
+  #rec-dot { cursor: pointer; }
+  #recset {
+    position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
+    z-index: 12; width: 250px; padding: 14px 16px; display: none;
+  }
+  #recset.show { display: block; }
+  #recset .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 10px; }
+  #recset .row:last-child { margin-bottom: 0; }
+  #recset label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  #recset input[type=number], #recset select { width: 84px; padding: 5px 7px; }
+  #recset .fmt { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+  #sharebox {
+    position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
+    z-index: 13; width: 280px; padding: 16px;
+  }
+  #sharebox.show { display: block !important; }
+  #sharebox input[type=text] { font-family: var(--mono); font-size: 11px; padding: 6px 8px; }
+
+  /* loading overlay */
+  #loading {
+    position: fixed; inset: 0; z-index: 30; display: none;
+    align-items: center; justify-content: center;
+    background: rgba(5, 8, 11, 0.55); backdrop-filter: blur(3px);
+  }
+  #loading.show { display: flex; }
+  .ld-box {
+    display: flex; flex-direction: column; align-items: center; gap: 16px;
+    padding: 30px 40px; border-radius: 14px;
+    background: var(--panel); border: 1px solid var(--line-strong);
+    box-shadow: var(--shadow); backdrop-filter: blur(14px);
+  }
+  .ld-spin {
+    width: 40px; height: 40px; border-radius: 50%;
+    border: 3px solid rgba(69, 198, 218, 0.18); border-top-color: var(--accent);
+    animation: ld-rot 0.8s linear infinite;
+  }
+  @keyframes ld-rot { to { transform: rotate(360deg); } }
+  .ld-text {
+    font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.06em;
+    color: var(--text); text-align: center; min-width: 220px;
+  }
+
+  /* drop overlay / empty state */
+  #drop {
+    position: fixed; inset: 0; z-index: 20; display: flex;
+    align-items: center; justify-content: center; flex-direction: column;
+    text-align: center; transition: opacity 0.25s; gap: 4px;
+  }
+  #drop.hide { opacity: 0; pointer-events: none; }
+  #drop.dragging .dz {
+    border-color: var(--accent); background: rgba(69, 198, 218, 0.06);
+  }
+  .dz {
+    width: min(560px, 80vw); padding: 52px 40px;
+    border: 1.5px dashed var(--line-strong); border-radius: 18px;
+    background: var(--panel); backdrop-filter: blur(12px);
+    transition: all 0.2s;
+  }
+  .dz .glyph {
+    width: 56px; height: 56px; margin: 0 auto 20px; border-radius: 14px;
+    border: 1px solid var(--line-strong);
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(69, 198, 218, 0.06);
+  }
+  .dz .glyph svg { width: 28px; height: 28px; stroke: var(--accent); fill: none; stroke-width: 1.4; }
+  .dz h2 { font-weight: 500; font-size: 19px; letter-spacing: 0.04em; margin-bottom: 8px; }
+  .dz p { color: var(--muted); font-size: 13px; line-height: 1.6; max-width: 420px; margin: 0 auto; }
+  .dz .formats {
+    margin-top: 18px; font-family: var(--mono); font-size: 10.5px;
+    color: var(--muted); letter-spacing: 0.12em;
+  }
+  .dz .pick {
+    margin-top: 22px; display: inline-flex; gap: 10px; align-items: center;
+    font-family: var(--ui); font-size: 13px; color: var(--bg-0); font-weight: 500;
+    background: var(--accent); border: 0; border-radius: 9px;
+    padding: 10px 22px; cursor: pointer; letter-spacing: 0.03em;
+    transition: filter 0.15s;
+  }
+  .dz .pick:hover { filter: brightness(1.12); }
+  .dz .demo {
+    margin-top: 14px; display: block; background: none; border: 0;
+    color: var(--muted); font-family: var(--mono); font-size: 11px;
+    letter-spacing: 0.1em; cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
+  }
+  .dz .demo:hover { color: var(--accent); }
+
+  .hidden { display: none !important; }
+
+  /* ----- collapse header inside the controls panel (mobile only) ----- */
+  #ctrl-toggle {
+    display: none;
+    align-items: center; justify-content: space-between; gap: 8px;
+    width: 100%; padding: 2px 2px 10px;
+    background: transparent; border: 0; cursor: pointer;
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  #ctrl-toggle::before {
+    content: ""; position: absolute; top: 6px; left: 50%;
+    width: 36px; height: 3px; transform: translateX(-50%);
+    border-radius: 2px; background: var(--line-strong);
+  }
+  #ctrl-toggle .chev {
+    display: inline-block; color: var(--accent-dim); transition: transform 0.18s;
+  }
+  #controls.collapsed #ctrl-toggle .chev { transform: rotate(180deg); }
+
+  @media (max-width: 720px) {
+    /* compact brand */
+    .brand { top: 12px; left: 14px; }
+    .brand h1 { font-size: 15px; letter-spacing: 0.32em; }
+    .brand .sub { display: none; }
+
+    /* stats hidden on mobile (rendered as small fps/face row inside controls instead) */
+    #stats { display: none; }
+
+    /* keep toolbar visible: right-side strip with wrap, smaller chips */
+    #toolbar {
+      top: 10px; left: auto; right: 10px; transform: none;
+      max-width: calc(100vw - 130px);
+      flex-wrap: wrap; justify-content: flex-end; gap: 6px;
+    }
+    .tool {
+      padding: 7px 10px; font-size: 10.5px; letter-spacing: 0.04em;
+      min-height: 32px;
+    }
+    /* dropdowns: anchor to right edge so menus don't overflow viewport */
+    .tdrop { position: relative; }
+    .tmenu { left: auto; right: 0; min-width: 180px; }
+
+    /* controls panel: bottom sheet with collapse */
+    #controls {
+      left: 0; right: 0; bottom: 0; width: auto;
+      max-height: 58vh;
+      border-radius: 14px 14px 0 0;
+      padding: 22px 14px calc(14px + env(safe-area-inset-bottom));
+      transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    #controls.collapsed {
+      transform: translateY(calc(100% - 50px));
+    }
+    #controls.collapsed > *:not(#ctrl-toggle) { visibility: hidden; pointer-events: none; }
+    #ctrl-toggle { display: flex; }
+
+    /* legend: shorter + slimmer, tucked under toolbar */
+    #legend {
+      right: 10px; top: auto; bottom: 50%; transform: translateY(50%);
+      padding: 10px 10px 10px 8px;
+    }
+    .legend-inner { height: 180px; gap: 8px; }
+    #cbar { width: 12px; }
+    .ticks { font-size: 9.5px; }
+    .ticks span small { font-size: 8px; }
+    #legend .cap { font-size: 9px; letter-spacing: 0.14em; margin-top: 6px; }
+
+    /* settings/share popovers: center & fit narrow viewport */
+    #recset, #sharebox {
+      top: auto; bottom: 64px;
+      width: min(290px, calc(100vw - 24px));
+    }
+
+    /* drop overlay: smaller card on narrow screens */
+    .dz { padding: 36px 22px; }
+    .dz h2 { font-size: 16px; }
+    .dz p { font-size: 12px; }
+
+    /* readout (hover) hidden on touch — no hover surface */
+    #readout { display: none !important; }
+  }
+
+  /* tighter still on very narrow screens (phones in portrait) */
+  @media (max-width: 420px) {
+    #toolbar { max-width: calc(100vw - 110px); gap: 5px; }
+    .tool { padding: 6px 8px; font-size: 10px; }
+    .brand h1 { font-size: 14px; letter-spacing: 0.28em; }
+    #legend { display: none; }
+    #legend.show.force { display: block; }
+  }
+
+  /* landscape phones: panel from the right instead of the bottom */
+  @media (max-width: 900px) and (max-height: 500px) {
+    .brand { top: 10px; left: 14px; }
+    .brand h1 { font-size: 14px; letter-spacing: 0.28em; }
+    .brand .sub { display: none; }
+    #stats { display: none; }
+    #toolbar {
+      top: 8px; left: 50%; transform: translateX(-50%);
+      max-width: calc(100vw - 380px);
+      flex-wrap: wrap; gap: 5px; justify-content: center;
+    }
+    .tool { padding: 6px 9px; font-size: 10px; min-height: 28px; }
+    .tmenu { left: auto; right: 0; min-width: 170px; }
+    #ctrl-toggle { display: flex; }
+    #controls {
+      left: auto; right: 0; bottom: 0; top: 0;
+      width: min(320px, 55vw); max-height: 100vh;
+      border-radius: 14px 0 0 14px;
+      padding: 14px 14px 14px 28px;
+      transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    #controls.collapsed {
+      transform: translateX(calc(100% - 54px));
+    }
+    /* in collapsed side-drawer mode hide everything except the toggle handle
+       so the drawer reads as a clean vertical strip rather than a leaked
+       column of half-visible labels */
+    #controls.collapsed > *:not(#ctrl-toggle) { visibility: hidden; pointer-events: none; }
+    #controls.collapsed #ctrl-toggle .chev { transform: rotate(90deg); }
+    #ctrl-toggle::before {
+      top: 50%; left: 6px; width: 3px; height: 36px;
+      transform: translateY(-50%);
+    }
+    #legend { display: none; }
+    #readout { display: none !important; }
+  }
+
+  #controls-legend {
+    position: fixed; left: 50%; bottom: 8px; transform: translateX(-50%); z-index: 9;
+    pointer-events: none; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
+    color: var(--muted); opacity: 0.7;
+  }
+  @media (max-width: 720px) { #controls-legend { display: none; } }
+</style>
+</head>
+<body>
+
+<div id="stage"></div>
+
+<div class="brand">
+  <h1>EP<b>View</b></h1>
+  <div class="sub">3D Electroanatomic Map</div>
+</div>
+
+<div id="stats">
+  <div><b id="st-verts">—</b> vertices</div>
+  <div><b id="st-faces">—</b> faces</div>
+</div>
+
+<div id="toolbar">
+  <button class="tool" id="t-open">Öffnen…</button>
+  <div class="tdrop">
+    <button class="tool" id="t-cam">Kamera ▾</button>
+    <div class="tmenu panel" id="m-cam">
+      <button class="tool" data-view="AP">AP</button>
+      <button class="tool" data-view="PA">PA</button>
+      <button class="tool" data-view="LAO">LAO</button>
+      <button class="tool" data-view="RAO">RAO</button>
+      <button class="tool" id="t-reset">Reset View</button>
+      <button class="tool" id="t-rotate">Auto-Rotate</button>
+    </div>
+  </div>
+  <div class="tdrop">
+    <button class="tool" id="t-vid">Video ▾</button>
+    <div class="tmenu panel" id="m-vid">
+      <button class="tool" id="t-orbit">● Aufnahme (Kamerafahrt)</button>
+      <button class="tool" id="t-export">🎥 Export (Aktivierung)</button>
+      <button class="tool" id="t-recset">⚙ Einstellungen</button>
+    </div>
+  </div>
+  <div class="tdrop">
+    <button class="tool" id="t-save">Speichern ▾</button>
+    <div class="tmenu panel" id="m-save">
+      <button class="tool" id="t-shot">PNG Snapshot</button>
+      <button class="tool" id="ex-ply">↓ PLY (binär)</button>
+      <button class="tool" id="ex-ply-ascii">↓ PLY (ASCII)</button>
+      <button class="tool" id="ex-obj">↓ OBJ</button>
+      <button class="tool" id="ex-stl">↓ STL</button>
+    </div>
+  </div>
+  <button class="tool" id="t-share">🔗 Teilen</button>
+  <span class="tool" id="rec-dot" style="display:none; color:var(--warn)">● REC</span>
+</div>
+
+<div id="controls-legend">Drag rotieren · ⌘+Drag verschieben · Rad zoomen · Q/E rollen</div>
+
+<div id="recset" class="panel">
+  <div class="row"><label>Farbskala einbacken</label><input type="checkbox" id="rs-legend" checked></div>
+  <div class="row"><label>Gizmo ausblenden</label><input type="checkbox" id="rs-gizmo" checked></div>
+  <div class="row"><label>FPS</label>
+    <select id="rs-fps"><option>24</option><option selected>30</option><option>60</option></select></div>
+  <div class="row"><label>Orbit · s</label><input type="number" id="rs-orbit" min="2" max="60" step="1" value="8"></div>
+  <div class="row"><label>Aktivierung · s</label><input type="number" id="rs-export" min="2" max="60" step="1" placeholder="auto"></div>
+  <div class="row"><label>Loop-Zyklen</label><input type="number" id="rs-cycles" min="1" max="20" step="1" value="1"></div>
+  <div class="row"><label>Pfad</label>
+    <select id="rs-path"><option value="turntable" selected>Turntable</option><option value="tilt">Tilt-Orbit</option><option value="rock">Rock/Sway</option></select></div>
+  <div class="row"><label>Ease-in/out</label><input type="checkbox" id="rs-ease" checked></div>
+  <div class="row"><label>Format</label><span class="fmt" id="rs-fmt">—</span></div>
+</div>
+
+<div id="sharebox" class="panel" style="display:none">
+  <div class="row" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <b style="letter-spacing:.1em">SHARE LINK</b>
+    <button class="tool" id="share-close" style="padding:4px 10px">✕</button>
+  </div>
+  <div id="share-busy" class="field"><small>Lade hoch…</small></div>
+  <div id="share-result" style="display:none">
+    <img id="share-qr" alt="QR" style="width:180px;height:180px;display:block;margin:0 auto 12px;background:#fff;border-radius:8px"/>
+    <div class="field" style="margin-bottom:10px"><small style="color:var(--muted)">Labels werden nur per Muster (Zeit/Datum/ID) anonymisiert — vor dem Teilen prüfen.</small></div>
+    <div class="field"><small>Link</small>
+      <input type="text" id="share-link" readonly style="width:100%"></div>
+    <div class="anim-row">
+      <button class="chip" id="share-copy">Link kopieren</button>
+      <button class="chip" id="share-revoke">Widerrufen</button>
+    </div>
+    <div class="field" style="margin-top:8px"><small>ID</small> <span id="share-id" class="fmt"></span></div>
+  </div>
+  <div id="share-err" class="field" style="display:none;color:var(--warn)"></div>
+</div>
+
+<div id="controls" class="panel">
+  <button type="button" id="ctrl-toggle" aria-label="Bedienfeld ein-/ausklappen">
+    <span>Steuerung</span>
+    <span class="chev">▾</span>
+  </button>
+  <div class="grp" id="grp-mesh" style="display:none">
+    <label>Anatomie</label>
+    <select id="meshsel"></select>
+  </div>
+  <div class="grp">
+    <label>Map / Color Source</label>
+    <select id="mode"></select>
+  </div>
+  <div class="grp" id="grp-cmap">
+    <label>Color Scale</label>
+    <select id="cmap">
+      <option value="rhythmia_voltage">Rhythmia · Voltage</option>
+      <option value="rhythmia_lat">Rhythmia · LAT</option>
+      <option value="jet">Jet</option>
+      <option value="turbo">Turbo</option>
+    </select>
+  </div>
+  <div class="grp" id="grp-range">
+    <label>Window <span id="range-unit" style="color:var(--accent-dim)"></span>
+      <span id="vwin-readout" style="float:right; font-family:var(--mono); font-size:10px; color:var(--text); text-transform:none; letter-spacing:0; opacity:0.9"></span></label>
+    <div class="dual" id="vwin">
+      <input type="range" id="vmin-s">
+      <input type="range" id="vmax-s">
+    </div>
+    <details class="advanced">
+      <summary>Erweitert</summary>
+      <div class="range-row">
+        <div class="field"><small>min</small><input type="number" id="vmin" step="0.01"></div>
+        <div class="field"><small>max</small><input type="number" id="vmax" step="0.01"></div>
+      </div>
+      <div class="toggles" id="vpresets"></div>
+      <div id="conf-mask-row" style="display:none; gap:6px; align-items:center">
+        <button class="chip" id="conf-mask" style="flex:1">Conf-Maske ≤ <span id="conf-mask-th-lbl">0.03</span> mV</button>
+        <div class="field" style="flex:0 0 84px"><small>Schwelle · mV</small><input type="number" id="conf-mask-th" step="0.01" min="0" value="0.03"></div>
+      </div>
+    </details>
+  </div>
+  <div class="grp" id="grp-smooth" style="display:none">
+    <label>Interpolation <span id="smooth-val" style="color:var(--accent-dim)">0</span></label>
+    <input type="range" id="smooth-level" min="0" max="10" step="1" value="0">
+  </div>
+  <div class="grp" id="grp-area" style="display:none">
+    <label>Fläche <span style="color:var(--accent-dim)">· cm²</span></label>
+    <div id="area-summary"><b id="area-total">—</b><span id="area-mid" style="color:var(--muted)">—</span></div>
+    <details class="advanced">
+      <summary>Aufschlüsselung</summary>
+      <div id="area-readout"></div>
+      <button class="chip" id="area-isolate" style="margin-top:8px; width:100%">Window isolieren</button>
+    </details>
+  </div>
+  <div class="grp" id="grp-anim" style="display:none">
+    <label>Activation <span id="anim-t" style="color:var(--accent-dim)"></span></label>
+    <div class="seg" id="anim-mode">
+      <button data-mode="loop" class="on">Loop · Reentry</button>
+      <button data-mode="linear">Linear</button>
+    </div>
+    <div class="anim-row">
+      <button class="chip" id="anim-play">▶ Play</button>
+    </div>
+    <div class="field" style="margin-top:8px"><small>Cursor · ms</small>
+      <input type="range" id="anim-cursor"></div>
+    <div class="field" style="margin-top:6px"><small>Speed · ms/s</small>
+      <input type="range" id="anim-speed" min="1" max="500" step="1" value="60"></div>
+    <div class="field" style="margin-top:6px"><small>Band · ms</small>
+      <input type="range" id="anim-band"></div>
+  </div>
+  <div class="grp">
+    <label>Surface Opacity</label>
+    <input type="range" id="opacity" min="0.15" max="1" step="0.01" value="1">
+  </div>
+  <div class="grp">
+    <label>Display</label>
+    <div class="toggles">
+      <button class="chip on" id="c-axes">Orientierung</button>
+      <button class="chip" id="c-wire">Wireframe</button>
+      <button class="chip" id="c-smooth">Smooth</button>
+    </div>
+  </div>
+  <div class="grp" id="grp-tags" style="display:none">
+    <label>Tags <button class="chip" id="tags-all" style="float:right; padding:2px 8px">Alle</button></label>
+    <div class="field" style="margin-top:6px"><small>Punktgröße <span id="tag-size-val" style="color:var(--accent-dim)">1.0×</span></small>
+      <input type="range" id="tag-size" min="0.3" max="4" step="0.05" value="1"></div>
+    <div class="toggles" style="margin-top:6px">
+      <button class="chip" id="tag-project">Auf Oberfläche projizieren</button>
+    </div>
+    <div class="toggles" id="tag-list" style="margin-top:6px"></div>
+  </div>
+</div>
+
+<div id="legend" class="panel">
+  <div class="legend-inner">
+    <canvas id="cbar" width="16" height="280"></canvas>
+    <div class="ticks" id="cbar-ticks"></div>
+  </div>
+  <div class="cap" id="legend-cap">Voltage · mV</div>
+</div>
+
+<div id="readout"></div>
+
+<div id="loading">
+  <div class="ld-box">
+    <div class="ld-spin"></div>
+    <div class="ld-text" id="loading-text">Lade…</div>
+  </div>
+</div>
+
+<div id="drop">
+  <div class="dz">
+    <div class="glyph">
+      <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
+    </div>
+    <h2>3D-Map laden</h2>
+    <p>Rohexport direkt ablegen — <b>Rhythmia</b> (.000/.001…, alle Teile zusammen),
+       <b>CARTO</b> (.zip) oder <b>EnSite</b> (.xml). Wird im Browser konvertiert;
+       Voltage/LAT live umschaltbar, Export als OBJ/STL/PLY. Fertige PLY/OBJ/STL
+       gehen auch.</p>
+    <div class="formats">Rhythmia · CARTO · EnSite · PLY · OBJ · STL</div>
+    <button class="pick" id="pick">Dateien wählen</button>
+    <button class="demo" id="demo">oder Demo-Map ansehen</button>
+  </div>
+</div>
+
+<!-- kein accept-Filter: Rhythmia-Teile (.000…010…) sonst im Dialog ausgegraut;
+     Validierung passiert im Code (loadFiles) -->
+<input type="file" id="file" class="hidden" multiple>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "../vendor/three/three.module.js?v=95f5f6f1cfa8",
+    "three/addons/": "../vendor/three/addons/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import * as EP from './epconv.js?v=95f5f6f1cfa8';
+import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=95f5f6f1cfa8';
+
+/* =====================================================================
+ *  Color lookup tables
+ *  Stops: [t (0..1), [r,g,b] (0..255)].  Finalised from Rhythmia research.
+ * ===================================================================== */
+
+/* =====================================================================
+ *  Scene
+ * ===================================================================== */
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(42, innerWidth/innerHeight, 0.1, 100000);
+camera.position.set(0, 0, 200);
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+// lights — soft clinical studio
+const hemi = new THREE.HemisphereLight(0xbfe6f0, 0x202830, 0.55);
+scene.add(hemi);
+const key = new THREE.DirectionalLight(0xffffff, 2.1); key.position.set(1, 1.2, 1.4); scene.add(key);
+const fill = new THREE.DirectionalLight(0x9fc7d6, 0.7); fill.position.set(-1.4, 0.2, -0.6); scene.add(fill);
+const rim = new THREE.DirectionalLight(0x6fc9dc, 1.0); rim.position.set(-0.3, 0.6, -1.6); scene.add(rim);
+
+let controls;
+function makeControls() {
+  const c = new OrbitControls(camera, renderer.domElement);
+  c.enableDamping = true; c.dampingFactor = 0.08; c.rotateSpeed = 0.85; c.autoRotateSpeed = 1.1;
+  c.addEventListener('change', onControlsChange);   // hält den Hover-Readout aktuell (siehe P-1)
+  return c;
+}
+controls = makeControls();
+// Rebuild OrbitControls so it re-captures the current camera.up as the orbit axis
+// (r160 caches the up->Y quaternion once at construction). Preserves target/zoom/state.
+function rebuildControls() {
+  const old = controls;
+  const tgt = old.target.clone();
+  const saved = { autoRotate: old.autoRotate, enabled: old.enabled, minDistance: old.minDistance, maxDistance: old.maxDistance };
+  old.dispose();
+  controls = makeControls();
+  controls.target.copy(tgt);
+  controls.autoRotate = saved.autoRotate; controls.enabled = saved.enabled;
+  controls.minDistance = saved.minDistance; controls.maxDistance = saved.maxDistance;
+  controls.update();
+}
+let _rollRebuildPending = false;
+function scheduleControlsRebuild() {
+  if (_rollRebuildPending) return;
+  _rollRebuildPending = true;
+  requestAnimationFrame(() => { _rollRebuildPending = false; rebuildControls(); });
+}
+
+/* =====================================================================
+ *  Orientierungs-Gizmo: XYZ-Achsen + Smiley (unten links). Dreht mit der
+ *  Kamera mit und dient der anatomischen Orientierung.
+ * ===================================================================== */
+const gizmoScene = new THREE.Scene();
+const gizmoCam = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+
+const ax = (dir, color) => new THREE.ArrowHelper(dir, new THREE.Vector3(), 1.0, color, 0.34, 0.20);
+gizmoScene.add(ax(new THREE.Vector3(1, 0, 0), 0xff4d4d));  // X rot
+gizmoScene.add(ax(new THREE.Vector3(0, 1, 0), 0x4dff7a));  // Y grün
+gizmoScene.add(ax(new THREE.Vector3(0, 0, 1), 0x4d8bff));  // Z blau
+
+function spriteFromCanvas(c, scale, depthTest = false) {
+  const tex = new THREE.CanvasTexture(c);
+  tex.anisotropy = 4;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest, transparent: true }));
+  sp.scale.setScalar(scale);
+  return sp;
+}
+function axisLabel(text, color, pos) {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d');
+  x.fillStyle = color; x.font = 'bold 46px "IBM Plex Mono", monospace';
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(text, 32, 34);
+  const sp = spriteFromCanvas(c, 0.44); sp.position.copy(pos);
+  return sp;
+}
+gizmoScene.add(axisLabel('X', '#ff8a8a', new THREE.Vector3(1.3, 0, 0)));
+gizmoScene.add(axisLabel('Y', '#8affab', new THREE.Vector3(0, 1.3, 0)));
+gizmoScene.add(axisLabel('Z', '#8ab4ff', new THREE.Vector3(0, 0, 1.3)));
+
+(function addSmiley() {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d');
+  x.beginPath(); x.arc(64, 64, 50, 0, Math.PI * 2);
+  x.fillStyle = '#ffd23e'; x.fill();
+  x.lineWidth = 5; x.strokeStyle = '#c08a16'; x.stroke();
+  x.fillStyle = '#3a2e00';
+  x.beginPath(); x.arc(47, 54, 8, 0, Math.PI * 2); x.fill();
+  x.beginPath(); x.arc(81, 54, 8, 0, Math.PI * 2); x.fill();
+  x.lineWidth = 7; x.strokeStyle = '#3a2e00'; x.lineCap = 'round';
+  x.beginPath(); x.arc(64, 68, 26, 0.18 * Math.PI, 0.82 * Math.PI); x.stroke();
+  const tex = new THREE.CanvasTexture(c); tex.anisotropy = 4;
+  // Flache Scheibe im Gizmo-Raum (Blickrichtung +Z) statt Billboard: dreht mit
+  // den XYZ-Achsen mit. Leicht nach -Z versetzt + Tiefentest an, damit die nach
+  // vorn (zur Kamera) zeigende +Z-Achse davor sichtbar bleibt statt verdeckt zu
+  // werden. alphaTest verwirft transparente Ecken, damit sie nichts verdecken.
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true,
+    side: THREE.FrontSide, depthTest: true, depthWrite: true, alphaTest: 0.5 });
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(0.40, 48), mat);
+  disc.position.set(0, 0, 0);
+  gizmoScene.add(disc);
+
+  // Rückseite: gleiche gelbe Scheibe ohne Gesicht, damit man von hinten
+  // auch den Smiley sieht (anonym).
+  const cb = document.createElement('canvas'); cb.width = cb.height = 128;
+  const xb = cb.getContext('2d');
+  xb.beginPath(); xb.arc(64, 64, 50, 0, Math.PI * 2);
+  xb.fillStyle = '#ffd23e'; xb.fill();
+  xb.lineWidth = 5; xb.strokeStyle = '#c08a16'; xb.stroke();
+  const texBack = new THREE.CanvasTexture(cb); texBack.anisotropy = 4;
+  const matBack = new THREE.MeshBasicMaterial({ map: texBack, transparent: true,
+    side: THREE.BackSide, depthTest: true, depthWrite: true, alphaTest: 0.5 });
+  const discBack = new THREE.Mesh(new THREE.CircleGeometry(0.40, 48), matBack);
+  discBack.position.set(0, 0, 0);
+  gizmoScene.add(discBack);
+})();
+
+function renderGizmo() {
+  if (!state.axes) return;
+  // Shrink the gizmo on narrow viewports; lift it above the mobile collapse
+  // handle so it stays visible when the controls panel is in its collapsed state.
+  // In landscape-phone mode the panel becomes a right-side drawer, so push the
+  // gizmo left out of the way of the (collapsed) drawer strip.
+  const narrow = innerWidth <= 720;
+  const landscapeDrawer = innerWidth <= 900 && innerHeight <= 500;
+  const size = narrow || landscapeDrawer ? 90 : 132;
+  const pad = narrow ? 12 : 16;
+  const bottomOffset = (narrow && !landscapeDrawer) ? 56 : pad;
+  const rightOffset = landscapeDrawer ? pad + 54 : pad;
+  const gx = innerWidth - size - rightOffset;
+  renderer.setScissorTest(true);
+  renderer.setViewport(gx, bottomOffset, size, size);
+  renderer.setScissor(gx, bottomOffset, size, size);
+  renderer.clearDepth();
+  // Do NOT clear color: keep mesh pixels behind the gizmo so the gizmo
+  // doesn't punch a transparent (looks black) hole through the map.
+  const prevAutoClear = renderer.autoClear;
+  renderer.autoClear = false;
+  const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+  gizmoCam.position.copy(dir.multiplyScalar(3.7));
+  gizmoCam.up.copy(camera.up);
+  gizmoCam.lookAt(0, 0, 0);
+  renderer.render(gizmoScene, gizmoCam);
+  renderer.autoClear = prevAutoClear;
+  renderer.setScissorTest(false);
+}
+
+/* Anatomische Blick-Voreinstellungen (Rotation um die Hochachse Y):
+   AP=frontal, PA=dorsal, LAO=+60° (Patient links), RAO=-30° (Patient rechts). */
+const VIEW_ANGLES = { AP: 0, PA: 180, LAO: 60, RAO: -30 };
+function setView(name) {
+  if (!mesh) return;
+  mesh.geometry.computeBoundingSphere();
+  const r = mesh.geometry.boundingSphere.radius || 50;
+  const d = r / Math.sin((camera.fov * Math.PI / 180) / 2) * 1.15;
+  const t = (VIEW_ANGLES[name] || 0) * Math.PI / 180;
+  // Um den aktuellen Zielpunkt schwenken, nicht um den Ursprung — sonst
+  // springt die Ansicht nach einem Pan (Rechtsklick / Zweifinger) weg.
+  const c = controls.target;
+  camera.position.set(c.x + Math.sin(t) * d, c.y, c.z + Math.cos(t) * d);
+  camera.up.set(0, 1, 0);
+  camera.near = r / 100; camera.far = d * 8; camera.updateProjectionMatrix();
+  controls.update();
+}
+
+let mesh = null, wire = null, current = null, currentName = null;
+const group = new THREE.Group();
+scene.add(group);
+
+const material = new THREE.MeshStandardMaterial({
+  vertexColors: true, roughness: 0.52, metalness: 0.0,
+  side: THREE.DoubleSide, flatShading: false,
+  envMapIntensity: 0.6, transparent: false,
+});
+
+/* ---------- state ---------- */
+const state = {
+  mode: null, cmap: 'rhythmia_voltage',
+  vmin: 0.05, vmax: 0.5, unit: 'mV',
+  wire: false, smooth: true, axes: true,
+  windows: {},            // per-field {field: {vmin, vmax}} — survives field switches, reset in loadGeometry
+  fieldRange: [0, 1],     // data min/max of the active scalar field (slider bounds)
+  anim: { playing: false, engaged: false, mode: 'loop', t: 0, speed: 60, band: 0 },
+  recording: null,        // active capture session (see startRecording) or null
+  isolateScar: false,
+  smoothLevel: 0,         // Laplacian interpolation strength for the scalar field (0 = raw)
+  confMask: false,
+  confMaskTh: 0.03,        // Confidence-mask voltage cutoff (mV); vertices <= this go grey
+};
+// Video-export options (mutated by the ⚙ settings popover in the UI).
+const recOpts = { fps: 30, bakeLegend: true, hideGizmo: true, orbitSeconds: 8, exportSeconds: null, cycles: 1, path: 'turntable', ease: true };
+let initialView = null;  // optionale Blick-Voreinstellung aus ?view=
+
+function disposeMesh() {
+  disposeTagMarkers();
+  // mesh/wire teilen sich das gemeinsame `material`, das wiederverwendet wird.
+  for (const o of [mesh, wire]) if (o) { group.remove(o); o.geometry?.dispose?.(); }
+  mesh = wire = null;
+}
+
+let tagMeshes = [];   // [{ group, inst, surface }] — one InstancedMesh of spheres per tag group
+const tagOpts = { sizeMul: 1, project: false };
+
+function disposeTagMarkers() {
+  for (const t of tagMeshes) { group.remove(t.inst); t.inst.geometry.dispose(); t.inst.material.dispose(); }
+  tagMeshes = [];
+}
+
+function buildTagMarkers(groups, meshRadius) {
+  disposeTagMarkers();
+  if (!groups || !groups.length) { buildTagUI(); return; }
+  const radius = tagMarkerRadius(meshRadius || 50);
+  for (const g of groups) {
+    if (!g.points || !g.points.length) continue;
+    const geo = new THREE.SphereGeometry(radius, 12, 10);
+    const col = new THREE.Color().setRGB(g.color[0] / 255, g.color[1] / 255, g.color[2] / 255, THREE.SRGBColorSpace);
+    const mat = new THREE.MeshBasicMaterial({ color: col, toneMapped: false });
+    const inst = new THREE.InstancedMesh(geo, mat, g.points.length);
+    inst.userData.group = g;
+    group.add(inst);
+    tagMeshes.push({ group: g, inst, surface: null });
+  }
+  applyTagMarkerSettings();
+  buildTagUI();
+}
+
+// Per-point nearest-vertex on the loaded mesh; computed on first use of
+// „Projizieren" and cached per group so the slider/toggle stay snappy.
+function ensureProjectedPositions() {
+  const pos = current && current.positions;
+  if (!pos || !pos.length) { for (const t of tagMeshes) t.surface = null; return; }
+  if (!tagMeshes.some(t => !t.surface)) return;
+  const grid = current._vgrid || (current._vgrid = buildVertexGrid(pos));
+  for (const t of tagMeshes) {
+    if (t.surface) continue;
+    const pts = t.group.points;
+    const surf = new Float32Array(pts.length * 3);
+    for (let i = 0; i < pts.length; i++) {
+      const [px, py, pz] = pts[i].position;
+      const v = nearestVertexIndex(grid, pos, px, py, pz);
+      if (v < 0) { surf[i*3] = px; surf[i*3+1] = py; surf[i*3+2] = pz; }
+      else { surf[i*3] = pos[v*3]; surf[i*3+1] = pos[v*3+1]; surf[i*3+2] = pos[v*3+2]; }
+    }
+    t.surface = surf;
+  }
+}
+
+const _tagM = new THREE.Matrix4();
+const _tagP = new THREE.Vector3();
+const _tagQ = new THREE.Quaternion();
+const _tagS = new THREE.Vector3();
+function applyTagMarkerSettings() {
+  if (tagOpts.project) ensureProjectedPositions();
+  const s = tagOpts.sizeMul;
+  _tagS.set(s, s, s);
+  for (const t of tagMeshes) {
+    const pts = t.group.points;
+    const surf = tagOpts.project ? t.surface : null;
+    for (let i = 0; i < pts.length; i++) {
+      let x, y, z;
+      if (surf) { x = surf[i * 3]; y = surf[i * 3 + 1]; z = surf[i * 3 + 2]; }
+      else { const p = pts[i].position; x = p[0]; y = p[1]; z = p[2]; }
+      _tagP.set(x, y, z);
+      _tagM.compose(_tagP, _tagQ, _tagS);
+      t.inst.setMatrixAt(i, _tagM);
+    }
+    t.inst.instanceMatrix.needsUpdate = true;
+  }
+}
+
+function buildTagUI() {
+  const grp = document.getElementById('grp-tags');
+  const list = document.getElementById('tag-list');
+  list.innerHTML = '';
+  if (!tagMeshes.length) { grp.style.display = 'none'; return; }
+  grp.style.display = '';
+  tagMeshes.forEach(({ group: g, inst }) => {
+    const chip = document.createElement('button');
+    chip.className = 'chip on';
+    const sw = document.createElement('span');
+    sw.style.cssText = `display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:middle;background:rgb(${g.color[0]},${g.color[1]},${g.color[2]})`;
+    chip.appendChild(sw);
+    chip.appendChild(document.createTextNode(`${g.label} (${g.points.length})`));
+    chip.onclick = () => { inst.visible = !inst.visible; chip.classList.toggle('on', inst.visible); };
+    list.appendChild(chip);
+  });
+}
+
+function loadGeometry(data, name) {
+  disposeMesh();
+  current = data;
+  currentName = name;
+  // Farbfenster gehören zum Datensatz, nicht zum Feldnamen: ohne Reset gilt
+  // nach dem Laden einer zweiten Studie weiter das Fenster der ersten und die
+  // feldspezifischen Defaults greifen nie wieder.
+  state.windows = {};
+  _smoothCache = null;
+  _visibleCache = null;
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
+  if (data.faces && data.faces.length) geo.setIndex(new THREE.BufferAttribute(data.faces, 1));
+  if (data.normals) geo.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
+  else geo.computeVertexNormals();
+  // placeholder color attribute
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(data.positions.length), 3));
+
+  // recenter + frame
+  geo.computeBoundingSphere();
+  const bs = geo.boundingSphere;
+  group.position.set(-bs.center.x, -bs.center.y, -bs.center.z);
+
+  mesh = new THREE.Mesh(geo, material);
+  group.add(mesh);
+
+  buildModeOptions(data);
+  applyColors();
+  frameCamera(bs);
+  if (initialView) setView(initialView);
+  updateStats(data);
+  refreshDisplayToggles();
+  buildTagMarkers(data.tagGroups, bs.radius);
+  _readoutDirty = true;      // neuer Datensatz -> Hover-Wert einmal nachziehen
+
+  document.getElementById('drop').classList.add('hide');
+}
+
+function frameCamera(bs) {
+  const r = bs.radius || 50;
+  const d = r / Math.sin((camera.fov * Math.PI / 180) / 2) * 1.15;
+  camera.position.set(0.2 * d, 0.15 * d, d);
+  camera.near = r / 100; camera.far = d * 8; camera.updateProjectionMatrix();
+  controls.target.set(0, 0, 0);
+  controls.maxDistance = d * 4; controls.minDistance = r * 0.15;
+  controls.update();
+}
+
+/* ---------- mode / colour ---------- */
+const FIELD_META = {
+  voltage:   { label: 'Bipolar Voltage', unit: 'mV', cmap: 'rhythmia_voltage', range: [0.05, 1.5] },
+  unipolar:  { label: 'Unipolar Voltage', unit: 'mV', cmap: 'rhythmia_voltage', range: [0.1, 8.3] },
+  lat:       { label: 'LAT', unit: 'ms', cmap: 'rhythmia_lat', range: null },
+  activation:{ label: 'Activation (LAT)', unit: 'ms', cmap: 'rhythmia_lat', range: null },
+  map_data:  { label: 'Map Data', unit: '', cmap: 'rhythmia_voltage', range: null },
+};
+
+function buildModeOptions(data) {
+  const sel = document.getElementById('mode');
+  sel.innerHTML = '';
+  const add = (val, label) => { const o = document.createElement('option'); o.value = val; o.textContent = label; sel.appendChild(o); };
+
+  let firstScalar = null;
+  for (const n of data.scalarNames) {
+    const meta = FIELD_META[n.toLowerCase()] || { label: n, unit: '', cmap: 'rhythmia_voltage', range: null };
+    add('scalar:' + n, meta.label);
+    if (!firstScalar) firstScalar = n;
+  }
+  if (data.colors) add('vertex', 'Vertex Colors');
+  add('tissue', 'Tissue (uniform)');
+
+  if (firstScalar) selectMode('scalar:' + firstScalar, data);
+  else if (data.colors) selectMode('vertex', data);
+  else selectMode('tissue', data);
+  sel.value = state.mode;
+}
+
+function selectMode(mode, data = current) {
+  state.mode = mode;
+  state.isolateScar = false;
+  _readoutDirty = true;      // anderes Feld -> Hover-Wert neu bestimmen
+  const _iso = document.getElementById('area-isolate'); if (_iso) _iso.classList.remove('on');
+  const legend = document.getElementById('legend');
+  if (mode.startsWith('scalar:')) {
+    const field = mode.slice(7);
+    const meta = FIELD_META[field.toLowerCase()] || { unit: '', cmap: 'rhythmia_voltage', range: null };
+    state.cmap = meta.cmap; state.unit = meta.unit;
+    state.fieldRange = dataRange(data.scalars[field]);
+    if (!state.windows[field]) {
+      let range = meta.range || state.fieldRange;
+      if (field === 'voltage' && current && current.source === 'rhythmia') range = [0.05, 0.5];  // atrial bipolar standard
+      state.windows[field] = { vmin: range[0], vmax: range[1] };
+    }
+    const isVolt = (field === 'voltage' || field === 'unipolar');
+    state.confMask = isVolt && current && current.source === 'rhythmia';
+    const cmRow = document.getElementById('conf-mask-row');
+    const cmChip = document.getElementById('conf-mask');
+    const cmIn = document.getElementById('conf-mask-th');
+    const cmLbl = document.getElementById('conf-mask-th-lbl');
+    if (cmRow) cmRow.style.display = isVolt ? 'flex' : 'none';
+    if (cmChip) cmChip.classList.toggle('on', state.confMask);
+    if (cmIn) cmIn.value = round(state.confMaskTh);
+    if (cmLbl) cmLbl.textContent = round(state.confMaskTh);
+    state.vmin = state.windows[field].vmin;
+    state.vmax = state.windows[field].vmax;
+    document.getElementById('cmap').value = state.cmap;
+    document.getElementById('vmin').value = round(state.vmin);
+    document.getElementById('vmax').value = round(state.vmax);
+    document.getElementById('range-unit').textContent = meta.unit ? '· ' + meta.unit : '';
+    document.getElementById('grp-cmap').style.display = '';
+    document.getElementById('grp-range').style.display = '';
+    document.getElementById('grp-smooth').style.display = '';
+    legend.classList.add('show');
+    buildPresets(field);
+    syncSliderBounds();
+    updateActivationUI(field);
+  } else {
+    document.getElementById('grp-cmap').style.display = 'none';
+    document.getElementById('grp-range').style.display = 'none';
+    document.getElementById('grp-smooth').style.display = 'none';
+    legend.classList.remove('show');
+    updateActivationUI(null);
+  }
+  recomputeArea();
+}
+
+// Surface-area quantification for the active scalar field, bucketed by the color window.
+function recomputeArea() {
+  const grp = document.getElementById('grp-area');
+  const field = state.mode && state.mode.startsWith('scalar:') ? state.mode.slice(7) : null;
+  if (!current || !field || !current.scalars[field]) { grp.style.display = 'none'; return; }
+  grp.style.display = '';
+  // Dieselbe Quelle wie das Rendering (geglättet + Conf-Maske), sonst gehören
+  // die cm²-Zahlen sichtbar nicht zu dem, was auf dem Schirm steht.
+  const r = areaByThreshold(current.positions, current.faces, visibleScalar(field), state.vmin, state.vmax);
+  const cm2 = a => (a / 100).toFixed(1);
+  const pct = a => (r.total > 0 ? (a / r.total * 100).toFixed(1) : '0.0');
+  const lo = round(state.vmin), hi = round(state.vmax), u = state.unit ? ' ' + state.unit : '';
+  const totalEl = document.getElementById('area-total');
+  const midEl = document.getElementById('area-mid');
+  if (totalEl) totalEl.textContent = `${cm2(r.total)} cm²`;
+  if (midEl) midEl.textContent = `Window ${cm2(r.border)} · ${pct(r.border)}%`;
+  const el = document.getElementById('area-readout');
+  el.textContent = '';
+  const line = (txt) => { const d = document.createElement('div'); d.textContent = txt; el.appendChild(d); };
+  line(`< ${lo}${u}:  ${cm2(r.scar)} cm² · ${pct(r.scar)}%`);
+  line(`${lo}–${hi}${u}:  ${cm2(r.border)} cm² · ${pct(r.border)}%`);
+  line(`> ${hi}${u}:  ${cm2(r.healthy)} cm² · ${pct(r.healthy)}%`);
+  if (r.unmapped > 0) line(`unmapped: ${pct(r.unmapped)}%`);
+}
+
+// Single source of truth for the active field's color window.
+function setWindow(vmin, vmax) {
+  const [lo, hi] = state.fieldRange;
+  ({ vmin, vmax } = clampWindow(vmin, vmax, lo, hi));
+  state.vmin = vmin; state.vmax = vmax;
+  if (state.mode && state.mode.startsWith('scalar:')) {
+    const field = state.mode.slice(7);
+    if (state.windows[field]) { state.windows[field].vmin = vmin; state.windows[field].vmax = vmax; }
+  }
+  document.getElementById('vmin').value = round(vmin);
+  document.getElementById('vmax').value = round(vmax);
+  document.getElementById('vmin-s').value = vmin;
+  document.getElementById('vmax-s').value = vmax;
+  const ro = document.getElementById('vwin-readout');
+  if (ro) ro.textContent = round(vmin) + ' – ' + round(vmax);
+  applyColors();
+  if (state.mode && state.mode.startsWith('scalar:') && isLatField(state.mode.slice(7))) syncTimelineToWindow();
+  recomputeArea();
+}
+
+function syncSliderBounds() {
+  const [lo, hi] = state.fieldRange;
+  const step = (hi - lo) / 1000 || 0.001;
+  const a = document.getElementById('vmin-s'), b = document.getElementById('vmax-s');
+  for (const s of [a, b]) { s.min = lo; s.max = hi; s.step = step; }
+  a.value = state.vmin; b.value = state.vmax;
+}
+
+function buildPresets(field) {
+  const box = document.getElementById('vpresets');
+  box.innerHTML = '';
+  for (const p of voltagePresets(field)) {
+    const btn = document.createElement('button');
+    btn.className = 'chip';
+    btn.textContent = p.label;
+    btn.onclick = () => {
+      if (p.lo == null) { const [lo, hi] = dataRange(current.scalars[field]); setWindow(lo, hi); }
+      else setWindow(p.lo, p.hi);
+    };
+    box.appendChild(btn);
+  }
+}
+
+function isLatField(field) { const f = (field || '').toLowerCase(); return f === 'lat' || f === 'activation'; }
+
+function updateActivationUI(field) {
+  const grp = document.getElementById('grp-anim');
+  if (!field || !isLatField(field)) { grp.style.display = 'none'; stopAnim(); return; }
+  grp.style.display = '';
+  state.anim.engaged = false;
+  syncTimelineToWindow();
+}
+
+// The Ausschnitt [t0,t1] is the LAT color window (state.vmin/vmax). Keep the
+// timeline + band sliders bounded to it.
+function syncTimelineToWindow() {
+  const t0 = state.vmin, t1 = state.vmax, W = (t1 - t0) || 1;
+  const cur = document.getElementById('anim-cursor');
+  cur.min = t0; cur.max = t1; cur.step = W / 500;
+  if (state.anim.t < t0 || state.anim.t > t1) state.anim.t = t0;
+  cur.value = state.anim.t;
+  const band = document.getElementById('anim-band');
+  band.min = W / 200; band.max = W; band.step = W / 200;
+  if (!state.anim.band || state.anim.band > W) state.anim.band = W * 0.08;
+  band.value = state.anim.band;
+  updateAnimReadout();
+}
+
+function updateAnimReadout() {
+  document.getElementById('anim-t').textContent = '· ' + round(state.anim.t) + ' ms';
+}
+
+let _animLast = null;
+function startAnim() {
+  if (!state.mode || !state.mode.startsWith('scalar:') || !isLatField(state.mode.slice(7))) return;
+  state.anim.playing = true; state.anim.engaged = true; _animLast = null;
+  const b = document.getElementById('anim-play'); b.textContent = '❚❚ Pause'; b.classList.add('on');
+}
+function stopAnim() {
+  state.anim.playing = false;
+  const b = document.getElementById('anim-play'); b.textContent = '▶ Play'; b.classList.remove('on');
+}
+function stepAnim(now) {
+  if (!state.anim.playing || !mesh || !state.mode.startsWith('scalar:') || !isLatField(state.mode.slice(7))) { _animLast = now; return; }
+  if (_animLast == null) { _animLast = now; return; }
+  let dt = (now - _animLast) / 1000; _animLast = now;
+  if (dt > 0.1) dt = 0.1;   // clamp jumps after tab-blur
+  state.anim.t = advanceCursor(state.anim.t, state.vmin, state.vmax, dt, state.anim.speed, state.anim.mode);
+  document.getElementById('anim-cursor').value = state.anim.t;
+  updateAnimReadout();
+  applyColors();
+}
+
+function round(v) { const a = Math.abs(v); return a >= 100 ? v.toFixed(0) : a >= 1 ? v.toFixed(2) : v.toFixed(3); }
+
+// Per-vertex adjacency (built lazily, cached on the mesh data).
+function getAdjacency() {
+  if (!current._adjacency) current._adjacency = buildAdjacencyCSR(current.faces, current.positions.length / 3);
+  return current._adjacency;
+}
+// Display values for a scalar field: raw if smoothLevel 0, else memoized Laplacian-smoothed.
+// P-4: Laplace-Glättung ist iterativ — Stufe k-1 ist exakt der Startwert für
+// Stufe k. Beim Ziehen des Reglers von 0 auf 10 sind das 10 statt 55 Durchläufe
+// (bitgleiches Ergebnis).
+let _smoothCache = null;
+function displayScalar(field) {
+  const raw = current.scalars[field];
+  const level = state.smoothLevel;
+  if (!level) return raw;
+  const warm = _smoothCache && _smoothCache.mesh === current && _smoothCache.field === field;
+  if (warm && _smoothCache.level === level) return _smoothCache.values;
+  const from = (warm && _smoothCache.level < level) ? _smoothCache.values : raw;
+  const iterations = (from === raw) ? level : level - _smoothCache.level;
+  const values = smoothScalar(from, getAdjacency(), iterations);
+  _smoothCache = { mesh: current, field, level, values };
+  return values;
+}
+// Werte so, wie der Nutzer sie sieht: geglättet, und Vertices, die die
+// Conf-Maske ausblendet, als NaN (= unmapped). Rendering, Flächenstatistik und
+// Export teilen sich diese Quelle, damit die cm²-Zahlen und die exportierten
+// Farben zum Bild auf dem Schirm gehören.
+function confMaskActive(field) {
+  return !!state.confMask && (field === 'voltage' || field === 'unipolar');
+}
+let _visibleCache = null;
+function visibleScalar(field) {
+  const s = displayScalar(field);
+  if (!confMaskActive(field)) return s;
+  const key = { mesh: current, field, level: state.smoothLevel, th: state.confMaskTh };
+  if (_visibleCache && _visibleCache.mesh === key.mesh && _visibleCache.field === key.field
+      && _visibleCache.level === key.level && _visibleCache.th === key.th) return _visibleCache.values;
+  const out = new Float32Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s[i] <= state.confMaskTh ? NaN : s[i];
+  _visibleCache = { ...key, values: out };
+  return out;
+}
+
+function applyColors() {
+  if (!mesh) return;
+  const col = mesh.geometry.getAttribute('color');
+  const arr = col.array;
+  const n = current.positions.length / 3;
+
+  if (state.mode === 'tissue') {
+    const tr = srgbToLinear(214), tg = srgbToLinear(150), tb = srgbToLinear(140);
+    for (let i = 0; i < n; i++) { arr[i*3]=tr; arr[i*3+1]=tg; arr[i*3+2]=tb; }
+  } else if (state.mode === 'vertex' && current.colors) {
+    const c = current.colors;
+    for (let i = 0; i < n*3; i++) arr[i] = srgbToLinear(c[i]);
+  } else if (state.mode.startsWith('scalar:')) {
+    const field = state.mode.slice(7);
+    const s = visibleScalar(field);                   // geglättet + Conf-Maske
+    const table = linLut(state.cmap);                 // already-linear LUT (perf option A)
+    const vmin = state.vmin, vmax = state.vmax, span = (vmax - vmin) || 1e-9;
+    const uR = srgbToLinear(UNMAPPED[0]), uG = srgbToLinear(UNMAPPED[1]), uB = srgbToLinear(UNMAPPED[2]);
+    const animOn = isLatField(field) && state.anim.engaged;
+    const t = state.anim.t, band = state.anim.band, W = vmax - vmin, mode = state.anim.mode;
+    for (let i = 0; i < n; i++) {
+      const v = s[i];
+      if (Number.isNaN(v)) { arr[i*3]=uR; arr[i*3+1]=uG; arr[i*3+2]=uB; continue; }
+      if (state.isolateScar && v >= vmin) { arr[i*3]=0.10; arr[i*3+1]=0.10; arr[i*3+2]=0.10; continue; }
+      let tt = (v - vmin) / span; tt = tt < 0 ? 0 : tt > 1 ? 1 : tt;
+      const idx = (tt * 255) | 0;
+      let r = table[idx*3], g = table[idx*3+1], b = table[idx*3+2];
+      if (animOn) {
+        const h = highlightFactor(v, t, W, band, mode);
+        if (h > 0) { r += (1 - r) * h; g += (1 - g) * h; b += (1 - b) * h; }  // blend toward linear white
+      }
+      arr[i*3] = r; arr[i*3+1] = g; arr[i*3+2] = b;
+    }
+  }
+  col.needsUpdate = true;
+  drawLegend();
+}
+
+/* ---------- legend ---------- */
+// P-5: applyColors() läuft während Wiedergabe und Video-Export in jedem Frame.
+// Die Legende hängt aber nur an Farbskala, Fenster, Einheit und Modus — ohne
+// diesen Wächter wären das 280 fillRect plus DOM-Neubau, 60-mal pro Sekunde.
+let _legendKey = null;
+function drawLegend() {
+  if (!state.mode || !state.mode.startsWith('scalar:')) { _legendKey = null; return; }
+  const key = state.mode + '|' + state.cmap + '|' + state.vmin + '|' + state.vmax + '|' + state.unit;
+  if (key === _legendKey) return;
+  _legendKey = key;
+  const cv = document.getElementById('cbar');
+  const ctx = cv.getContext('2d');
+  const table = lut(state.cmap);
+  const h = cv.height;
+  for (let y = 0; y < h; y++) {
+    const t = 1 - y / (h - 1);
+    const idx = (t * 255) | 0;
+    ctx.fillStyle = `rgb(${table[idx*3]},${table[idx*3+1]},${table[idx*3+2]})`;
+    ctx.fillRect(0, y, cv.width, 1);
+  }
+  const ticksEl = document.getElementById('cbar-ticks');
+  ticksEl.innerHTML = '';
+  for (let i = 0; i <= 4; i++) {
+    const t = 1 - i / 4;
+    const val = state.vmin + (state.vmax - state.vmin) * t;
+    const sp = document.createElement('span');
+    sp.textContent = round(val);
+    ticksEl.appendChild(sp);
+  }
+  const field = state.mode.slice(7);
+  const meta = FIELD_META[field.toLowerCase()] || { label: field, unit: state.unit };
+  document.getElementById('legend-cap').textContent = (meta.label || field) + (meta.unit ? ' · ' + meta.unit : '');
+}
+
+/* ---------- display toggles ---------- */
+// P-6: `needsUpdate` zwingt three.js zur Neubewertung des Shader-Programms —
+// beim Ziehen des Opazitätsreglers 60-mal pro Sekunde, obwohl sich nur eine
+// Uniform ändert. Nur setzen, wenn ein Flag wirklich gekippt ist.
+function refreshDisplayToggles() {
+  const opacity = +document.getElementById('opacity').value;
+  const transparent = opacity < 0.999;
+  const flat = !state.smooth;
+  let dirty = false;
+  if (material.wireframe !== state.wire) { material.wireframe = state.wire; dirty = true; }
+  if (material.flatShading !== flat) { material.flatShading = flat; dirty = true; }
+  if (material.transparent !== transparent) { material.transparent = transparent; dirty = true; }
+  material.opacity = opacity;                 // reine Uniform, kein Neuübersetzen
+  if (dirty) material.needsUpdate = true;
+}
+
+/* ---------- stats ---------- */
+function updateStats(data) {
+  document.getElementById('st-verts').textContent = (data.positions.length/3).toLocaleString('de-DE');
+  document.getElementById('st-faces').textContent = (data.faces.length/3).toLocaleString('de-DE');
+}
+
+/* =====================================================================
+ *  Hover value readout (raycast)
+ * ===================================================================== */
+const ray = new THREE.Raycaster();
+const ptr = new THREE.Vector2();
+const readout = document.getElementById('readout');
+let hoverX = 0, hoverY = 0;
+// P-1: der Raycast lief in *jedem* Frame, auch bei stehender Maus — bei 500k
+// Vertices ein Viertel des 16,7-ms-Budgets für nichts. Jetzt nur noch, wenn
+// sich Zeiger oder Kamera bewegt haben (`_readoutDirty`).
+let _readoutDirty = false, _pointerInside = false;
+renderer.domElement.addEventListener('pointermove', (e) => {
+  hoverX = e.clientX; hoverY = e.clientY;
+  ptr.x = (e.clientX / innerWidth) * 2 - 1;
+  ptr.y = -(e.clientY / innerHeight) * 2 + 1;
+  _pointerInside = true; _readoutDirty = true;
+});
+renderer.domElement.addEventListener('pointerleave', () => {
+  _pointerInside = false; _readoutDirty = false;
+  readout.style.display = 'none';
+});
+// Kamerabewegung ändert, was unter dem Zeiger liegt — aber nur, solange er drin ist.
+function onControlsChange() { if (_pointerInside) _readoutDirty = true; }
+// Raycast tag markers first; on hit show "<point label> · <group label>" in the readout.
+function tagHover() {
+  if (!tagMeshes.length) return false;
+  ray.setFromCamera(ptr, camera);
+  const objs = tagMeshes.filter(t => t.inst.visible).map(t => t.inst);
+  if (!objs.length) return false;
+  const hit = ray.intersectObjects(objs, false)[0];
+  if (!hit) return false;
+  const g = hit.object.userData.group;
+  const pt = g.points[hit.instanceId];
+  // labels come from a loaded file (untrusted) -> build with safe DOM, not innerHTML
+  readout.textContent = '';
+  const b = document.createElement('b'); b.textContent = (pt && pt.label) || '';
+  readout.appendChild(b);
+  readout.appendChild(document.createTextNode(' · ' + g.label));
+  readout.style.display = 'block';
+  readout.style.left = hoverX + 'px';
+  readout.style.top = hoverY + 'px';
+  return true;
+}
+function updateReadout() {
+  if (tagHover()) return;
+  if (!mesh || !state.mode || !state.mode.startsWith('scalar:')) { readout.style.display = 'none'; return; }
+  ray.setFromCamera(ptr, camera);
+  const hit = ray.intersectObject(mesh, false)[0];
+  if (!hit) { readout.style.display = 'none'; return; }
+  const field = state.mode.slice(7);
+  const s = visibleScalar(field);          // Wert passend zur Farbe unter dem Cursor
+  const rawS = current.scalars[field];
+  // nearest of the three face vertices (in Mesh-lokalen Koordinaten – das Mesh
+  // sitzt in einer verschobenen Group, daher hit.point nach lokal umrechnen)
+  const f = hit.face;
+  const pos = mesh.geometry.getAttribute('position');
+  const p = mesh.worldToLocal(hit.point.clone());
+  let best = f.a, bd = Infinity;
+  for (const vi of [f.a, f.b, f.c]) {
+    const dx = pos.getX(vi)-p.x, dy = pos.getY(vi)-p.y, dz = pos.getZ(vi)-p.z;
+    const d = dx*dx+dy*dy+dz*dz; if (d < bd) { bd = d; best = vi; }
+  }
+  const v = s[best], raw = rawS[best];
+  const meta = FIELD_META[field.toLowerCase()] || { unit: state.unit };
+  // Der angezeigte Wert gehört zur Farbe; der Rohwert steht daneben, sobald
+  // Glättung oder Conf-Maske ihn verändern.
+  const showsRaw = !Number.isNaN(raw) && (Number.isNaN(v) || Math.abs(raw - v) > 1e-9);
+  readout.innerHTML = Number.isNaN(v)
+    ? (showsRaw ? `<b>—</b> unmapped (roh ${round(raw)})` : '<b>—</b> unmapped')
+    : `<b>${round(v)}</b> ${meta.unit || ''}` + (showsRaw ? ` <small>(roh ${round(raw)})</small>` : '');
+  readout.style.display = 'block';
+  readout.style.left = hoverX + 'px';
+  readout.style.top = hoverY + 'px';
+}
+
+/* =====================================================================
+ *  File loading
+ * ===================================================================== */
+let rawMeshes = [];   // mehrere Anatomien/Surfaces aus einem Rohexport
+
+const loadingEl = document.getElementById('loading');
+const loadingTextEl = document.getElementById('loading-text');
+function showLoading(t) { loadingTextEl.textContent = t || 'Lade…'; loadingEl.classList.add('show'); }
+function setLoading(t) { loadingTextEl.textContent = t; }
+function hideLoading() { loadingEl.classList.remove('show'); }
+const mb = (b) => (b / 1048576).toFixed(0);
+function rawProgress(p) {
+  if (p.phase === 'scan') setLoading(`Archiv scannen…  ${mb(p.done)} / ${mb(p.total)} MB`);
+  else if (p.phase === 'build') setLoading('Mesh & Skalare lesen…');
+}
+
+// Fertiges Mesh (PLY/OBJ/STL)
+async function loadMeshFile(file) {
+  const name = file.name.toLowerCase();
+  let data;
+  if (name.endsWith('.ply')) data = EP.parsePLY(await file.arrayBuffer());
+  else if (name.endsWith('.obj')) data = EP.parseOBJ(await file.text());
+  else if (name.endsWith('.stl')) data = EP.parseSTL(await file.arrayBuffer());
+  else throw new Error('Format nicht unterstützt: ' + name);
+  if (!data.positions.length) throw new Error('Keine Geometrie gefunden.');
+  loadGeometry(data, file.name);
+}
+
+// epconv-Mesh -> loadGeometry-Datenform
+function loadParsedMesh(m) {
+  loadGeometry({
+    positions: m.positions, normals: m.normals || null, colors: null,
+    scalars: m.scalars || {}, scalarNames: Object.keys(m.scalars || {}),
+    faces: m.faces, tagGroups: m.tagGroups || null, source: m.source || null,
+  }, m.name || 'Mesh');
+}
+
+async function loadFiles(fileList) {
+  const files = Array.from(fileList);
+  if (!files.length) return;
+  showLoading('Lade…');
+  try {
+    // Einzelnes fertiges Mesh?
+    if (files.length === 1 && /\.(ply|obj|stl)$/i.test(files[0].name)) {
+      rawMeshes = []; populateMeshSelector([]);
+      await loadMeshFile(files[0]);
+      return;
+    }
+    // Rohexport (Rhythmia .000/.001…, CARTO .zip, EnSite .xml)
+    let unzip = null;
+    if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
+      setLoading('ZIP entpacken…');
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=95f5f6f1cfa8'));
+    }
+    setLoading('Konvertiere…');
+    // dem Browser einen Frame geben, damit der Spinner sichtbar wird
+    await new Promise(r => requestAnimationFrame(() => r()));
+    const meshes = await EP.loadRawFiles(files, unzip, rawProgress);
+    if (!meshes.length) throw new Error('Keine Mesh-Daten im Export gefunden.');
+    rawMeshes = meshes;
+    populateMeshSelector(meshes);
+    loadParsedMesh(meshes[0]);
+  } catch (err) {
+    alert('Fehler beim Laden:\n' + err.message);
+    console.error(err);
+  } finally {
+    hideLoading();
+  }
+}
+
+function populateMeshSelector(meshes) {
+  const grp = document.getElementById('grp-mesh');
+  const sel = document.getElementById('meshsel');
+  if (!meshes || meshes.length < 2) { grp.style.display = 'none'; return; }
+  sel.innerHTML = '';
+  meshes.forEach((m, i) => { const o = document.createElement('option'); o.value = i; o.textContent = m.name || ('Mesh ' + i); sel.appendChild(o); });
+  sel.value = '0';
+  grp.style.display = '';
+}
+
+/* ---------- Export (PLY / OBJ / STL Download) ---------- */
+function bakeColorsU8() {
+  if (!current) return null;
+  const n = current.positions.length / 3;
+  if (state.mode === 'vertex' && current.colors) return current.colors;
+  if (state.mode && state.mode.startsWith('scalar:')) {
+    // Wie applyColors(): geglättet, Conf-Maske und Scar-Isolation eingerechnet.
+    // Sonst sieht ein exportiertes oder geteiltes Modell anders aus als das,
+    // was der Nutzer beim Klicken auf dem Schirm hatte.
+    const s = visibleScalar(state.mode.slice(7));
+    const table = lut(state.cmap), span = (state.vmax - state.vmin) || 1e-9;
+    const out = new Uint8Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const v = s[i];
+      if (Number.isNaN(v)) { out[i*3]=UNMAPPED[0]; out[i*3+1]=UNMAPPED[1]; out[i*3+2]=UNMAPPED[2]; continue; }
+      if (state.isolateScar && v >= state.vmin) { out[i*3]=26; out[i*3+1]=26; out[i*3+2]=26; continue; }
+      let t = (v - state.vmin) / span; t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const idx = (t * 255) | 0;
+      out[i*3]=table[idx*3]; out[i*3+1]=table[idx*3+1]; out[i*3+2]=table[idx*3+2];
+    }
+    return out;
+  }
+  return null;
+}
+function download(name, data, mime) {
+  const blob = new Blob([data], { type: mime });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+function exportMesh(fmt) {
+  if (!current) { alert('Erst eine Map laden.'); return; }
+  const m = { positions: current.positions, normals: current.normals || null, faces: current.faces, scalars: current.scalars || {} };
+  const base = (currentName || 'epview').replace(/\.[^.]+$/, '').replace(/[^\w\-.]/g, '_');
+  // Binäres PLY ist Default (P-8): 43x schneller zu schreiben, rund halb so
+  // groß, und der eigene Parser liest es. ASCII bleibt als Menüpunkt, falls
+  // ein Empfängerwerkzeug es braucht.
+  if (fmt === 'ply') download(base + '.ply', EP.exportPLYBinary(m, bakeColorsU8()), 'application/octet-stream');
+  else if (fmt === 'ply-ascii') download(base + '.ply', EP.exportPLY(m, bakeColorsU8()), 'text/plain');
+  else if (fmt === 'obj') download(base + '.obj', EP.exportOBJ(m, bakeColorsU8()), 'text/plain');
+  else if (fmt === 'stl') download(base + '.stl', EP.exportSTL(m), 'application/octet-stream');
+}
+
+/* =====================================================================
+ *  Share — upload the baked PLY (with scrubbed tags) to the configured
+ *  backend; show link + QR + revoke. Backend URL + token live only in
+ *  this browser's localStorage (your own server secret).
+ * ===================================================================== */
+const PAGES_VIEWER = 'https://cara.github.io/EPView/viewer.html';
+let _shareDel = null;  // { url, id, token } for revoke
+
+function shareConfig() {
+  let url = localStorage.getItem('epview_share_url') || '';
+  let tok = localStorage.getItem('epview_share_token') || '';
+  if (!url) { url = (prompt('Backend-Basis-URL (z.B. https://maps.example.org):') || '').trim().replace(/\/+$/, ''); if (url) localStorage.setItem('epview_share_url', url); }
+  if (url && !tok) { tok = (prompt('Upload-Token (EPVIEW_TOKEN):') || '').trim(); if (tok) localStorage.setItem('epview_share_token', tok); }
+  return { url, tok };
+}
+function showShareBox() { document.getElementById('sharebox').classList.add('show'); }
+function hideShareBox() { document.getElementById('sharebox').classList.remove('show'); }
+function shareError(msg) {
+  document.getElementById('share-busy').style.display = 'none';
+  const e = document.getElementById('share-err'); e.style.display = ''; e.textContent = msg;
+}
+
+async function doShare() {
+  if (!current) { alert('Erst eine Map laden.'); return; }
+  const { url, tok } = shareConfig();
+  if (!url || !tok) { alert('Backend-URL und Token nötig.'); return; }
+  document.getElementById('share-result').style.display = 'none';
+  document.getElementById('share-err').style.display = 'none';
+  document.getElementById('share-busy').style.display = '';
+  showShareBox();
+  try {
+    const m = { positions: current.positions, normals: current.normals || null, faces: current.faces, scalars: current.scalars || {} };
+    // binäres PLY (P-8): halbes Upload-Volumen, und das Schreiben blockiert die
+    // Oberfläche nicht mehr sekundenlang.
+    const ply = EP.exportPLYBinary(m, bakeColorsU8(), current.tagGroups && current.tagGroups.length ? [encodeTagComment(current.tagGroups)] : []);
+    const res = await fetch(url + '/maps', { method: 'POST', headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/octet-stream' }, body: ply });
+    if (!res.ok) { shareError('Upload fehlgeschlagen: HTTP ' + res.status); return; }
+    const { id, delete_token } = await res.json();
+    const link = `${PAGES_VIEWER}?src=${encodeURIComponent(url + '/maps/' + id + '.ply')}`;
+    _shareDel = { url, id, token: delete_token };
+    document.getElementById('share-link').value = link;
+    document.getElementById('share-id').textContent = id;
+    document.getElementById('share-busy').style.display = 'none';
+    document.getElementById('share-result').style.display = '';
+    try {
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=95f5f6f1cfa8');
+      const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
+      document.getElementById('share-qr').src = qr.createDataURL(6, 8);
+    } catch { document.getElementById('share-qr').style.display = 'none'; }
+  } catch (err) { shareError('Fehler: ' + err.message); }
+}
+
+async function doRevoke() {
+  if (!_shareDel) return;
+  const { url, id, token } = _shareDel;
+  try {
+    const res = await fetch(`${url}/maps/${id}`, { method: 'DELETE', headers: { 'X-Delete-Token': token } });
+    if (res.ok) shareError('Widerrufen — Link ist tot.');
+    else shareError('Widerruf fehlgeschlagen: HTTP ' + res.status);
+  } catch (err) { shareError('Widerruf-Fehler: ' + err.message); }
+}
+
+/* =====================================================================
+ *  Video export — MediaRecorder on a compositing 2D canvas.
+ *  mp4 when the browser supports it (zero deps), else webm.
+ * ===================================================================== */
+function pickMime() {
+  const types = ['video/mp4;codecs=avc1.640028', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm'];
+  if (!window.MediaRecorder) return null;
+  for (const t of types) { if (MediaRecorder.isTypeSupported(t)) return t; }
+  return null;
+}
+function mimeExt(mime) { return mime.includes('mp4') ? 'mp4' : 'webm'; }
+
+let recCanvas = null, recCtx = null;
+function ensureRecCanvas() {
+  const gl = renderer.domElement;
+  if (!recCanvas) { recCanvas = document.createElement('canvas'); recCtx = recCanvas.getContext('2d'); }
+  if (recCanvas.width !== gl.width || recCanvas.height !== gl.height) { recCanvas.width = gl.width; recCanvas.height = gl.height; }
+}
+// Copy the GL frame onto the 2D canvas + optionally bake the colorbar legend.
+function compositeFrame() {
+  ensureRecCanvas();
+  const W = recCanvas.width, H = recCanvas.height;
+  recCtx.fillStyle = '#05080b';   // GL canvas is alpha:true; opaque bg stops previous-frame bleed-through
+  recCtx.fillRect(0, 0, W, H);
+  recCtx.drawImage(renderer.domElement, 0, 0, W, H);
+  if (recOpts.bakeLegend && state.mode && state.mode.startsWith('scalar:')) drawLegendOverlay(recCtx, W, H);
+}
+function drawLegendOverlay(ctx, W, H) {
+  const table = lut(state.cmap);
+  const barH = Math.round(H * 0.34), barW = Math.max(10, Math.round(W * 0.012));
+  const x = W - barW - Math.round(W * 0.06), y = Math.round(H * 0.30);
+  for (let i = 0; i < barH; i++) {
+    const t = 1 - i / (barH - 1); const idx = (t * 255) | 0;
+    ctx.fillStyle = `rgb(${table[idx*3]},${table[idx*3+1]},${table[idx*3+2]})`;
+    ctx.fillRect(x, y + i, barW, 1);
+  }
+  const fs = Math.max(11, Math.round(H * 0.016));
+  ctx.font = `${fs}px monospace`; ctx.fillStyle = '#d8e6ec'; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  for (let k = 0; k <= 4; k++) {
+    const val = state.vmin + (state.vmax - state.vmin) * (1 - k / 4);
+    ctx.fillText(round(val), x + barW + 6, y + (barH * k / 4));
+  }
+  const field = state.mode.slice(7);
+  const meta = FIELD_META[field.toLowerCase()] || { label: field, unit: state.unit };
+  ctx.fillText((meta.label || field) + (meta.unit ? ' · ' + meta.unit : ''), x - Math.round(W * 0.02), y + barH + fs * 1.5);
+}
+
+function recIndicator(on) { document.getElementById('rec-dot').style.display = on ? '' : 'none'; }
+function setRecButtonsDisabled(d) {
+  for (const id of ['t-orbit', 't-export']) document.getElementById(id).style.opacity = d ? '0.5' : '';
+}
+
+// spec: { mode:'driver'|'live', kind, driver?, durationMs, label }
+function startRecording(spec) {
+  if (!mesh) { alert('Erst eine Map laden.'); return; }
+  if (state.recording) return;
+  const mime = pickMime();
+  if (!mime) { alert('Video-Aufnahme von diesem Browser nicht unterstützt.'); return; }
+  const savedAnim = { t: state.anim.t, engaged: state.anim.engaged };  // capture BEFORE priming (driver(0) may move the cursor)
+  // prime the first frame so capture doesn't start blank
+  renderer.setScissorTest(false); renderer.setViewport(0, 0, innerWidth, innerHeight);
+  if (spec.mode === 'driver' && spec.driver) spec.driver(0);
+  renderer.render(scene, camera);
+  ensureRecCanvas();
+  compositeFrame();
+  let recorder;
+  try { recorder = new MediaRecorder(recCanvas.captureStream(recOpts.fps), { mimeType: mime, videoBitsPerSecond: 12_000_000 }); }
+  catch (e) { alert('Recorder-Fehler: ' + e.message); return; }
+  const chunks = [];
+  recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  recorder.onstop = () => download(`epview-${spec.label}.${mimeExt(mime)}`, new Blob(chunks, { type: mime }), mime);
+  recorder.onerror = ev => { alert('Aufnahme-Fehler: ' + (ev.error?.message || ev.error)); finishRecording(); };
+  state.recording = { ...spec, start: null, recorder, savedAnim };
+  recorder.start();
+  recIndicator(true);
+  setRecButtonsDisabled(true);
+}
+function stopRecording() {
+  const rec = state.recording; if (!rec) return;
+  if (rec.recorder && rec.recorder.state !== 'inactive') rec.recorder.stop();
+  finishRecording();
+}
+function finishRecording() {
+  const rec = state.recording; if (!rec) return;
+  if (rec.kind === 'activation' && state.anim) { state.anim.t = rec.savedAnim.t; state.anim.engaged = rec.savedAnim.engaged; }
+  state.recording = null;
+  recIndicator(false);
+  setRecButtonsDisabled(false);
+  applyColors();
+}
+
+let _orbit = null;
+function orbitFrame(progress) {
+  const p = recOpts.ease ? ease(progress) : progress;
+  const { az, pitch } = orbitPath(recOpts.path, p, _orbit.theta0, _orbit.basePitch);
+  const cp = Math.cos(pitch), d = _orbit.d, c = _orbit.target;
+  // Um den eingestellten Zielpunkt kreisen, nicht um den Ursprung — sonst
+  // nimmt die Aufnahme nach einem Pan ein anderes Bild auf als eingestellt.
+  camera.position.set(c.x + d * cp * Math.sin(az), c.y + d * Math.sin(pitch), c.z + d * cp * Math.cos(az));
+  camera.up.set(0, 1, 0);
+  camera.lookAt(c.x, c.y, c.z);
+}
+function startOrbit() {
+  if (!mesh) { alert('Erst eine Map laden.'); return; }
+  mesh.geometry.computeBoundingSphere();
+  const r = mesh.geometry.boundingSphere.radius || 50;
+  const target = controls.target.clone();
+  const pos = camera.position.clone().sub(target);                     // relative to the actual orbit centre
+  const d = Math.max(pos.length(), 1e-3);                              // current distance from target -> keep zoom
+  const theta0 = Math.atan2(pos.x, pos.z);                             // current azimuth -> no horizontal snap
+  const basePitch = Math.asin(Math.max(-1, Math.min(1, pos.y / d)));   // current elevation -> no vertical snap
+  _orbit = { d, theta0, basePitch, target };
+  camera.near = r / 100; camera.far = d * 8; camera.updateProjectionMatrix();   // generous clip planes (like setView)
+  startRecording({ mode: 'driver', kind: 'orbit', driver: orbitFrame, durationMs: recOpts.orbitSeconds * 1000, label: 'orbit' });
+}
+
+function activationFrame(progress) {
+  state.anim.t = activationCursor(progress, state.vmin, state.vmax, state.anim.mode, recOpts.cycles);
+  applyColors();
+}
+function startExport() {
+  if (!mesh) { alert('Erst eine Map laden.'); return; }
+  const field = state.mode && state.mode.startsWith('scalar:') ? state.mode.slice(7) : null;
+  if (field && isLatField(field)) {
+    state.anim.engaged = true;
+    const W = state.vmax - state.vmin;
+    const oneCycle = Math.max(2, Math.round(W / (state.anim.speed || 60)));
+    const cycles = state.anim.mode === 'loop' ? recOpts.cycles : 1;
+    const seconds = recOpts.exportSeconds || (oneCycle * cycles);
+    startRecording({ mode: 'driver', kind: 'activation', driver: activationFrame, durationMs: seconds * 1000, label: 'activation' });
+  } else {
+    startRecording({ mode: 'live', kind: 'live', durationMs: (recOpts.exportSeconds || 6) * 1000, label: 'view' });
+  }
+}
+
+/* demo: synthetic LV-like ellipsoid with a voltage gradient + a low-voltage scar */
+function buildDemo() {
+  const sp = new THREE.SphereGeometry(45, 96, 64);
+  sp.scale(1, 1.35, 1);
+  const pos = sp.getAttribute('position');
+  const n = pos.count;
+  const positions = new Float32Array(pos.array);
+  const normals = new Float32Array(sp.getAttribute('normal').array);
+  const voltage = new Float32Array(n);
+  const lat = new Float32Array(n);
+  const scar = new THREE.Vector3(20, -30, 30);
+  for (let i = 0; i < n; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const d = Math.hypot(x-scar.x, y-scar.y, z-scar.z);
+    let v = 0.08 + 0.55 * Math.min(1, d / 70);
+    v += (Math.sin(x*0.18)+Math.cos(z*0.15)) * 0.03;
+    voltage[i] = Math.max(0.02, v);
+    lat[i] = 10 + (y + 60) * 0.7 + Math.sin(x*0.05)*8;
+  }
+  const idx = sp.getIndex().array;
+  const RX = 45, RY = 45 * 1.35, RZ = 45;
+  const onSurf = (theta, phi) => [RX * Math.sin(phi) * Math.cos(theta), RY * Math.cos(phi), RZ * Math.sin(phi) * Math.sin(theta)];
+  const tagGroups = [
+    { id: 'abl', label: 'Ablation', category: 'ablation', color: [230, 40, 40], points: [] },
+    { id: 'cs', label: 'CS', category: 'annotation', color: [255, 0, 255],
+      points: [{ position: onSurf(2.4, 1.05), label: 'CS 1' }, { position: onSurf(2.7, 1.25), label: 'CS 2' }] },
+  ];
+  for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; tagGroups[0].points.push({ position: onSurf(a, 1.15 + 0.18 * Math.sin(a)), label: 'Abl ' + (i + 1) }); }
+  loadGeometry({
+    positions, normals, colors: null,
+    scalars: { voltage, lat }, scalarNames: ['voltage', 'lat'],
+    faces: new Uint32Array(idx), tagGroups,
+  }, 'Demo');
+}
+
+/* =====================================================================
+ *  UI wiring
+ * ===================================================================== */
+const fileInput = document.getElementById('file');
+document.getElementById('pick').onclick = () => fileInput.click();
+document.getElementById('t-open').onclick = () => fileInput.click();
+document.getElementById('demo').onclick = buildDemo;
+fileInput.onchange = () => { if (fileInput.files.length) loadFiles(fileInput.files); };
+
+const drop = document.getElementById('drop');
+['dragenter','dragover'].forEach(ev => window.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('dragging'); }));
+['dragleave','drop'].forEach(ev => window.addEventListener(ev, e => { e.preventDefault(); if (ev==='drop'||e.clientX===0) drop.classList.remove('dragging'); }));
+window.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('dragging'); if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files); });
+
+// Mesh-/Anatomie-Auswahl bei Mehrfach-Meshes aus einem Rohexport
+document.getElementById('meshsel').onchange = e => { const m = rawMeshes[+e.target.value]; if (m) loadParsedMesh(m); };
+
+// Export-Buttons
+document.getElementById('ex-ply').onclick = () => exportMesh('ply');
+document.getElementById('ex-ply-ascii').onclick = () => exportMesh('ply-ascii');
+document.getElementById('ex-obj').onclick = () => exportMesh('obj');
+document.getElementById('ex-stl').onclick = () => exportMesh('stl');
+
+document.getElementById('mode').onchange = e => { selectMode(e.target.value); applyColors(); };
+document.getElementById('cmap').onchange = e => { state.cmap = e.target.value; applyColors(); };
+document.getElementById('vmin').onchange = () => setWindow(+document.getElementById('vmin').value, state.vmax);
+document.getElementById('vmax').onchange = () => setWindow(state.vmin, +document.getElementById('vmax').value);
+document.getElementById('vmin-s').oninput = e => { let v = +e.target.value; if (v > state.vmax) v = state.vmax; setWindow(v, state.vmax); };
+document.getElementById('vmax-s').oninput = e => { let v = +e.target.value; if (v < state.vmin) v = state.vmin; setWindow(state.vmin, v); };
+document.getElementById('opacity').oninput = refreshDisplayToggles;
+document.getElementById('smooth-level').oninput = e => {
+  state.smoothLevel = +e.target.value;
+  document.getElementById('smooth-val').textContent = state.smoothLevel;
+  applyColors();
+};
+
+document.getElementById('anim-play').onclick = () => state.anim.playing ? stopAnim() : startAnim();
+document.querySelectorAll('#anim-mode button').forEach(b => b.onclick = () => {
+  state.anim.mode = b.dataset.mode;
+  document.querySelectorAll('#anim-mode button').forEach(x => x.classList.toggle('on', x === b));
+  if (!state.anim.playing) applyColors();
+});
+document.getElementById('anim-speed').oninput = e => { state.anim.speed = +e.target.value; };
+document.getElementById('anim-band').oninput = e => { state.anim.band = +e.target.value; if (!state.anim.playing) applyColors(); };
+document.getElementById('anim-cursor').oninput = e => { stopAnim(); state.anim.engaged = true; state.anim.t = +e.target.value; updateAnimReadout(); applyColors(); };
+
+const toggle = (id, key) => {
+  const el = document.getElementById(id);
+  el.onclick = () => { state[key] = !state[key]; el.classList.toggle('on', state[key]); applyState(); };
+};
+toggle('c-wire', 'wire'); toggle('c-smooth', 'smooth');
+document.getElementById('c-smooth').classList.toggle('on', state.smooth);
+
+document.getElementById('area-isolate').onclick = () => {
+  state.isolateScar = !state.isolateScar;
+  document.getElementById('area-isolate').classList.toggle('on', state.isolateScar);
+  applyColors();
+};
+
+document.getElementById('conf-mask').onclick = () => {
+  state.confMask = !state.confMask;
+  document.getElementById('conf-mask').classList.toggle('on', state.confMask);
+  applyColors();
+};
+document.getElementById('conf-mask-th').addEventListener('input', e => {
+  const v = parseFloat(e.target.value);
+  if (!Number.isFinite(v) || v < 0) return;
+  state.confMaskTh = v;
+  document.getElementById('conf-mask-th-lbl').textContent = round(v);
+  if (state.confMask) applyColors();
+});
+
+document.getElementById('tags-all').onclick = () => {
+  const next = !tagMeshes.some(t => t.inst.visible);
+  tagMeshes.forEach(t => { t.inst.visible = next; });
+  document.querySelectorAll('#tag-list .chip').forEach(c => c.classList.toggle('on', next));
+};
+
+const tagSizeEl = document.getElementById('tag-size');
+const tagSizeLbl = document.getElementById('tag-size-val');
+tagSizeEl.addEventListener('input', () => {
+  tagOpts.sizeMul = parseFloat(tagSizeEl.value) || 1;
+  tagSizeLbl.textContent = tagOpts.sizeMul.toFixed(2) + '×';
+  applyTagMarkerSettings();
+});
+const tagProjBtn = document.getElementById('tag-project');
+tagProjBtn.onclick = () => {
+  tagOpts.project = !tagOpts.project;
+  tagProjBtn.classList.toggle('on', tagOpts.project);
+  applyTagMarkerSettings();
+};
+
+// Orientierungs-Gizmo an/aus (Default an)
+const axesBtn = document.getElementById('c-axes');
+axesBtn.onclick = () => { state.axes = !state.axes; axesBtn.classList.toggle('on', state.axes); };
+
+// Anatomische Blick-Voreinstellungen
+document.querySelectorAll('#m-cam [data-view]').forEach(b => { b.onclick = () => setView(b.dataset.view); });
+function setupDrop(btnId, menuId) {
+  const btn = document.getElementById(btnId), menu = document.getElementById(menuId);
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.tmenu.show').forEach(m => { if (m !== menu) m.classList.remove('show'); });
+    menu.classList.toggle('show');
+  };
+  menu.querySelectorAll('.tool').forEach(it => it.addEventListener('click', () => menu.classList.remove('show')));
+}
+setupDrop('t-cam', 'm-cam'); setupDrop('t-vid', 'm-vid'); setupDrop('t-save', 'm-save');
+addEventListener('click', (e) => {
+  document.querySelectorAll('.tmenu.show').forEach(m => m.classList.remove('show'));
+  const rs = document.getElementById('recset'); if (rs && rs.classList.contains('show') && !rs.contains(e.target)) rs.classList.remove('show');
+  const sb = document.getElementById('sharebox'); if (sb && sb.classList.contains('show') && !sb.contains(e.target)) sb.classList.remove('show');
+});
+function applyState() {
+  refreshDisplayToggles();
+}
+
+const rotBtn = document.getElementById('t-rotate');
+rotBtn.onclick = () => { controls.autoRotate = !controls.autoRotate; rotBtn.classList.toggle('on', controls.autoRotate); };
+document.getElementById('t-reset').onclick = () => { if (current) { mesh.geometry.computeBoundingSphere(); frameCamera(mesh.geometry.boundingSphere); } };
+document.getElementById('t-shot').onclick = () => {
+  // vollen Viewport setzen (Gizmo hinterlässt einen kleinen Scissor) und Gizmo
+  // mit ins Bild rendern.
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, innerWidth, innerHeight);
+  renderer.render(scene, camera);
+  renderGizmo();
+  const a = document.createElement('a');
+  a.download = 'epview-snapshot.png';
+  a.href = renderer.domElement.toDataURL('image/png');
+  a.click();
+};
+document.getElementById('t-orbit').onclick = () => state.recording ? stopRecording() : startOrbit();
+document.getElementById('t-export').onclick = () => state.recording ? stopRecording() : startExport();
+document.getElementById('rec-dot').onclick = () => stopRecording();
+
+const recsetEl = document.getElementById('recset');
+document.getElementById('t-recset').onclick = (e) => {
+  e.stopPropagation();
+  const mime = pickMime();
+  document.getElementById('rs-fmt').textContent = mime ? mimeExt(mime).toUpperCase() : 'nicht unterstützt';
+  recsetEl.classList.toggle('show');
+};
+document.getElementById('rs-legend').onchange = e => { recOpts.bakeLegend = e.target.checked; };
+document.getElementById('rs-gizmo').onchange = e => { recOpts.hideGizmo = e.target.checked; };
+document.getElementById('rs-fps').onchange = e => { recOpts.fps = +e.target.value; };
+document.getElementById('rs-orbit').onchange = e => { recOpts.orbitSeconds = Math.max(2, +e.target.value || 8); };
+document.getElementById('rs-export').onchange = e => { recOpts.exportSeconds = e.target.value ? Math.max(2, +e.target.value) : null; };
+document.getElementById('rs-cycles').onchange = e => { recOpts.cycles = Math.max(1, +e.target.value || 1); };
+document.getElementById('rs-path').onchange = e => { recOpts.path = e.target.value; };
+document.getElementById('rs-ease').onchange = e => { recOpts.ease = e.target.checked; };
+
+document.getElementById('t-share').onclick = (e) => { e.stopPropagation(); doShare(); };
+document.getElementById('share-close').onclick = hideShareBox;
+document.getElementById('share-copy').onclick = () => { const i = document.getElementById('share-link'); i.select(); navigator.clipboard?.writeText(i.value); };
+document.getElementById('share-revoke').onclick = doRevoke;
+
+// Mobile: collapsible bedrock for the controls panel. The toggle button is
+// only visible via CSS below 720px; on desktop the panel always shows fully.
+const controlsEl = document.getElementById('controls');
+const ctrlToggle = document.getElementById('ctrl-toggle');
+const mqBottomSheet = matchMedia('(max-width: 720px)');
+const mqSideDrawer = matchMedia('(max-width: 900px) and (max-height: 500px)');
+const isMobileLayout = () => mqBottomSheet.matches || mqSideDrawer.matches;
+function setControlsCollapsed(yes) {
+  controlsEl.classList.toggle('collapsed', !!yes);
+}
+ctrlToggle.addEventListener('click', () => setControlsCollapsed(!controlsEl.classList.contains('collapsed')));
+// Start collapsed on mobile / narrow landscape so the canvas is unobstructed.
+if (isMobileLayout()) setControlsCollapsed(true);
+const onLayoutChange = () => {
+  if (!isMobileLayout()) controlsEl.classList.remove('collapsed');
+};
+mqBottomSheet.addEventListener?.('change', onLayoutChange);
+mqSideDrawer.addEventListener?.('change', onLayoutChange);
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// Q/E roll the view around the camera->target axis (rotate camera.up, then re-derive).
+addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+  if (k !== 'q' && k !== 'e') return;
+  const tag = (e.target && e.target.tagName) || '';
+  if (/INPUT|SELECT|TEXTAREA/.test(tag)) return;   // don't hijack form fields
+  const axis = new THREE.Vector3().subVectors(controls.target, camera.position).normalize();
+  camera.up.applyAxisAngle(axis, (k === 'q' ? 1 : -1) * 0.06);
+  controls.update();
+  scheduleControlsRebuild();
+});
+
+/* =====================================================================
+ *  Loop
+ * ===================================================================== */
+function animate(now) {
+  requestAnimationFrame(animate);
+  const rec = state.recording;
+  const t = now ?? performance.now();
+  if (rec && rec.mode === 'driver') {
+    if (rec.start == null) rec.start = t;
+    const progress = clamp01((t - rec.start) / rec.durationMs);
+    rec.driver(progress);
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, innerWidth, innerHeight);
+    renderer.render(scene, camera);
+    if (!recOpts.hideGizmo) renderGizmo();
+    compositeFrame();
+    if (progress >= 1) stopRecording();
+    return;
+  }
+  // normal loop (also used for 'live' recording)
+  stepAnim(t);
+  controls.update();
+  if (_readoutDirty) { _readoutDirty = false; updateReadout(); }
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, innerWidth, innerHeight);
+  renderer.render(scene, camera);
+  if (!(rec && recOpts.hideGizmo)) renderGizmo();
+  if (rec && rec.mode === 'live') {
+    if (rec.start == null) rec.start = t;
+    compositeFrame();
+    if (clamp01((t - rec.start) / rec.durationMs) >= 1) stopRecording();
+  }
+}
+animate();
+applyState();
+
+// Direktlinks: ?demo lädt die Demo-Map, ?src=<url> lädt Mesh ODER Rohexport
+// (.000 Rhythmia, .zip CARTO, .xml EnSite).
+async function loadURL(url) {
+  showLoading('Lade…');
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    setLoading('Konvertiere…');
+    await new Promise(r => requestAnimationFrame(() => r()));
+    const buf = await res.arrayBuffer();
+    const name = (url.split('/').pop() || 'mesh').split('?')[0];
+    const lower = name.toLowerCase();
+    if (/\.(ply|obj|stl)$/.test(lower)) {
+      let data;
+      if (lower.endsWith('.obj')) data = EP.parseOBJ(new TextDecoder().decode(buf));
+      else if (lower.endsWith('.stl')) data = EP.parseSTL(buf);
+      else data = EP.parsePLY(buf);
+      if (!data.positions.length) throw new Error('Keine Geometrie gefunden.');
+      loadGeometry(data, name);
+      return;
+    }
+    // Rohexport
+    let meshes;
+    if (lower.endsWith('.zip')) {
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=95f5f6f1cfa8');
+      meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
+    } else if (lower.endsWith('.xml')) {
+      meshes = EP.parseEnSite(new TextDecoder().decode(buf));
+    } else {
+      meshes = await EP.parseRhythmia(new Uint8Array(buf));   // .000 (einteilig)
+    }
+    if (!meshes.length) throw new Error('Keine Mesh-Daten gefunden.');
+    rawMeshes = meshes;
+    populateMeshSelector(meshes);
+    loadParsedMesh(meshes[0]);
+  } catch (err) {
+    alert('Laden fehlgeschlagen:\n' + err.message);
+    console.error(err);
+  } finally {
+    hideLoading();
+  }
+}
+const _params = new URLSearchParams(location.search);
+const _v = (_params.get('view') || '').toUpperCase();
+if (_v in VIEW_ANGLES) initialView = _v;
+if (_params.has('demo')) {
+  try { buildDemo(); } catch (e) { console.error('demo failed', e); }
+} else if (_params.get('src')) {
+  loadURL(_params.get('src'));
+}
+</script>
+
+<script type="module">
+/* See the note in viewer.html. The map view owns the map actions; everything
+ * else the menu can send is routed back to the signal view by the bridge. */
+import '../shared/bridge.js?v=95f5f6f1cfa8';
+
+window.epcoreNotify = (msg) => { console.warn('[epcore]', msg); alert(msg); };
+
+window.epcore.register({
+  openMap: () => document.getElementById('file')?.click(),
+  exportMap: () => document.getElementById('ex-ply')?.click(),
+});
+</script>
+</body>
+</html>

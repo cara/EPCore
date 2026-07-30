@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rhythmia Anonymisierer</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 920px;
+    margin: 1.5em auto;
+    padding: 0 1em;
+    color: #2c3e50;
+    line-height: 1.5;
+  }
+  h1 { color: #1a5f8e; margin-bottom: 0.2em; }
+  h2 { color: #1a5f8e; border-bottom: 1px solid #ddd; padding-bottom: 0.2em; margin-top: 1.6em; }
+  .subtitle { color: #7f8c8d; margin-top: 0; }
+  .info, .warn {
+    padding: 0.8em 1em;
+    border-radius: 4px;
+    margin: 1em 0;
+  }
+  .info { background: #e8f4f8; border-left: 4px solid #1a5f8e; }
+  .warn { background: #fff3cd; border-left: 4px solid #f39c12; }
+  .dropzone {
+    border: 2px dashed #95a5a6;
+    border-radius: 4px;
+    padding: 2em;
+    text-align: center;
+    color: #7f8c8d;
+    margin: 0.5em 0 1em 0;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .dropzone.drag {
+    background: #dff0d8;
+    border-color: #2ecc71;
+    color: #27ae60;
+  }
+  fieldset {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin: 0.6em 0;
+    padding: 0.8em 1em;
+  }
+  fieldset legend { font-weight: 600; padding: 0 0.4em; }
+  label { display: block; margin: 0.3em 0; }
+  input[type=text] {
+    padding: 0.3em 0.5em;
+    border: 1px solid #bdc3c7;
+    border-radius: 3px;
+    width: 26em;
+    max-width: 100%;
+    font-family: monospace;
+  }
+  textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.5em;
+    border: 1px solid #bdc3c7;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 0.9em;
+  }
+  button {
+    padding: 0.7em 1.5em;
+    font-size: 1em;
+    cursor: pointer;
+    border-radius: 4px;
+    border: 1px solid #bdc3c7;
+    background: #ecf0f1;
+    margin-right: 0.5em;
+  }
+  button:hover { background: #d6dbdf; }
+  button.primary {
+    background: #2ecc71;
+    color: white;
+    border-color: #27ae60;
+  }
+  button.primary:hover { background: #27ae60; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  pre {
+    background: #f8f8f8;
+    padding: 0.8em;
+    border-radius: 3px;
+    overflow: auto;
+    max-height: 18em;
+    font-size: 0.85em;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  table { border-collapse: collapse; width: 100%; margin-top: 0.5em; font-size: 0.9em; }
+  th, td { padding: 0.4em 0.6em; text-align: left; border-bottom: 1px solid #eee; }
+  th { background: #f4f6f7; }
+  td.field { font-family: monospace; color: #1a5f8e; }
+  td.original, td.replacement { font-family: monospace; }
+  td.original { color: #c0392b; }
+  td.replacement { color: #27ae60; }
+  ul.files { padding-left: 1.5em; }
+  ul.files li { font-family: monospace; }
+  .row { display: flex; gap: 1em; flex-wrap: wrap; }
+  .row > fieldset { flex: 1; min-width: 280px; }
+  .footer {
+    margin-top: 3em;
+    padding-top: 1em;
+    border-top: 1px solid #ddd;
+    color: #7f8c8d;
+    font-size: 0.85em;
+  }
+</style>
+</head>
+<body>
+
+<h1>Rhythmia Daten Anonymisierer</h1>
+<p class="subtitle">Entfernt Patientendaten aus Rhythmia HDx Mapping-Archiven (.000/.001/...).</p>
+
+<div class="info">
+  <strong>Datenschutz:</strong> Diese Seite läuft komplett lokal in Ihrem Browser.
+  Es werden keine Daten an einen Server geschickt &ndash; auch nicht zum Anonymisieren.
+  Sie können die Datei <code>anonymize_rhythmia.html</code> herunterladen und ohne Internetverbindung
+  öffnen. Schließen Sie das Browser-Fenster, dann sind alle eingelesenen Daten weg.
+</div>
+
+<div class="warn">
+  <strong>Wichtig:</strong> Diese Software ist ein Hilfsmittel und ersetzt nicht die manuelle
+  Prüfung. Verifizieren Sie nach der Anonymisierung mit einem Hex- oder Texteditor (oder durch
+  erneutes Einlesen mit der Vorschau-Funktion), dass keine personenbezogenen Daten mehr
+  enthalten sind. Geometrie- und Voltage-/Aktivierungswerte selbst bleiben unverändert.
+</div>
+
+<h2>1. Archiv-Dateien wählen</h2>
+<p>Alle Teile des Archivs gleichzeitig auswählen (.000, .001, .002, ...):</p>
+<input type="file" id="files" multiple>
+<div class="dropzone" id="dropzone">Oder Dateien hier ablegen</div>
+<div id="fileList"></div>
+
+<h2>2. Ersatzwerte konfigurieren</h2>
+<div class="row">
+  <fieldset>
+    <legend>Patient</legend>
+    <label>PatientID: <input type="text" id="rep-patientid" value="ANON-001"></label>
+    <label>Vorname: <input type="text" id="rep-first" value="Anonym"></label>
+    <label>Nachname: <input type="text" id="rep-last" value="Patient"></label>
+    <label>Geburtsdatum: <input type="text" id="rep-dob" value="1900-01-01"></label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Zusätzlich anonymisieren</legend>
+    <label><input type="checkbox" id="opt-physician" checked>
+      Ärzte- &amp; Personalnamen</label>
+    <label><input type="checkbox" id="opt-institution" checked>
+      Klinik- &amp; Standortnamen</label>
+    <label><input type="checkbox" id="opt-comments" checked>
+      Kommentare &amp; Notizen leeren</label>
+    <label><input type="checkbox" id="opt-dates">
+      Datum/Zeitstempel auf Jahr kürzen</label>
+  </fieldset>
+</div>
+
+<fieldset>
+  <legend>Eigene zu ersetzende Begriffe</legend>
+  <p style="margin: 0.2em 0; font-size: 0.9em; color: #7f8c8d;">
+    Eine Zeichenkette pro Zeile (z.&nbsp;B. Patientenname, Geburtsdatum-Variante,
+    Studienkennung). Wird im gesamten XML &ndash; ohne Beachtung der Tags &ndash; durch
+    <code>[REDACTED]</code> ersetzt. Case-insensitive. Binärdaten werden NIE verändert.
+  </p>
+  <textarea id="custom-patterns" rows="3"
+    placeholder="Müller, Hans&#10;1965-03-15&#10;Smith_Mapping_2024"></textarea>
+</fieldset>
+
+<h2>3. Vorschau und Anonymisieren</h2>
+<button id="analyze">Vorschau anzeigen</button>
+<button id="process" class="primary">Anonymisieren &amp; Herunterladen</button>
+
+<progress id="progress" max="1" value="0" hidden style="width:100%"></progress>
+<div id="preview"></div>
+<pre id="log" hidden></pre>
+
+<div class="footer">
+  Open-Source / Forschungswerkzeug. Nicht für klinische Anwendung zugelassen.
+  Keine Garantie auf Vollständigkeit der Anonymisierung &ndash; eigene Prüfung empfohlen.
+</div>
+
+<script>
+"use strict";
+
+// ===========================================================================
+// DOM-Referenzen
+// ===========================================================================
+const $ = id => document.getElementById(id);
+const filesInput = $("files");
+const dropzone = $("dropzone");
+const fileList = $("fileList");
+const preview = $("preview");
+const logEl = $("log");
+
+let selectedFiles = [];
+
+// ===========================================================================
+// Logging
+// ===========================================================================
+function log(msg) {
+  logEl.hidden = false;
+  logEl.textContent += msg + "\n";
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function clearLog() {
+  logEl.textContent = "";
+  logEl.hidden = true;
+  setProgress(0);
+}
+
+const progressEl = $("progress");
+function setProgress(frac) {
+  if (!frac) { progressEl.hidden = true; progressEl.value = 0; return; }
+  progressEl.hidden = false;
+  progressEl.value = Math.min(1, frac);
+}
+
+// ===========================================================================
+// Datei-Auswahl & Drag/Drop
+// ===========================================================================
+function partNumber(name) {
+  const ext = name.split(".").pop();
+  const n = parseInt(ext, 10);
+  return Number.isFinite(n) ? n : 9999;
+}
+
+function setFiles(files) {
+  selectedFiles = Array.from(files).sort(
+    (a, b) => partNumber(a.name) - partNumber(b.name)
+  );
+  fileList.innerHTML = "";
+  if (!selectedFiles.length) return;
+  const ul = document.createElement("ul");
+  ul.className = "files";
+  let total = 0;
+  for (const f of selectedFiles) {
+    total += f.size;
+    const li = document.createElement("li");
+    li.textContent = `${f.name}  (${(f.size / (1024 * 1024)).toFixed(1)} MB)`;
+    ul.appendChild(li);
+  }
+  const summary = document.createElement("div");
+  summary.style.marginTop = "0.4em";
+  summary.style.fontWeight = "600";
+  summary.textContent = `Gesamt: ${selectedFiles.length} Datei(en), ${(
+    total / (1024 * 1024)
+  ).toFixed(1)} MB`;
+  fileList.appendChild(ul);
+  fileList.appendChild(summary);
+
+  if (
+    selectedFiles.length === 1 &&
+    /\.000$/i.test(selectedFiles[0].name) &&
+    selectedFiles[0].size > 100 * 1024 * 1024
+  ) {
+    const w = document.createElement("div");
+    w.className = "warn";
+    w.style.marginTop = "0.6em";
+    w.innerHTML =
+      "<strong>Hinweis:</strong> Nur eine .000-Datei ausgewählt, aber sehr groß. " +
+      "Falls weitere Teile (.001, .002, ...) im selben Ordner liegen, " +
+      "bitte alle gemeinsam auswählen.";
+    fileList.appendChild(w);
+  }
+}
+
+filesInput.addEventListener("change", e => setFiles(e.target.files));
+
+["dragover", "dragenter"].forEach(t =>
+  dropzone.addEventListener(t, e => {
+    e.preventDefault();
+    dropzone.classList.add("drag");
+  })
+);
+["dragleave"].forEach(t =>
+  dropzone.addEventListener(t, e => {
+    e.preventDefault();
+    dropzone.classList.remove("drag");
+  })
+);
+dropzone.addEventListener("drop", e => {
+  e.preventDefault();
+  dropzone.classList.remove("drag");
+  setFiles(e.dataTransfer.files);
+});
+dropzone.addEventListener("click", () => filesInput.click());
+
+// === SCRUB-CORE START ===
+// Alles zwischen den SCRUB-CORE-Markern ist frei von DOM-Zugriffen und wird
+// von test/scrub_core.js extrahiert und in node --test geprüft.
+// `coreLog` wird weiter unten von der UI auf `log` gesetzt.
+let coreLog = () => {};
+
+// ===========================================================================
+// Byte/String-Konvertierung (latin1: 1 Byte = 1 Char, byte-perfekt)
+// ===========================================================================
+const CHUNK = 0x8000;
+
+function bytesToLatin1(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    s += String.fromCharCode.apply(
+      null,
+      bytes.subarray(i, Math.min(i + CHUNK, bytes.length))
+    );
+  }
+  return s;
+}
+
+function latin1ToBytes(str) {
+  const bytes = new Uint8Array(str.length);
+  for (let i = 0; i < str.length; i++) {
+    bytes[i] = str.charCodeAt(i) & 0xff;
+  }
+  return bytes;
+}
+
+// Wandelt einen UTF-8-String in einen latin1-String um (jedes UTF-8-Byte
+// wird ein Zeichen 0-255). Damit wird ein Replacement (z.B. mit Umlaut)
+// korrekt als UTF-8 in den latin1-decodierten Archiv-String eingebettet.
+const _enc = new TextEncoder();
+function utf8ToLatin1(str) {
+  return bytesToLatin1(_enc.encode(str));
+}
+const _dec = new TextDecoder("utf-8", { fatal: false });
+function latin1ToUtf8(s) {
+  return _dec.decode(latin1ToBytes(s));
+}
+
+// ===========================================================================
+// Wahlfreier Zugriff über alle Teildateien hinweg
+// ===========================================================================
+// Rhythmia-HDx-Archive sind regelmäßig mehrere GB groß. Das Archiv wird
+// deshalb NIE komplett gelesen und schon gar nicht in einen einzigen JS-String
+// gewandelt (V8 bricht bei 512 MiB mit "Invalid string length" ab). Gelesen
+// wird per File.slice(), Binärblöcke bleiben als Blob-Referenz stehen.
+function makeArchiveReader(files) {
+  const parts = Array.from(files).sort((a, b) =>
+    String(a.name || "").localeCompare(String(b.name || "")));
+  if (!parts.length) throw new Error("Keine Teildateien gewählt.");
+
+  const sizes = parts.map(f => f.size);
+  const starts = [];
+  let acc = 0;
+  for (const s of sizes) { starts.push(acc); acc += s; }
+  const total = acc;
+
+  // Index der Teildatei, in der das globale Byte g liegt, + lokaler Offset.
+  function fileAt(g) {
+    let lo = 0, hi = parts.length - 1, idx = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (starts[mid] <= g) { idx = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    return [idx, g - starts[idx]];
+  }
+
+  async function readRange(gStart, len) {
+    const out = new Uint8Array(len);
+    let written = 0, g = gStart;
+    while (written < len) {
+      const [fi, lo] = fileAt(g);
+      const take = Math.min(sizes[fi] - lo, len - written);
+      if (take <= 0) throw new Error("Lesefehler an der Dateigrenze.");
+      out.set(new Uint8Array(await parts[fi].slice(lo, lo + take).arrayBuffer()),
+        written);
+      written += take; g += take;
+    }
+    return out;
+  }
+
+  // Zerlegt einen globalen Bereich in Blob-Scheiben pro Teildatei — ohne ihn
+  // zu lesen. So bleibt der Speicherbedarf unabhängig von der Archivgröße.
+  function sliceRange(gStart, len) {
+    const out = [];
+    let g = gStart, left = len;
+    while (left > 0) {
+      const [fi, lo] = fileAt(g);
+      const take = Math.min(sizes[fi] - lo, left);
+      if (take <= 0) throw new Error("Lesefehler an der Dateigrenze.");
+      out.push({ part: fi, blob: parts[fi].slice(lo, lo + take) });
+      g += take; left -= take;
+    }
+    return out;
+  }
+
+  return { parts, sizes, total, fileAt, readRange, sliceRange };
+}
+
+// ===========================================================================
+// PII-Felder
+// ===========================================================================
+function buildReplacementMap(opts) {
+  // Map: Tag-Name (case-insensitive) -> Ersatzwert (UTF-8-String).
+  const m = new Map();
+  const set = (k, v) => m.set(k.toLowerCase(), v);
+
+  // Patientenidentifikatoren - immer
+  set("PatientID", opts.patientId);
+  set("PatientName", `${opts.lastName}, ${opts.firstName}`);
+  set("FullName", `${opts.lastName}, ${opts.firstName}`);
+  set("NameFirst", opts.firstName);
+  set("NameLast", opts.lastName);
+  set("NameMiddle", "");
+  set("FirstName", opts.firstName);
+  set("LastName", opts.lastName);
+  set("MiddleName", "");
+  set("GivenName", opts.firstName);
+  set("FamilyName", opts.lastName);
+  set("BirthDate", opts.dob);
+  set("DateOfBirth", opts.dob);
+  set("DOB", opts.dob);
+  set("Birthday", opts.dob);
+  set("PatientBirthDate", opts.dob);
+  set("Age", "");
+  set("SSN", "XXX-XX-XXXX");
+  set("SocialSecurityNumber", "XXX-XX-XXXX");
+  set("InsuranceNumber", "ANON");
+  set("PolicyNumber", "ANON");
+  set("MedicalRecordNumber", "ANON");
+  set("MRN", "ANON");
+  set("Address", "ANON");
+  set("StreetAddress", "ANON");
+  set("Street", "ANON");
+  set("City", "ANON");
+  set("State", "ANON");
+  set("Country", "ANON");
+  set("ZIP", "00000");
+  set("PostalCode", "00000");
+  set("Phone", "ANON");
+  set("PhoneNumber", "ANON");
+  set("Email", "anon@example.com");
+
+  if (opts.physician) {
+    [
+      "PhysicianName",
+      "AttendingPhysician",
+      "ReferringPhysician",
+      "Operator",
+      "OperatorName",
+      "Doctor",
+      "DoctorName",
+      "Surgeon",
+      "Nurse",
+      "Technician",
+      "Performer",
+      "PerformingPhysician",
+      "RecordingClinician",
+      "User",
+      "UserName",
+      "OperatorID",
+    ].forEach(f => set(f, "ANON"));
+  }
+
+  if (opts.institution) {
+    [
+      "Hospital",
+      "HospitalName",
+      "Institution",
+      "InstitutionName",
+      "InstitutionAddress",
+      "Site",
+      "SiteName",
+      "Department",
+      "DepartmentName",
+      "Clinic",
+      "ClinicName",
+      "Facility",
+      "FacilityName",
+      "StationName",
+    ].forEach(f => set(f, "ANON"));
+  }
+
+  if (opts.comments) {
+    [
+      "Comments",
+      "Comment",
+      "Notes",
+      "Note",
+      "Remark",
+      "Remarks",
+      "Description",
+      "FreeText",
+    ].forEach(f => set(f, ""));
+  }
+
+  return m;
+}
+
+// ===========================================================================
+// XML-Anonymisierung (in latin1-codierten Strings)
+// ===========================================================================
+function escapeXml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function anonymizeXmlChunk(xml, repMap, customPatterns, opts, found) {
+  let out = xml;
+
+  // 1) Tag-basierte Ersetzungen: <Tag>...</Tag>
+  //    Wir bauen pro Tag einen case-insensitiven Regex.
+  for (const [field, replacement] of repMap) {
+    // Sicherstellen, dass das Replacement als UTF-8 in den latin1-String passt.
+    const replEsc = escapeXml(utf8ToLatin1(replacement));
+    const re = new RegExp(`(<${field}>)([^<]*)(</${field}>)`, "gi");
+    out = out.replace(re, (match, open, content, close) => {
+      if (content === "") return match; // leer lassen
+      // Original (latin1) zur Anzeige in UTF-8 zurückwandeln
+      const origUtf8 = latin1ToUtf8(content);
+      found.push({
+        field: open.replace(/[<>]/g, ""),
+        original: origUtf8,
+        replacement: replacement,
+      });
+      return open + replEsc + close;
+    });
+  }
+
+  // 2) Datums-Stempel kürzen (nur Jahr behalten)
+  if (opts.dates) {
+    const dateTags = [
+      "StudyDate",
+      "AcquisitionDate",
+      "RecordingDate",
+      "Date",
+      "Timestamp",
+      "DateTime",
+      "CreationDate",
+      "ExportDate",
+      "MapDate",
+    ];
+    for (const tag of dateTags) {
+      const re = new RegExp(`(<${tag}>)([^<]*)(</${tag}>)`, "gi");
+      out = out.replace(re, (match, open, content, close) => {
+        const yearMatch = content.match(/\b(19|20)\d{2}\b/);
+        const year = yearMatch ? yearMatch[0] : "1900";
+        const newVal = `${year}-01-01`;
+        if (content.trim() === newVal) return match;
+        found.push({
+          field: open.replace(/[<>]/g, ""),
+          original: latin1ToUtf8(content),
+          replacement: newVal,
+        });
+        return open + newVal + close;
+      });
+    }
+  }
+
+  // 3) Eigene Patterns: anywhere im XML, case-insensitive Literalersetzung.
+  for (const pat of customPatterns) {
+    if (!pat) continue;
+    const patLatin = utf8ToLatin1(pat);
+    const escaped = patLatin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(escaped, "gi");
+    let count = 0;
+    out = out.replace(re, m => {
+      count++;
+      return "[REDACTED]";
+    });
+    if (count > 0) {
+      found.push({
+        field: "(custom)",
+        original: pat,
+        replacement: "[REDACTED]",
+        count: count,
+      });
+    }
+  }
+
+  return out;
+}
+
+// ===========================================================================
+// Haupt-Verarbeitung: Archiv durchgehen, XML/Binary trennen
+// ===========================================================================
+// Lesefenster für den XML-Scan. Zwischen zwei Binärblöcken liegt nur wenig
+// XML, also wird pro übersprungenem Block höchstens ~SCAN_CHUNK an Binärdaten
+// unnötig gelesen.
+const SCAN_CHUNK = 1 << 20;
+// Ab dieser Menge unverarbeiteten XMLs wird zwischendurch abgegeben, damit
+// auch ein Archiv ohne Binärblöcke nicht in einen 512-MiB-String läuft.
+const XML_FLUSH_LIMIT = 32 << 20;
+const XML_FLUSH_KEEP = 1 << 16;
+const OPEN_TAG = "<inlinedbin ";
+
+async function processArchive(files, opts, onProgress) {
+  const rd = makeArchiveReader(files);
+  coreLog(`Lese ${rd.parts.length} Datei(en), gesamt ` +
+    `${(rd.total / (1024 * 1024)).toFixed(2)} MB (streamend)...`);
+
+  const repMap = buildReplacementMap(opts);
+  const customPatterns = (opts.customPatterns || "")
+    .split(/\r?\n/)
+    .map(s => s.trim())
+    .filter(Boolean);
+  const found = [];
+
+  // Ein Ausgabe-Eimer pro Eingabe-Teildatei: die Aufteilung des Archivs bleibt
+  // erhalten (das Rhythmia-System erwartet sie), obwohl sich die XML-Teile
+  // beim Anonymisieren in der Länge ändern.
+  const outParts = rd.parts.map(() => []);
+  const emitBytes = (u8, gStart) => {
+    if (u8.length) outParts[rd.fileAt(gStart)[0]].push(u8);
+  };
+  const emitRaw = (gStart, len) => {
+    for (const s of rd.sliceRange(gStart, len)) outParts[s.part].push(s.blob);
+  };
+  const flushXml = (text, gStart) => {
+    if (!text.length) return;
+    emitBytes(latin1ToBytes(
+      anonymizeXmlChunk(text, repMap, customPatterns, opts, found)), gStart);
+  };
+
+  const dec = new TextDecoder("latin1");
+  let g = 0;            // globaler Leseoffset
+  let carry = "";       // gelesen, noch nicht verarbeitet
+  let carryStart = 0;   // globaler Offset von carry[0]
+  let binCount = 0;
+
+  while (g < rd.total) {
+    const take = Math.min(SCAN_CHUNK, rd.total - g);
+    carry += dec.decode(await rd.readRange(g, take));
+    g += take;
+    if (onProgress) onProgress({ done: g, total: rd.total });
+
+    for (;;) {
+      const ti = carry.indexOf(OPEN_TAG);
+      if (ti < 0) break;
+      const gt = carry.indexOf(">", ti);
+      if (gt < 0) break;                      // Tag noch unvollständig
+      const tag = carry.slice(ti, gt + 1);
+      const m = tag.match(/\sBIN="?(\d+)/);
+      if (!m) {
+        throw new Error(
+          `<inlinedbin>-Tag ohne erkennbare BIN-Länge bei Byte ` +
+          `${carryStart + ti}: »${tag.slice(0, 160)}«`);
+      }
+      const binLength = parseInt(m[1], 10);
+      const payloadStart = carryStart + gt + 1;
+      const binEnd = payloadStart + binLength;
+      if (binEnd > rd.total) {
+        throw new Error(
+          `Binärblock bei Byte ${carryStart + ti} reicht über das Archivende ` +
+          `hinaus (BIN=${binLength}, verfügbar=${rd.total - payloadStart}). ` +
+          `Wahrscheinlich fehlt eine Datei (.001/.002/...).`);
+      }
+
+      flushXml(carry.slice(0, gt + 1), carryStart);   // XML inkl. Open-Tag
+      emitRaw(payloadStart, binLength);               // Block byte-identisch
+      binCount++;
+
+      const afterInCarry = gt + 1 + binLength;
+      if (afterInCarry <= carry.length) {
+        carry = carry.slice(afterInCarry);            // kleiner Block
+      } else {
+        carry = "";                                   // großer Block: springen
+        g = binEnd;
+      }
+      carryStart = binEnd;
+      if (!carry.length) break;
+    }
+
+    if (carry.length > XML_FLUSH_LIMIT) {
+      // Nie hinter einem angefangenen <inlinedbin ...> schneiden.
+      const openIdx = carry.indexOf(OPEN_TAG);
+      const bound = Math.min(
+        openIdx >= 0 ? openIdx : carry.length,
+        carry.length - XML_FLUSH_KEEP);
+      const cut = carry.lastIndexOf(">", bound) + 1;
+      if (cut > 0) {
+        flushXml(carry.slice(0, cut), carryStart);
+        carry = carry.slice(cut);
+        carryStart += cut;
+      }
+    }
+  }
+  if (carry.length) flushXml(carry, carryStart);
+
+  coreLog(`  ${binCount} Binärblock/-blöcke übersprungen (unverändert).`);
+  if (binCount === 0) {
+    coreLog(
+      "  WARNUNG: Keine <inlinedbin>-Tags gefunden. Sind das wirklich " +
+        "Rhythmia-Rohdaten?"
+    );
+  }
+  coreLog(`  ${countReplacements(found)} Ersetzung(en) durchgeführt.`);
+
+  const blobs = outParts.map(chunks => new Blob(chunks,
+    { type: "application/octet-stream" }));
+  const outTotal = blobs.reduce((s, b) => s + b.size, 0);
+  coreLog(`  Ergebnisgröße: ${(outTotal / (1024 * 1024)).toFixed(2)} MB in ` +
+    `${blobs.length} Teil(en) (Differenz: ${outTotal - rd.total} Bytes).`);
+  return { blobs, found, inputNames: rd.parts.map(f => f.name) };
+}
+
+// Ein Eintrag in `found` kann für mehrere Vorkommen stehen (eigene Patterns
+// tragen `count`), deshalb nicht `found.length` als Ersetzungszahl melden.
+function countReplacements(found) {
+  return found.reduce((s, f) => s + (f.count || 1), 0);
+}
+
+// === SCRUB-CORE END ===
+// === SCRUB-CORE EXPORTS: bytesToLatin1, latin1ToBytes, utf8ToLatin1,
+//     latin1ToUtf8, buildReplacementMap, anonymizeXmlChunk, processArchive,
+//     makeArchiveReader, countReplacements ===
+
+// ===========================================================================
+// Optionen aus dem Formular einsammeln
+// ===========================================================================
+function getOptions() {
+  return {
+    patientId: $("rep-patientid").value || "ANON",
+    firstName: $("rep-first").value || "Anonym",
+    lastName: $("rep-last").value || "Patient",
+    dob: $("rep-dob").value || "1900-01-01",
+    physician: $("opt-physician").checked,
+    institution: $("opt-institution").checked,
+    comments: $("opt-comments").checked,
+    dates: $("opt-dates").checked,
+    customPatterns: $("custom-patterns").value,
+  };
+}
+
+// ===========================================================================
+// Vorschau-Tabelle
+// ===========================================================================
+function renderPreview(found) {
+  if (!found.length) {
+    preview.innerHTML =
+      '<p style="color:#7f8c8d">Keine personenbezogenen Felder gefunden. ' +
+      "Falls die Datei trotzdem PII enthält, fügen Sie diese unter " +
+      '"Eigene zu ersetzende Begriffe" hinzu.</p>';
+    return;
+  }
+
+  // Aggregieren: gleiche (field, original) zusammenfassen
+  const agg = new Map();
+  for (const f of found) {
+    const key = `${f.field}${f.original}`;
+    if (!agg.has(key)) {
+      agg.set(key, { ...f, count: 0 });
+    }
+    agg.get(key).count += f.count || 1;
+  }
+
+  let html = `<h3>${countReplacements(found)} Ersetzung(en) &ndash; Vorschau:</h3>`;
+  html +=
+    "<table><thead><tr><th>Feld</th><th>Original</th>" +
+    "<th>Ersatz</th><th>Anzahl</th></tr></thead><tbody>";
+  for (const [, f] of agg) {
+    html +=
+      "<tr>" +
+      `<td class="field">${escapeHtml(f.field)}</td>` +
+      `<td class="original">${escapeHtml(f.original) || "<em>(leer)</em>"}</td>` +
+      `<td class="replacement">${escapeHtml(f.replacement) || "<em>(leer)</em>"}</td>` +
+      `<td>${f.count}</td>` +
+      "</tr>";
+  }
+  html += "</tbody></table>";
+  preview.innerHTML = html;
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// Kern-Code loggt über diesen Haken (damit er DOM-frei testbar bleibt).
+coreLog = log;
+
+// ===========================================================================
+// Buttons
+// ===========================================================================
+// "Vorschau" und "Verarbeiten" liefen bisher jeweils die komplette Pipeline —
+// bei einem mehrere GB großen Archiv doppelt. Das Ergebnis wird deshalb
+// zwischengespeichert, solange Dateien und Optionen unverändert sind.
+let lastRun = null;
+
+function runKey(files, opts) {
+  return JSON.stringify([
+    Array.from(files).map(f => [f.name, f.size, f.lastModified]),
+    opts,
+  ]);
+}
+
+async function runPipeline() {
+  const opts = getOptions();
+  const key = runKey(selectedFiles, opts);
+  if (lastRun && lastRun.key === key) {
+    log("Ergebnis aus der Vorschau wiederverwendet (keine Änderung).");
+    return lastRun.result;
+  }
+  const result = await processArchive(selectedFiles, opts, ({ done, total }) => {
+    setProgress(done / total);
+  });
+  setProgress(1);
+  lastRun = { key, result, opts };
+  return result;
+}
+
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+$("analyze").addEventListener("click", async () => {
+  if (!selectedFiles.length) {
+    alert("Bitte zuerst Dateien wählen.");
+    return;
+  }
+  clearLog();
+  preview.innerHTML = "";
+  try {
+    const { found } = await runPipeline();
+    renderPreview(found);
+  } catch (e) {
+    log("FEHLER: " + e.message);
+    console.error(e);
+  }
+});
+
+$("process").addEventListener("click", async () => {
+  if (!selectedFiles.length) {
+    alert("Bitte zuerst Dateien wählen.");
+    return;
+  }
+  clearLog();
+  preview.innerHTML = "";
+  try {
+    const opts = getOptions();
+    const result = await runPipeline();
+    renderPreview(result.found);
+
+    // Sicherer Dateiname: nur erlaubte Zeichen. Die Teilung des Archivs bleibt
+    // erhalten — ein Studienexport aus .000/.001/.002 kommt auch wieder als
+    // drei Teile zurück, sonst ist er nicht re-importierbar.
+    const base = (opts.patientId || "ANON").replace(/[^\w.\-]/g, "_");
+    for (let i = 0; i < result.blobs.length; i++) {
+      const name = `${base}.${String(i).padStart(3, "0")}`;
+      downloadBlob(result.blobs[i], name);
+      log(`  ${name}: ${(result.blobs[i].size / (1024 * 1024)).toFixed(2)} MB`);
+      // Browser blocken mehrere Downloads in schneller Folge.
+      if (i < result.blobs.length - 1) {
+        await new Promise(r => setTimeout(r, 400));
+      }
+    }
+
+    log(`\nFertig! ${result.blobs.length} Datei(en) heruntergeladen.`);
+    if (result.blobs.length > 1) {
+      log(
+        "Hinweis: Der Browser fragt beim Herunterladen mehrerer Dateien ggf. " +
+          "einmal nach — bitte erlauben, sonst fehlen Teildateien."
+      );
+    }
+    log(
+      "Tipp: Vor dem Hochladen die heruntergeladenen Dateien nochmal mit " +
+        '"Vorschau" prüfen, dann sollten keine Felder mehr gefunden werden.'
+    );
+  } catch (e) {
+    log("FEHLER: " + e.message);
+    console.error(e);
+  }
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EnSite Anonymisierer</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 920px;
+    margin: 1.5em auto;
+    padding: 0 1em;
+    color: #2c3e50;
+    line-height: 1.5;
+  }
+  h1 { color: #1a5f8e; margin-bottom: 0.2em; }
+  h2 { color: #1a5f8e; border-bottom: 1px solid #ddd; padding-bottom: 0.2em; margin-top: 1.6em; }
+  .subtitle { color: #7f8c8d; margin-top: 0; }
+  .info, .warn { padding: 0.8em 1em; border-radius: 4px; margin: 1em 0; }
+  .info { background: #e8f4f8; border-left: 4px solid #1a5f8e; }
+  .warn { background: #fff3cd; border-left: 4px solid #f39c12; }
+  .dropzone {
+    border: 2px dashed #95a5a6; border-radius: 4px;
+    padding: 2em; text-align: center; color: #7f8c8d;
+    margin: 0.5em 0 1em 0; transition: background 0.15s, border-color 0.15s;
+  }
+  .dropzone.drag { background: #dff0d8; border-color: #2ecc71; color: #27ae60; }
+  fieldset { border: 1px solid #ddd; border-radius: 4px; margin: 0.6em 0; padding: 0.8em 1em; }
+  fieldset legend { font-weight: 600; padding: 0 0.4em; }
+  label { display: block; margin: 0.3em 0; }
+  input[type=text] {
+    padding: 0.3em 0.5em; border: 1px solid #bdc3c7; border-radius: 3px;
+    width: 26em; max-width: 100%; font-family: monospace;
+  }
+  textarea {
+    width: 100%; box-sizing: border-box; padding: 0.5em;
+    border: 1px solid #bdc3c7; border-radius: 3px;
+    font-family: monospace; font-size: 0.9em;
+  }
+  button {
+    padding: 0.7em 1.5em; font-size: 1em; cursor: pointer;
+    border-radius: 4px; border: 1px solid #bdc3c7; background: #ecf0f1;
+    margin-right: 0.5em;
+  }
+  button:hover { background: #d6dbdf; }
+  button.primary { background: #2ecc71; color: white; border-color: #27ae60; }
+  button.primary:hover { background: #27ae60; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  pre {
+    background: #f8f8f8; padding: 0.8em; border-radius: 3px; overflow: auto;
+    max-height: 18em; font-size: 0.85em; white-space: pre-wrap; word-break: break-all;
+  }
+  table { border-collapse: collapse; width: 100%; margin-top: 0.5em; font-size: 0.9em; }
+  th, td { padding: 0.4em 0.6em; text-align: left; border-bottom: 1px solid #eee; }
+  th { background: #f4f6f7; }
+  td.field { font-family: monospace; color: #1a5f8e; }
+  td.original, td.replacement { font-family: monospace; }
+  td.original { color: #c0392b; }
+  td.replacement { color: #27ae60; }
+  ul.files { padding-left: 1.5em; }
+  ul.files li { font-family: monospace; }
+  .row { display: flex; gap: 1em; flex-wrap: wrap; }
+  .row > fieldset { flex: 1; min-width: 280px; }
+  .footer {
+    margin-top: 3em; padding-top: 1em; border-top: 1px solid #ddd;
+    color: #7f8c8d; font-size: 0.85em;
+  }
+</style>
+</head>
+<body>
+
+<h1>EnSite Daten Anonymisierer</h1>
+<p class="subtitle">Entfernt Patientendaten aus EnSite (NavX / Velocity / Precision) XML-Exports.</p>
+
+<div class="info">
+  <strong>Datenschutz:</strong> Alles läuft lokal im Browser. Es werden keine
+  Daten an einen Server geschickt. Die Datei kann auch offline geöffnet werden.
+</div>
+
+<div class="warn">
+  <strong>Wichtig:</strong> Hilfsmittel &ndash; bitte nach der Anonymisierung
+  manuell verifizieren. Mesh-, Voltage- und LAT-Daten bleiben unverändert.
+</div>
+
+<h2>1. XML-Datei wählen</h2>
+<input type="file" id="files" accept=".xml">
+<div class="dropzone" id="dropzone">Oder XML-Datei hier ablegen</div>
+<div id="fileList"></div>
+
+<h2>2. Ersatzwerte konfigurieren</h2>
+<div class="row">
+  <fieldset>
+    <legend>Patient</legend>
+    <label>PatientID: <input type="text" id="rep-patientid" value="ANON-001"></label>
+    <label>Vorname: <input type="text" id="rep-first" value="Anonym"></label>
+    <label>Nachname: <input type="text" id="rep-last" value="Patient"></label>
+    <label>Geburtsdatum: <input type="text" id="rep-dob" value="1900-01-01"></label>
+  </fieldset>
+  <fieldset>
+    <legend>Zusätzlich anonymisieren</legend>
+    <label><input type="checkbox" id="opt-physician" checked> Ärzte- &amp; Personalnamen</label>
+    <label><input type="checkbox" id="opt-institution" checked> Klinik- &amp; Standortnamen</label>
+    <label><input type="checkbox" id="opt-comments" checked> Kommentare &amp; Notizen leeren</label>
+    <label><input type="checkbox" id="opt-dates"> Datum/Zeitstempel auf Jahr kürzen</label>
+    <label><input type="checkbox" id="opt-attrs" checked> Auch Attribute (z.&nbsp;B. <code>PatientID="…"</code>)</label>
+  </fieldset>
+</div>
+
+<fieldset>
+  <legend>Eigene zu ersetzende Begriffe</legend>
+  <p style="margin: 0.2em 0; font-size: 0.9em; color: #7f8c8d;">
+    Eine Zeichenkette pro Zeile (z.&nbsp;B. Patientenname, Studienkennung).
+    Wird im gesamten XML-Text durch <code>[REDACTED]</code> ersetzt.
+    Case-insensitive.
+  </p>
+  <textarea id="custom-patterns" rows="3"
+    placeholder="Müller, Hans&#10;1965-03-15&#10;Smith_Mapping_2024"></textarea>
+</fieldset>
+
+<h2>3. Vorschau und Anonymisieren</h2>
+<button id="analyze">Vorschau anzeigen</button>
+<button id="process" class="primary">Anonymisieren &amp; Herunterladen</button>
+
+<div id="preview"></div>
+<pre id="log" hidden></pre>
+
+<div class="footer">
+  Open-Source / Forschungswerkzeug. Nicht für klinische Anwendung zugelassen.
+</div>
+
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+const filesInput = $("files");
+const dropzone = $("dropzone");
+const fileList = $("fileList");
+const preview = $("preview");
+const logEl = $("log");
+
+let selectedFile = null;
+
+function log(m) { logEl.hidden = false; logEl.textContent += m + "\n"; }
+function clearLog() { logEl.textContent = ""; logEl.hidden = true; }
+
+function setFile(f) {
+  selectedFile = f;
+  fileList.innerHTML = "";
+  if (!f) return;
+  const div = document.createElement("div");
+  div.style.fontFamily = "monospace";
+  div.style.marginTop = "0.4em";
+  div.textContent = `${f.name}  (${(f.size / 1024).toFixed(1)} KB)`;
+  fileList.appendChild(div);
+}
+
+filesInput.addEventListener("change", e => setFile(e.target.files[0]));
+["dragover", "dragenter"].forEach(t =>
+  dropzone.addEventListener(t, e => { e.preventDefault(); dropzone.classList.add("drag"); })
+);
+dropzone.addEventListener("dragleave", e => { e.preventDefault(); dropzone.classList.remove("drag"); });
+dropzone.addEventListener("drop", e => {
+  e.preventDefault(); dropzone.classList.remove("drag");
+  setFile(e.dataTransfer.files[0]);
+});
+dropzone.addEventListener("click", () => filesInput.click());
+
+// === SCRUB-CORE START ===
+// Alles zwischen den SCRUB-CORE-Markern ist frei von DOM-Zugriffen und wird
+// von test/scrub_core.js extrahiert und in node --test geprüft.
+
+// ---------------------------------------------------------------------------
+// Kodierung: XML-Deklaration auswerten statt blind UTF-8 anzunehmen
+// ---------------------------------------------------------------------------
+// Einbyte-Kodierungen, die wir verlustfrei zurückschreiben können.
+const SINGLE_BYTE_ENCODINGS = new Set([
+  "iso-8859-1", "iso8859-1", "latin1", "latin-1", "us-ascii", "ascii",
+]);
+
+function decodeXmlBytes(buf) {
+  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
+    return {
+      text: new TextDecoder("utf-8", { fatal: false }).decode(buf.subarray(3)),
+      encoding: "utf-8", bom: true, declared: null,
+    };
+  }
+  // Deklaration ist per Definition ASCII-kompatibel -> latin1-Sniff genügt.
+  const head = new TextDecoder("latin1").decode(buf.subarray(0, 512));
+  const m = head.match(/<\?xml[^>]*?encoding\s*=\s*["']([\w.:-]+)["']/i);
+  const declared = m ? m[1] : null;
+  const label = (declared || "utf-8").toLowerCase();
+
+  let text;
+  try {
+    text = new TextDecoder(label, { fatal: false }).decode(buf);
+  } catch (e) {
+    // Unbekanntes Label: latin1 zerstört wenigstens keine Bytes.
+    text = new TextDecoder("latin1").decode(buf);
+  }
+  return { text, encoding: label, bom: false, declared };
+}
+
+// Kodiert einen String in eine Einbyte-Kodierung. Zeichen > U+00FF gibt es
+// dort nicht — sie werden als numerische XML-Referenz geschrieben, damit das
+// Ergebnis gültiges XML bleibt (statt still zu U+FFFD zu werden).
+function encodeLatin1Xml(text) {
+  const out = [];
+  for (let i = 0; i < text.length; i++) {
+    const c = text.codePointAt(i);
+    if (c > 0xff) {
+      for (const ch of `&#${c};`) out.push(ch.charCodeAt(0));
+      if (c > 0xffff) i++; // Surrogatpaar
+    } else {
+      out.push(c);
+    }
+  }
+  return new Uint8Array(out);
+}
+
+function encodeXmlText(text, info) {
+  if (info && SINGLE_BYTE_ENCODINGS.has(info.encoding)) {
+    return { bytes: encodeLatin1Xml(text), encoding: info.encoding };
+  }
+  if (info && info.declared && info.encoding !== "utf-8" && info.encoding !== "utf8") {
+    // Kodierung, die wir nicht zurückschreiben können (z. B. windows-1252,
+    // shift_jis): als UTF-8 ausgeben UND die Deklaration mitziehen, sonst
+    // wäre das Ergebnis kein gültiges XML mehr.
+    text = text.replace(/(<\?xml[^>]*?encoding\s*=\s*)(["'])[\w.:-]+\2/i,
+      (m, before, q) => before + q + "UTF-8" + q);
+    return { bytes: new TextEncoder().encode(text), encoding: "utf-8", rewrote: info.declared };
+  }
+  let bytes = new TextEncoder().encode(text);
+  if (info && info.bom) {
+    const withBom = new Uint8Array(bytes.length + 3);
+    withBom.set([0xef, 0xbb, 0xbf]);
+    withBom.set(bytes, 3);
+    bytes = withBom;
+  }
+  return { bytes, encoding: "utf-8" };
+}
+
+// ---------------------------------------------------------------------------
+// PII-Felder
+// ---------------------------------------------------------------------------
+function buildReplacementMap(opts) {
+  const m = new Map();
+  const set = (k, v) => m.set(k.toLowerCase(), v);
+
+  set("PatientID", opts.patientId);
+  set("PatientNumber", opts.patientId);
+  set("PatientName", `${opts.lastName}, ${opts.firstName}`);
+  set("FullName", `${opts.lastName}, ${opts.firstName}`);
+  set("NameFirst", opts.firstName);
+  set("NameLast", opts.lastName);
+  set("FirstName", opts.firstName);
+  set("LastName", opts.lastName);
+  set("MiddleName", "");
+  set("NameMiddle", "");
+  set("GivenName", opts.firstName);
+  set("FamilyName", opts.lastName);
+  set("BirthDate", opts.dob);
+  set("DateOfBirth", opts.dob);
+  set("DOB", opts.dob);
+  set("Birthday", opts.dob);
+  set("PatientBirthDate", opts.dob);
+  set("Age", "");
+  set("PatientAge", "");
+  set("Sex", "");
+  set("Gender", "");
+  set("PatientSex", "");
+  set("SSN", "XXX-XX-XXXX");
+  set("MRN", "ANON");
+  set("MedicalRecordNumber", "ANON");
+  set("InsuranceNumber", "ANON");
+  set("Address", "ANON");
+  set("Street", "ANON");
+  set("City", "ANON");
+  set("State", "ANON");
+  set("ZIP", "00000");
+  set("PostalCode", "00000");
+  set("Country", "ANON");
+  set("Phone", "ANON");
+  set("PhoneNumber", "ANON");
+  set("Email", "anon@example.com");
+
+  if (opts.physician) {
+    ["PhysicianName","AttendingPhysician","ReferringPhysician","Operator",
+     "OperatorName","Doctor","DoctorName","Surgeon","Nurse","Technician",
+     "Performer","PerformingPhysician","RecordingClinician","User","UserName",
+     "OperatorID","Author","Reviewer"].forEach(f => set(f, "ANON"));
+  }
+  if (opts.institution) {
+    ["Hospital","HospitalName","Institution","InstitutionName",
+     "InstitutionAddress","Site","SiteName","Department","DepartmentName",
+     "Clinic","ClinicName","Facility","FacilityName","StationName",
+     "Manufacturer"].forEach(f => set(f, "ANON"));
+  }
+  if (opts.comments) {
+    ["Comments","Comment","Notes","Note","Remark","Remarks",
+     "Description","FreeText","ProcedureNotes"].forEach(f => set(f, ""));
+  }
+  return m;
+}
+
+const DATE_TAGS = ["StudyDate","AcquisitionDate","RecordingDate","Date",
+  "Timestamp","DateTime","CreationDate","ExportDate","MapDate",
+  "ProcedureDate","StartTime","EndTime"];
+
+function escapeXml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+// <Tag>, <Tag attr="…">, <ns:Tag> und <Tag > — jeweils mit passendem Endtag.
+function tagRegex(field) {
+  return new RegExp(
+    `(<(?:[\\w.-]+:)?${field}(?:\\s[^>]*)?>)([^<]*)(</(?:[\\w.-]+:)?${field}\\s*>)`,
+    "gi");
+}
+
+// Feld="Wert" ODER Feld='Wert' (XML erlaubt beide), optional mit Namespace.
+function attrRegex(field) {
+  return new RegExp(`(\\b(?:[\\w.-]+:)?${field}\\s*=\\s*)("[^"]*"|'[^']*')`, "gi");
+}
+
+function anonymizeXml(xml, opts, found) {
+  let out = xml;
+  const repMap = buildReplacementMap(opts);
+
+  // 1) Tag-Form: <Tag>Inhalt</Tag> (auch mit Attributen / Namespace-Präfix)
+  for (const [field, replacement] of repMap) {
+    out = out.replace(tagRegex(field), (m, open, content, close) => {
+      if (content === "" || content === replacement) return m;
+      found.push({
+        field: open.replace(/^<|>$/g, "").split(/\s/)[0],
+        original: content,
+        replacement: replacement,
+      });
+      return open + escapeXml(replacement) + close;
+    });
+  }
+
+  // 2) Attribut-Form: TagOrElement Field="value" / Field='value'
+  if (opts.attrs) {
+    for (const [field, replacement] of repMap) {
+      out = out.replace(attrRegex(field), (m, before, quoted) => {
+        const q = quoted[0];
+        const content = quoted.slice(1, -1);
+        if (content === "" || content === replacement) return m;
+        found.push({
+          field: field + "=…",
+          original: content,
+          replacement: replacement,
+        });
+        return before + q + escapeXml(replacement) + q;
+      });
+    }
+  }
+
+  // 3) Datumsfelder auf Jahr kürzen
+  if (opts.dates) {
+    for (const tag of DATE_TAGS) {
+      out = out.replace(tagRegex(tag), (m, open, content, close) => {
+        const yr = content.match(/\b(19|20)\d{2}\b/);
+        const newVal = (yr ? yr[0] : "1900") + "-01-01";
+        if (content.trim() === newVal) return m;
+        found.push({
+          field: open.replace(/^<|>$/g, "").split(/\s/)[0],
+          original: content,
+          replacement: newVal,
+        });
+        return open + newVal + close;
+      });
+      if (opts.attrs) {
+        out = out.replace(attrRegex(tag), (m, before, quoted) => {
+          const q = quoted[0];
+          const content = quoted.slice(1, -1);
+          const yr = content.match(/\b(19|20)\d{2}\b/);
+          const newVal = (yr ? yr[0] : "1900") + "-01-01";
+          if (content.trim() === newVal) return m;
+          found.push({
+            field: tag + "=…",
+            original: content,
+            replacement: newVal,
+          });
+          return before + q + newVal + q;
+        });
+      }
+    }
+  }
+
+  // 4) Eigene Patterns (überall im Text)
+  const patterns = (opts.customPatterns || "").split(/\r?\n/)
+    .map(s => s.trim()).filter(Boolean);
+  for (const pat of patterns) {
+    const re = new RegExp(escapeRe(pat), "gi");
+    let count = 0;
+    out = out.replace(re, () => { count++; return "[REDACTED]"; });
+    if (count > 0) {
+      found.push({ field: "(custom)", original: pat,
+        replacement: "[REDACTED]", count });
+    }
+  }
+
+  return out;
+}
+
+// Ein Eintrag in `found` kann für mehrere Vorkommen stehen (eigene Patterns
+// tragen `count`), deshalb nicht `found.length` als Ersetzungszahl melden.
+function countReplacements(found) {
+  return found.reduce((s, f) => s + (f.count || 1), 0);
+}
+
+// === SCRUB-CORE END ===
+// === SCRUB-CORE EXPORTS: buildReplacementMap, anonymizeXml, countReplacements,
+//     decodeXmlBytes, encodeXmlText, encodeLatin1Xml, escapeXml, tagRegex, attrRegex ===
+
+function getOptions() {
+  return {
+    patientId: $("rep-patientid").value || "ANON",
+    firstName: $("rep-first").value || "Anonym",
+    lastName: $("rep-last").value || "Patient",
+    dob: $("rep-dob").value || "1900-01-01",
+    physician: $("opt-physician").checked,
+    institution: $("opt-institution").checked,
+    comments: $("opt-comments").checked,
+    dates: $("opt-dates").checked,
+    attrs: $("opt-attrs").checked,
+    customPatterns: $("custom-patterns").value,
+  };
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function renderPreview(found) {
+  if (!found.length) {
+    preview.innerHTML = '<p style="color:#7f8c8d">Keine personenbezogenen ' +
+      'Felder gefunden. Falls die Datei trotzdem PII enthält, fügen Sie ' +
+      'diese unter "Eigene zu ersetzende Begriffe" hinzu.</p>';
+    return;
+  }
+  const agg = new Map();
+  for (const f of found) {
+    const key = `${f.field}::${f.original}`;
+    if (!agg.has(key)) agg.set(key, { ...f, count: 0 });
+    agg.get(key).count += f.count || 1;
+  }
+  let html = `<h3>${countReplacements(found)} Ersetzung(en):</h3>` +
+    "<table><thead><tr><th>Feld</th><th>Original</th>" +
+    "<th>Ersatz</th><th>Anzahl</th></tr></thead><tbody>";
+  for (const [, f] of agg) {
+    html += "<tr>" +
+      `<td class="field">${escapeHtml(f.field)}</td>` +
+      `<td class="original">${escapeHtml(f.original) || "<em>(leer)</em>"}</td>` +
+      `<td class="replacement">${escapeHtml(f.replacement) || "<em>(leer)</em>"}</td>` +
+      `<td>${f.count}</td></tr>`;
+  }
+  html += "</tbody></table>";
+  preview.innerHTML = html;
+}
+
+async function readXml(f) {
+  const info = decodeXmlBytes(new Uint8Array(await f.arrayBuffer()));
+  log(`Eingabe: ${info.text.length.toLocaleString()} Zeichen` +
+      ` (Kodierung: ${info.declared || (info.bom ? "UTF-8 (BOM)" : "UTF-8 (angenommen)")})`);
+  return info;
+}
+
+$("analyze").addEventListener("click", async () => {
+  if (!selectedFile) { alert("Bitte zuerst eine XML-Datei wählen."); return; }
+  clearLog(); preview.innerHTML = "";
+  try {
+    const info = await readXml(selectedFile);
+    const opts = getOptions();
+    const found = [];
+    anonymizeXml(info.text, opts, found);
+    log(`Ersetzungen: ${countReplacements(found)}`);
+    renderPreview(found);
+  } catch (e) {
+    log("FEHLER: " + e.message); console.error(e);
+  }
+});
+
+$("process").addEventListener("click", async () => {
+  if (!selectedFile) { alert("Bitte zuerst eine XML-Datei wählen."); return; }
+  clearLog(); preview.innerHTML = "";
+  try {
+    const info = await readXml(selectedFile);
+    const opts = getOptions();
+    const found = [];
+    const out = anonymizeXml(info.text, opts, found);
+    log(`Ersetzungen: ${countReplacements(found)}`);
+    log(`Ausgabe: ${out.length.toLocaleString()} Zeichen`);
+    renderPreview(found);
+
+    const encoded = encodeXmlText(out, info);
+    if (encoded.rewrote) {
+      log(`Hinweis: Kodierung "${encoded.rewrote}" kann nicht zurückgeschrieben ` +
+          `werden — Ausgabe ist UTF-8, die XML-Deklaration wurde entsprechend ` +
+          `angepasst.`);
+    } else {
+      log(`Ausgabe-Kodierung: ${encoded.encoding}`);
+    }
+
+    const safeName = (opts.patientId || "ANON").replace(/[^\w.\-]/g, "_") + ".xml";
+    const blob = new Blob([encoded.bytes], { type: "application/xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = safeName;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+
+    log(`\nFertig! "${safeName}" wurde heruntergeladen.`);
+  } catch (e) {
+    log("FEHLER: " + e.message); console.error(e);
+  }
+});
+</script>
+
+</body>
+</html>

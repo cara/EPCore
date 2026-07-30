@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>EPTrace - Patient Data Anonymizer</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f4f4f7;
+    color: #222;
+    margin: 0;
+    padding: 24px;
+    line-height: 1.45;
+  }
+  .container { max-width: 880px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .lead { color: #555; margin: 0 0 20px; font-size: 14px; }
+  .card {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 14px;
+  }
+  .card h2 { margin: 0 0 8px; font-size: 16px; }
+  .muted { color: #777; font-size: 13px; }
+  button {
+    background: #2a5db0;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 5px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  button:hover { background: #1f4a8c; }
+  button:disabled { background: #aaa; cursor: not-allowed; }
+  button.secondary { background: #6c757d; }
+  button.secondary:hover { background: #555c63; }
+  select {
+    font-size: 14px;
+    padding: 7px 10px;
+    border: 1px solid #bbb;
+    border-radius: 5px;
+    background: #fff;
+    color: #222;
+  }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee; }
+  th { background: #f8f8fb; font-weight: 600; }
+  td.arrow { color: #999; width: 30px; text-align: center; }
+  td.dst { color: #2a5db0; font-family: ui-monospace, Menlo, monospace; }
+  td.src { font-family: ui-monospace, Menlo, monospace; }
+  td.skipped { color: #999; }
+  .badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-left: 6px;
+  }
+  .badge.patient { background: #e0f0e0; color: #2a662a; }
+  .badge.skip { background: #f0e0e0; color: #803333; }
+  .badge.passthru { background: #eee; color: #555; }
+  progress { width: 100%; height: 16px; }
+  #log {
+    background: #1a1a24;
+    color: #ccc;
+    padding: 10px 14px;
+    border-radius: 5px;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    height: 220px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+  }
+  .privacy {
+    background: #fff8e1;
+    border-left: 4px solid #f5a623;
+    padding: 10px 14px;
+    border-radius: 4px;
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+  .privacy strong { color: #8a6d00; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .hidden { display: none !important; }
+  a { color: #2a5db0; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>EPTrace - Patient Data Anonymizer</h1>
+<p class="lead">
+  Anonymisiert EP-Aufnahmen verschiedener Lab-Systeme (Boston Scientific
+  LabSystem PRO, GE CardioLab, Abbott EP-WorkMate Claris) lokal im Browser,
+  bevor sie weitergegeben werden.
+</p>
+
+<div class="privacy">
+  <strong>Datenschutz:</strong> Diese Seite verarbeitet Ihre Dateien
+  ausschließlich lokal im Browser. Es findet kein Upload und keine
+  Netzwerkkommunikation statt. Sie können die Internetverbindung trennen,
+  bevor Sie eine Datei auswählen.
+</div>
+
+<div class="card">
+  <h2>1. Lab-System wählen</h2>
+  <p class="muted">
+    Wählen Sie das Aufnahmesystem, mit dem die Daten erstellt wurden. Die
+    Erkennung der Patientenverzeichnisse hängt davon ab.
+  </p>
+  <div class="row">
+    <select id="lab-system">
+      <option value="bostonScientific">Boston Scientific LabSystem PRO</option>
+      <option value="geCardioLab">GE CardioLab / Labsystem (Beta)</option>
+      <option value="abbottClaris">Abbott EP-WorkMate Claris (Beta)</option>
+    </select>
+  </div>
+  <p class="muted" id="system-desc" style="margin-top:8px"></p>
+</div>
+
+<div class="privacy hidden" id="beta-warning"></div>
+
+<div class="card">
+  <h2>2. Quellordner auswählen</h2>
+  <p class="muted">
+    Wählen Sie den Ordner, der die Patienten- bzw. Studienverzeichnisse
+    enthält. Verzeichnisse, die eine Markierungsdatei des gewählten Lab-Systems
+    enthalten, werden als Patientenverzeichnis erkannt. Beispiel:
+    <code>Backup/</code>.
+  </p>
+  <div class="row">
+    <input type="file" id="folder-input" webkitdirectory directory multiple>
+  </div>
+</div>
+
+<div class="card hidden" id="preview-card">
+  <h2>3. Zuordnung prüfen</h2>
+  <p class="muted">
+    Patientenverzeichnisse erhalten Pseudonyme. Andere Verzeichnisse werden
+    unverändert übernommen. Sensible Dateien (siehe Markierung) werden
+    ausgeschlossen.
+  </p>
+  <table id="mapping-table">
+    <thead>
+      <tr>
+        <th>Original</th>
+        <th></th>
+        <th>Anonymisiert</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <p class="muted" id="summary" style="margin-top:8px"></p>
+</div>
+
+<div class="card hidden" id="action-card">
+  <h2>4. Anonymisieren und speichern</h2>
+  <p class="muted">
+    "In Ordner speichern" schreibt anonymisierte Dateien direkt in einen von
+    Ihnen gewählten Ausgabeordner (Chrome/Edge ab Version 86). Ansonsten
+    erzeugen Sie ein ZIP zum Download.
+  </p>
+  <div class="row">
+    <button id="btn-folder">In Ordner speichern</button>
+    <button id="btn-zip" class="secondary">Als ZIP herunterladen</button>
+  </div>
+  <progress id="progress" max="100" value="0" class="hidden" style="margin-top:12px"></progress>
+  <div id="status" class="muted" style="margin-top:8px"></div>
+</div>
+
+<div class="card hidden" id="log-card">
+  <h2>Protokoll</h2>
+  <div id="log"></div>
+</div>
+
+<div class="card">
+  <h2>Skript offline verwenden</h2>
+  <p class="muted">
+    Sie können dieses Anonymisierungs-Skript als einzelne, eigenständige
+    HTML-Datei herunterladen und später ohne Internetverbindung lokal im
+    Browser öffnen.
+  </p>
+  <div class="row">
+    <button id="btn-download" class="secondary">Skript herunterladen (HTML)</button>
+  </div>
+  <p class="muted" style="margin-top:8px">
+    Quellcode:
+    <a href="https://github.com/cara/EPTrace/blob/main/scripts/anonymize.html"
+       target="_blank" rel="noopener">scripts/anonymize.html</a>
+  </p>
+</div>
+
+</div>
+
+<script>
+"use strict";
+
+const ANON_DOB = "1970-01-01T00:00:00.000";
+const ANON_STARTTIME = "1970-01-01 00:00:00";
+const ANON_PHYSICIAN = "Dr. Demo";
+const ANON_HOST = "ANONHOST";
+
+function newUuid() {
+  if (crypto && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const buf = new Uint8Array(16);
+  crypto.getRandomValues(buf);
+  buf[6] = (buf[6] & 0x0f) | 0x40;
+  buf[8] = (buf[8] & 0x3f) | 0x80;
+  const h = Array.from(buf, b => b.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+}
+
+const FIXED_PSEUDONYMS = [
+  ["Patient_A", "Anna",  "000001"],
+  ["Patient_B", "Ben",   "000002"],
+  ["Patient_C", "Clara", "000003"],
+  ["Patient_D", "David", "000004"],
+  ["Patient_E", "Eva",   "000005"],
+  ["Patient_F", "Felix", "000006"],
+];
+
+// Files dropped regardless of lab system (OS clutter).
+const COMMON_EXCLUDED_NAMES = new Set([".DS_Store"]);
+
+function getPseudonym(idx) {
+  if (idx < FIXED_PSEUDONYMS.length) return FIXED_PSEUDONYMS[idx];
+  const n = idx + 1;
+  const letter = String.fromCharCode(65 + (idx % 26));
+  const cycle = Math.floor(idx / 26);
+  const last = cycle ? `Patient_${letter}${cycle}` : `Patient_${letter}`;
+  return [last, `Subject${n}`, String(n).padStart(6, "0")];
+}
+
+function logLine(msg) {
+  const el = document.getElementById("log");
+  el.textContent += msg + "\n";
+  el.scrollTop = el.scrollHeight;
+}
+function setStatus(msg) { document.getElementById("status").textContent = msg; }
+
+function setText(parent, tag, value) {
+  const el = parent.getElementsByTagName(tag)[0];
+  if (el) {
+    while (el.firstChild) el.removeChild(el.firstChild);
+    el.appendChild(el.ownerDocument.createTextNode(value));
+  }
+}
+
+// --- Boston Scientific LabSystem PRO anonymizer ---------------------------
+
+function anonymizeXml(xmlText, last, first, pid) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xmlText, "application/xml");
+  if (doc.getElementsByTagName("parsererror").length) {
+    throw new Error("XML konnte nicht geparst werden");
+  }
+  const root = doc.documentElement;
+  const fullName = `${last}, ${first}`;
+  const dirName = `${last}, ${first} [${pid}]`;
+
+  if (root.hasAttribute("name")) root.setAttribute("name", fullName);
+  if (root.hasAttribute("dataDirectory")) root.setAttribute("dataDirectory", dirName);
+
+  const patEl = root.getElementsByTagName("Patient")[0];
+  if (patEl) {
+    if (patEl.hasAttribute("name")) patEl.setAttribute("name", fullName);
+    if (patEl.hasAttribute("id")) patEl.setAttribute("id", pid);
+    if (patEl.hasAttribute("dataDirectory")) patEl.setAttribute("dataDirectory", dirName);
+  }
+
+  const piEl = root.getElementsByTagName("PatientInfo")[0];
+  if (piEl) {
+    setText(piEl, "ID", pid);
+    setText(piEl, "LastName", last);
+    setText(piEl, "FirstName", first);
+    setText(piEl, "DateofBirth", ANON_DOB);
+    setText(piEl, "Physician", ANON_PHYSICIAN);
+    setText(piEl, "Diagnoses", "");
+    setText(piEl, "Symptoms", "");
+    setText(piEl, "MiddleInitial", "");
+    setText(piEl, "SSN", "");
+    setText(piEl, "Staff", "");
+  }
+
+  const serializer = new XMLSerializer();
+  const body = serializer.serializeToString(doc);
+  const decl = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n';
+  return body.startsWith("<?xml") ? body : decl + body;
+}
+
+const ANON_INI = "[Session]\nName=ANON\n";
+
+// --- Abbott EP-WorkMate MASTER -------------------------------------------
+// The subject id sits at 0x43..0x4F as fixed-width ASCII. Overwrite it in
+// place, padded with NULs: a WorkMate study is a set of fixed-offset binary
+// records, so shifting bytes would corrupt everything after it.
+const WM_MASTER_ID_START = 0x43;
+const WM_MASTER_ID_END = 0x4f;
+
+function anonymizeWmMaster(bytes, pid) {
+  if (bytes.length < WM_MASTER_ID_END) return null;
+  const out = new Uint8Array(bytes);            // copy, never touch the source
+  const width = WM_MASTER_ID_END - WM_MASTER_ID_START;
+  const repl = new TextEncoder().encode(String(pid)).slice(0, width);
+  out.fill(0, WM_MASTER_ID_START, WM_MASTER_ID_END);
+  out.set(repl, WM_MASTER_ID_START);
+  return out;
+}
+
+// --- Generic demographic scrubbing (GE CardioLab, Abbott Claris) ----------
+//
+// The GE and Abbott export formats are not publicly documented, so these
+// profiles share a defensive, schema-agnostic scrubber: inside every element
+// that looks like a patient/demographics container, any field whose name
+// matches a known demographic key is replaced. Recursion stops at
+// signal/measurement containers so channel and montage configuration is
+// never corrupted.
+
+const PATIENT_CONTAINERS = new Set([
+  "patient", "patientinfo", "patientinformation", "patientdata",
+  "patientdemographics", "demographics", "subject", "personaldata",
+  "person", "studyinfo", "studyinformation", "study", "exam", "examinfo",
+  "examination",
+]);
+
+const DATA_CONTAINERS = new Set([
+  "channels", "channel", "montage", "montages", "signal", "signals",
+  "lead", "leads", "waveform", "waveforms", "trace", "traces",
+  "recording", "recordings", "measurements", "measurement",
+  "events", "event", "annotations", "annotation", "calculations",
+]);
+
+function normKey(s) {
+  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+// Returns the replacement string for a demographic field name, or null to
+// leave the field untouched.
+function demographicReplacement(name, pseudo) {
+  switch (normKey(name)) {
+    case "lastname": case "patientlastname": case "patlastname":
+    case "familyname": case "surname":
+      return pseudo.last;
+    case "firstname": case "patientfirstname": case "patfirstname":
+    case "givenname":
+      return pseudo.first;
+    case "middlename": case "middleinitial":
+      return "";
+    case "name": case "patientname": case "patname": case "fullname":
+    case "displayname": case "datadirectory":
+      return `${pseudo.last}, ${pseudo.first}`;
+    case "id": case "patientid": case "patid": case "pid": case "mrn":
+    case "medicalrecordnumber": case "patientidnumber": case "patno":
+      return pseudo.pid;
+    case "accountnumber": case "visitnumber": case "encounternumber":
+    case "ssn": case "socialsecuritynumber": case "nationalid":
+      return "";
+    case "dateofbirth": case "dob": case "birthdate": case "birthday":
+      return ANON_DOB;
+    case "physician": case "referringphysician": case "attendingphysician":
+    case "studyphysician": case "doctor": case "performingphysician":
+    case "operator": case "technician": case "nurse": case "staff":
+    case "recordedby":
+      return ANON_PHYSICIAN;
+    case "address": case "address1": case "address2": case "streetaddress":
+    case "street": case "city": case "state": case "province":
+    case "zip": case "zipcode": case "postalcode": case "country":
+    case "phone": case "phonenumber": case "telephone": case "homephone":
+    case "workphone": case "mobilephone": case "cellphone": case "fax":
+    case "email": case "emailaddress":
+      return "";
+    case "diagnoses": case "diagnosis": case "symptoms": case "indication":
+    case "comments": case "comment": case "notes": case "note":
+    case "history": case "medicalhistory":
+      return "";
+    default:
+      return null;
+  }
+}
+
+function scrubAttributes(el, pseudo) {
+  for (const attr of Array.from(el.attributes || [])) {
+    const repl = demographicReplacement(attr.name, pseudo);
+    if (repl !== null) el.setAttribute(attr.name, repl);
+  }
+}
+
+function scrubElement(el, pseudo) {
+  scrubAttributes(el, pseudo);
+  for (let child = el.firstElementChild; child; child = child.nextElementSibling) {
+    const tag = normKey(child.localName || child.tagName);
+    if (DATA_CONTAINERS.has(tag)) continue;  // never touch signal config
+    const repl = demographicReplacement(child.tagName, pseudo);
+    const isLeaf = child.firstElementChild === null;
+    if (repl !== null && isLeaf) {
+      while (child.firstChild) child.removeChild(child.firstChild);
+      if (repl !== "") child.appendChild(child.ownerDocument.createTextNode(repl));
+      scrubAttributes(child, pseudo);
+    } else {
+      scrubElement(child, pseudo);
+    }
+  }
+}
+
+function anonymizeDemographicsXml(xmlText, last, first, pid) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(xmlText, "application/xml");
+  if (doc.getElementsByTagName("parsererror").length) {
+    throw new Error("XML konnte nicht geparst werden");
+  }
+  const pseudo = { last, first, pid };
+  const root = doc.documentElement;
+
+  // Root-level attributes (e.g. name="...", dataDirectory="...").
+  scrubAttributes(root, pseudo);
+
+  // Scrub every patient/demographics container found anywhere in the tree.
+  const containers = [];
+  if (PATIENT_CONTAINERS.has(normKey(root.localName || root.tagName))) {
+    containers.push(root);
+  }
+  for (const el of Array.from(doc.getElementsByTagName("*"))) {
+    if (PATIENT_CONTAINERS.has(normKey(el.localName || el.tagName))) {
+      containers.push(el);
+    }
+  }
+  for (const c of containers) scrubElement(c, pseudo);
+
+  const serializer = new XMLSerializer();
+  const body = serializer.serializeToString(doc);
+  const decl = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n';
+  return body.startsWith("<?xml") ? body : decl + body;
+}
+
+// --- GE / Prucka .inf (INI text) demographics scrubber -------------------
+//
+// GE CardioLab archives store patient/study metadata in INI-shaped .inf
+// files (patient.inf, study.inf) instead of XML. Patient name and MRN are
+// kept as ".ENC" suffixed fields using a vendor obfuscation that is not
+// publicly documented, so we wipe them rather than try to re-encode a
+// pseudonym. Study UID / archive folder are regenerated so the anonymized
+// copy cannot be linked back to the originating study record. Workstation
+// hostnames in ONLINEPATH are stripped.
+
+const GE_INI_WIPE_KEYS = new Set([
+  "LASTNAME","PATIENTLASTNAME","FAMILYNAME","SURNAME",
+  "FIRSTNAME","PATIENTFIRSTNAME","GIVENNAME",
+  "MIDDLENAME","MIDDLEINITIAL",
+  "NAME","PATIENTNAME","FULLNAME","DISPLAYNAME",
+  "DOB","DATEOFBIRTH","BIRTHDATE","BIRTHDAY",
+  "ADDRESS","ADDRESS1","ADDRESS2","STREET","STREETADDRESS",
+  "CITY","STATE","PROVINCE","ZIP","ZIPCODE","POSTALCODE","COUNTRY",
+  "PHONE","PHONENUMBER","TELEPHONE","HOMEPHONE","WORKPHONE",
+  "MOBILEPHONE","CELLPHONE","FAX",
+  "EMAIL","EMAILADDRESS",
+  "SSN","SOCIALSECURITYNUMBER","NATIONALID",
+  "DIAGNOSES","DIAGNOSIS","SYMPTOMS","INDICATION","COMMENTS",
+  "COMMENT","NOTES","NOTE","HISTORY","MEDICALHISTORY",
+  "REFERRINGPHYSICIAN","ATTENDINGPHYSICIAN","STUDYPHYSICIAN",
+  "PERFORMINGPHYSICIAN","OPERATOR","TECHNICIAN","NURSE",
+  "ACCOUNTNUMBER","VISITNUMBER","ENCOUNTERNUMBER",
+]);
+const GE_INI_ID_KEYS = new Set([
+  "MRN","PATIENTID","PATID","PID","MEDICALRECORDNUMBER",
+  "PATIENTIDNUMBER","PATNO",
+]);
+
+function anonymizeGeInf(text, pseudo, newUid) {
+  // Some GE archives use ".inf" for a one-line file that contains nothing
+  // but the study UUID (e.g. study.inf). Treat that as a back-reference to
+  // the original study and replace with the regenerated UID.
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const stripped = text.trim();
+  if (uuidRe.test(stripped) && stripped.toLowerCase() !== newUid.toLowerCase()) {
+    const nl = text.includes("\r\n") ? "\r\n" : "\n";
+    const trailing = /[\r\n]$/.test(text) ? nl : "";
+    return newUid + trailing;
+  }
+  if (!text.trimStart().startsWith("[")) return null;
+  const nl = text.includes("\r\n") ? "\r\n" : "\n";
+  const lines = text.split(/\r?\n/);
+  let changed = false;
+  const out = lines.map(raw => {
+    if (!raw.includes("=") || /^\s*[;#]/.test(raw)) return raw;
+    const eq = raw.indexOf("=");
+    const key = raw.slice(0, eq);
+    const ku = key.trim().toUpperCase();
+    const base = ku.split(".", 1)[0];
+    let newV = null;
+    const dotSuffix = ku.includes(".") ? ku.slice(ku.lastIndexOf(".") + 1) : "";
+    const isEncoded = ["ENC","B64","ENCRYPTED","CIPHER"].includes(dotSuffix);
+    if (isEncoded && (GE_INI_WIPE_KEYS.has(base) || GE_INI_ID_KEYS.has(base))) {
+      // Vendor-specific obfuscation; wipe instead of writing plain text.
+      newV = "";
+    } else if (GE_INI_WIPE_KEYS.has(base)) newV = "";
+    else if (GE_INI_ID_KEYS.has(base)) newV = pseudo.pid;
+    else if (ku === "STUDYID") newV = pseudo.pid;
+    else if (ku === "STARTTIME" || ku === "ENDTIME") newV = ANON_STARTTIME;
+    else if (ku === "ARCHIVEFOLDER" || ku === "UID"
+             || ku === "STUDYUID" || ku === "PATIENTUID") newV = newUid;
+    else if (ku === "ONLINEPATH") newV = `\\\\${ANON_HOST}\\Studies\\${newUid}`;
+    if (newV === null) return raw;
+    const line = `${key}=${newV}`;
+    if (line !== raw) changed = true;
+    return line;
+  });
+  if (!changed) return null;
+  const trailing = /[\r\n]$/.test(text) ? nl : "";
+  return out.join(nl) + trailing;
+}
+
+// --- Vendor content sniffing ----------------------------------------------
+//
+// Abbott Claris (and some GE) exports do not use predictable marker file
+// names, so a directory is also recognised as a patient/study directory if
+// one of the XML files directly inside it contains a vendor signature
+// string. Only the first 64 KB of each XML file is inspected.
+
+async function dirMatchesSignatures(fileList, profile) {
+  const sigs = profile.contentSignatures;
+  if (!sigs || !sigs.length) return false;
+  for (const { file, subPath } of fileList) {
+    if (subPath.includes("/")) continue;          // only files directly in dir
+    if (!/\.xml$/i.test(subPath)) continue;
+    let text;
+    try {
+      text = (await file.slice(0, 65536).text()).toLowerCase();
+    } catch (e) {
+      continue;
+    }
+    if (sigs.some(s => text.includes(s))) return true;
+  }
+  return false;
+}
+
+// --- Lab system profiles --------------------------------------------------
+
+const LAB_SYSTEMS = {
+  bostonScientific: {
+    id: "bostonScientific",
+    label: "Boston Scientific LabSystem PRO",
+    beta: false,
+    description:
+      "Erkennt Patientenverzeichnisse anhand der Datei „PatientData " +
+      "Export.xml“. Name, ID, Geburtsdatum und Befunde werden durch " +
+      "Pseudonyme ersetzt.",
+    // A directory containing one of these (directly) is a patient directory.
+    markerFiles: ["PatientData Export.xml"],
+    excludedFileNames: new Set(["Patient.epdb", "Patient.opened"]),
+    excludedExts: [".edf", ".dcm"],
+    excludedPathSegments: new Set([
+      "PatientBackUp", "Logs", "PLogTransactions", "RecoveryInfo", "FluoroData",
+    ]),
+    // PatientInfoEx.ini is intentionally NOT excluded: it is replaced with a
+    // stub below instead of being dropped.
+    async anonymizeFile(subPath, file, pseudo) {
+      if (subPath === "PatientData Export.xml") {
+        const text = await file.text();
+        const anon = anonymizeXml(text, pseudo.last, pseudo.first, pseudo.pid);
+        return { data: new TextEncoder().encode(anon), note: "XML anonymisiert" };
+      }
+      if (subPath === "PatientInfoEx.ini") {
+        return { data: new TextEncoder().encode(ANON_INI), note: "INI ersetzt" };
+      }
+      return null;
+    },
+  },
+
+  geCardioLab: {
+    id: "geCardioLab",
+    label: "GE CardioLab / Labsystem (Beta)",
+    beta: true,
+    description:
+      "Erkennt Studienordner anhand typischer GE-Dateien (Study.xml, " +
+      "Patient.xml u. a.) sowie anhand von Inhalts-Signaturen. " +
+      "Patientendaten-Felder in allen XML-Dateien des Ordners werden " +
+      "ersetzt. Experimentell – Ergebnis bitte prüfen.",
+    betaHtml:
+      "<strong>GE CardioLab (Beta):</strong> Die Unterstützung für " +
+      "GE-Systeme ist experimentell. Patientendaten-Felder werden in " +
+      "<em>allen</em> XML-Dateien eines erkannten Studienordners ersetzt. " +
+      "Da der GE-Export nicht öffentlich dokumentiert ist, prüfen Sie das " +
+      "Ergebnis vor der Weitergabe sorgfältig auf verbliebene " +
+      "Patientendaten (auch in Binärdateien).",
+    markerFiles: [
+      "Study.xml", "StudyInfo.xml", "Patient.xml", "PatientInfo.xml",
+      "PatientData.xml", "Demographics.xml", "Exam.xml", "ExamInfo.xml",
+      "patient.inf", "study.inf",
+    ],
+    contentSignatures: [
+      "cardiolab", "prucka", "ge healthcare", "ge medical", "mac-lab",
+    ],
+    // Prucka encrypted study backup carries the same demographics as
+    // patient.inf but in a sealed blob - drop it instead of shipping an
+    // opaque PII container.
+    excludedFileNames: new Set(["study.bak.encrypt", "study.bak"]),
+    excludedExts: [".dcm", ".dicom", ".edf", ".encrypt"],
+    excludedPathSegments: new Set(["Logs"]),
+    async anonymizeFile(subPath, file, pseudo, ctx) {
+      const lower = subPath.toLowerCase();
+      if (lower.endsWith(".xml")) {
+        const text = await file.text();
+        const anon = anonymizeDemographicsXml(
+          text, pseudo.last, pseudo.first, pseudo.pid);
+        return {
+          data: new TextEncoder().encode(anon),
+          note: "XML anonymisiert (GE)",
+        };
+      }
+      if (lower.endsWith(".inf")) {
+        const text = await file.text();
+        ctx.geNewUid = ctx.geNewUid || newUuid();
+        const anon = anonymizeGeInf(text, pseudo, ctx.geNewUid);
+        if (anon === null) return null;
+        return {
+          data: new TextEncoder().encode(anon),
+          note: "INI anonymisiert (GE)",
+        };
+      }
+      return null;
+    },
+  },
+
+  abbottClaris: {
+    id: "abbottClaris",
+    label: "Abbott EP-WorkMate Claris (Beta)",
+    beta: true,
+    description:
+      "Erkennt Studienordner anhand typischer Abbott-Dateien sowie " +
+      "anhand von Inhalts-Signaturen (z. B. „WorkMate“, „Claris“). " +
+      "Patientendaten-Felder in allen XML-Dateien des Ordners werden " +
+      "ersetzt. Experimentell – Ergebnis bitte prüfen.",
+    betaHtml:
+      "<strong>Abbott EP-WorkMate Claris (Beta):</strong> Die " +
+      "Unterstützung für Abbott-Systeme ist experimentell. Studienordner " +
+      "werden anhand von Markierungsdateien und Inhalts-Signaturen " +
+      "(z. B. „WorkMate“, „Claris“) erkannt; Patientendaten-Felder werden " +
+      "in <em>allen</em> XML-Dateien eines erkannten Ordners ersetzt. Da " +
+      "der Abbott-Export nicht öffentlich dokumentiert ist, prüfen Sie das " +
+      "Ergebnis vor der Weitergabe sorgfältig auf verbliebene " +
+      "Patientendaten. Die Subject-ID in der Binärdatei <code>MASTER</code> " +
+      "(fester Offset 0x43) wird ersetzt.",
+    markerFiles: [
+      // MASTER and entries.log are the real WorkMate study files and belong to
+      // no other system here, so detection no longer rests on XML names that
+      // GE also uses.
+      "MASTER", "entries.log",
+      "Study.xml", "StudyInfo.xml", "StudyInformation.xml", "Patient.xml",
+      "PatientInfo.xml", "PatientInformation.xml", "WorkMate.xml",
+      "WorkMateStudy.xml", "ClarisStudy.xml", "StudyConfig.xml",
+    ],
+    contentSignatures: [
+      "workmate", "claris", "ep-workmate", "ep workmate", "ep medsystems",
+      "epmedsystems", "st. jude", "st jude", "abbott",
+    ],
+    excludedFileNames: new Set(),
+    excludedExts: [".dcm", ".dicom", ".edf"],
+    excludedPathSegments: new Set(["Logs"]),
+    async anonymizeFile(subPath, file, pseudo) {
+      const lower = subPath.toLowerCase();
+      // A WorkMate study keeps its subject id in a fixed-width binary field of
+      // the MASTER file, which the XML scrubber never sees — a study shipped
+      // without this looks anonymised and is not.
+      if (lower === "master" || lower.endsWith("/master")) {
+        const buf = new Uint8Array(await file.arrayBuffer());
+        const out = anonymizeWmMaster(buf, pseudo.pid);
+        return out
+          ? { data: out, note: "MASTER: Subject-ID ersetzt" }
+          : { data: buf, note: "MASTER zu kurz — unverändert kopiert" };
+      }
+      if (lower.endsWith(".xml")) {
+        const text = await file.text();
+        const anon = anonymizeDemographicsXml(
+          text, pseudo.last, pseudo.first, pseudo.pid);
+        return {
+          data: new TextEncoder().encode(anon),
+          note: "XML anonymisiert (Abbott)",
+        };
+      }
+      return null;
+    },
+  },
+};
+
+let _activeProfile = LAB_SYSTEMS.bostonScientific;
+let _selectedFiles = [];
+let _plan = null;
+
+function isExcluded(relPath, profile) {
+  const parts = relPath.split("/");
+  const name = parts[parts.length - 1];
+  if (COMMON_EXCLUDED_NAMES.has(name)) return true;
+  if (profile.excludedFileNames.has(name)) return true;
+  if (name.startsWith("._")) return true;
+  const lower = name.toLowerCase();
+  if (profile.excludedExts.some(e => lower.endsWith(e))) return true;
+  for (const seg of parts.slice(0, -1)) {
+    if (profile.excludedPathSegments.has(seg)) return true;
+  }
+  return false;
+}
+
+async function buildPlan(files, profile) {
+  if (!files.length) return null;
+
+  const rootName = files[0].webkitRelativePath.split("/")[0];
+  const isMarker = subPath => profile.markerFiles.includes(subPath);
+
+  // Detect "single patient" case: a marker file (or a content signature)
+  // lives directly under the selected root, so the root itself is a patient
+  // directory.
+  const rootFiles = files
+    .filter(f => f.webkitRelativePath.split("/").length === 2)
+    .map(f => ({ file: f, subPath: f.webkitRelativePath.split("/")[1] }));
+  let rootIsPatient = rootFiles.some(({ subPath }) => isMarker(subPath));
+  if (!rootIsPatient) {
+    rootIsPatient = await dirMatchesSignatures(rootFiles, profile);
+  }
+
+  const subdirMap = new Map();
+  const outRoot = rootIsPatient ? "Anonymized" : `${rootName}_anon`;
+
+  if (rootIsPatient) {
+    subdirMap.set(rootName, files.map(f => ({
+      file: f,
+      subPath: f.webkitRelativePath.split("/").slice(1).join("/"),
+    })));
+  } else {
+    for (const f of files) {
+      const parts = f.webkitRelativePath.split("/");
+      if (parts.length < 3) continue;
+      const sub = parts[1];
+      const subPath = parts.slice(2).join("/");
+      if (!subdirMap.has(sub)) subdirMap.set(sub, []);
+      subdirMap.get(sub).push({ file: f, subPath });
+    }
+  }
+
+  const patientDirs = new Set();
+  for (const [sub, list] of subdirMap) {
+    if (list.some(({ subPath }) => isMarker(subPath))) {
+      patientDirs.add(sub);
+    } else if (await dirMatchesSignatures(list, profile)) {
+      patientDirs.add(sub);
+    }
+  }
+
+  const sortedSubs = [...subdirMap.keys()].sort();
+  const dirRename = new Map();
+  let pseudoIdx = 0;
+  const pseudonymMap = new Map();
+
+  for (const sub of sortedSubs) {
+    if (patientDirs.has(sub)) {
+      const [last, first, pid] = getPseudonym(pseudoIdx++);
+      const newName = `${last}, ${first} [${pid}]`;
+      dirRename.set(sub, newName);
+      pseudonymMap.set(sub, { last, first, pid });
+    } else {
+      dirRename.set(sub, sub);
+    }
+  }
+
+  return {
+    profile, rootName, outRoot,
+    subdirMap, patientDirs, dirRename, pseudonymMap, sortedSubs,
+    rootIsPatient,
+    dirCtx: new Map(),
+  };
+}
+
+function renderPreview(plan) {
+  const tbody = document.querySelector("#mapping-table tbody");
+  tbody.innerHTML = "";
+  let nFiles = 0, nSkipped = 0, totalBytes = 0;
+
+  for (const sub of plan.sortedSubs) {
+    const files = plan.subdirMap.get(sub);
+    const isPatient = plan.patientDirs.has(sub);
+    const newSub = plan.dirRename.get(sub);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="src">${escapeHtml(sub)}/</td>
+      <td class="arrow">→</td>
+      <td class="dst">${escapeHtml(newSub)}/${
+        isPatient ? '<span class="badge patient">Patient</span>' :
+        '<span class="badge passthru">unverändert</span>'
+      }</td>
+    `;
+    tbody.appendChild(tr);
+
+    for (const { file, subPath } of files) {
+      const rel = sub + "/" + subPath;
+      const skip = isExcluded(rel, plan.profile);
+      if (skip) nSkipped++; else nFiles++;
+      if (!skip) totalBytes += file.size;
+    }
+  }
+
+  document.getElementById("summary").textContent =
+    `${nFiles} Dateien (${formatBytes(totalBytes)}), ${nSkipped} ausgeschlossen.`;
+  document.getElementById("preview-card").classList.remove("hidden");
+  document.getElementById("action-card").classList.remove("hidden");
+  document.getElementById("log-card").classList.remove("hidden");
+
+  if (!window.showDirectoryPicker) {
+    document.getElementById("btn-folder").disabled = true;
+    document.getElementById("btn-folder").title =
+      "Erfordert Chrome/Edge oder Opera. Bitte ZIP nutzen.";
+  }
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
+}
+function formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 ** 3) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+async function processFile(entry, plan) {
+  const { file, subPath, sub } = entry;
+  const newSub = plan.dirRename.get(sub);
+  const isPatient = plan.patientDirs.has(sub);
+  const outPath = `${newSub}/${subPath}`;
+
+  if (isPatient) {
+    const pseudo = plan.pseudonymMap.get(sub);
+    if (!plan.dirCtx.has(sub)) plan.dirCtx.set(sub, {});
+    const ctx = plan.dirCtx.get(sub);
+    const out = await plan.profile.anonymizeFile(subPath, file, pseudo, ctx);
+    if (out) return { outPath, data: out.data, note: out.note };
+  }
+
+  return { outPath, data: file, note: null };
+}
+
+function* iterEntries(plan) {
+  for (const sub of plan.sortedSubs) {
+    for (const entry of plan.subdirMap.get(sub)) {
+      const rel = sub + "/" + entry.subPath;
+      if (isExcluded(rel, plan.profile)) continue;
+      yield { ...entry, sub };
+    }
+  }
+}
+
+async function runWriter(writer, plan) {
+  const all = [...iterEntries(plan)];
+  const total = all.length;
+  let done = 0;
+  const progress = document.getElementById("progress");
+  progress.classList.remove("hidden");
+  progress.value = 0;
+  progress.max = total;
+
+  for (const entry of all) {
+    const out = await processFile(entry, plan);
+    await writer.write(out.outPath, out.data);
+    done++;
+    progress.value = done;
+    setStatus(`${done} / ${total}: ${out.outPath}`);
+    if (out.note) logLine(`[${out.note}] ${out.outPath}`);
+  }
+  await writer.close();
+  setStatus(`Fertig. ${done} Dateien geschrieben.`);
+  logLine(`✓ ${done} Dateien geschrieben.`);
+}
+
+class FsWriter {
+  constructor(rootHandle, rootFolderName) {
+    this.root = rootHandle;
+    this.rootName = rootFolderName;
+    this._dirCache = new Map();
+  }
+  async _ensureDir(pathParts) {
+    let h = this.root;
+    let key = "";
+    for (const p of pathParts) {
+      key = key ? `${key}/${p}` : p;
+      if (this._dirCache.has(key)) { h = this._dirCache.get(key); continue; }
+      h = await h.getDirectoryHandle(p, { create: true });
+      this._dirCache.set(key, h);
+    }
+    return h;
+  }
+  async write(outPath, data) {
+    const parts = outPath.split("/");
+    const fileName = parts.pop();
+    const dir = await this._ensureDir([this.rootName, ...parts]);
+    const fh = await dir.getFileHandle(fileName, { create: true });
+    const ws = await fh.createWritable();
+    if (data instanceof Blob) {
+      await ws.write(data);
+    } else {
+      await ws.write(data);
+    }
+    await ws.close();
+  }
+  async close() {}
+}
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[i] = c >>> 0;
+  }
+  return t;
+})();
+
+async function crc32OfBlob(blob) {
+  let c = 0xFFFFFFFF;
+  const stream = blob.stream().getReader();
+  while (true) {
+    const { value, done } = await stream.read();
+    if (done) break;
+    for (let i = 0; i < value.length; i++) {
+      c = CRC_TABLE[(c ^ value[i]) & 0xFF] ^ (c >>> 8);
+    }
+  }
+  return ((c ^ 0xFFFFFFFF) >>> 0);
+}
+function crc32OfBytes(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) {
+    c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  }
+  return ((c ^ 0xFFFFFFFF) >>> 0);
+}
+
+class ZipWriter {
+  constructor(rootFolderName) {
+    this.parts = [];
+    this.entries = [];
+    this.offset = 0;
+    this.rootName = rootFolderName;
+    this._maxFileSize = 0;
+  }
+  async write(outPath, data) {
+    const fullPath = `${this.rootName}/${outPath}`;
+    const nameBytes = new TextEncoder().encode(fullPath);
+    let bytes, size, crc;
+    if (data instanceof Uint8Array) {
+      bytes = data;
+      size = data.length;
+      crc = crc32OfBytes(data);
+    } else {
+      const blob = data;
+      size = blob.size;
+      crc = await crc32OfBlob(blob);
+      bytes = blob;
+    }
+    if (size > 0xFFFFFFFE) {
+      throw new Error(
+        `Datei ${fullPath} ist ${formatBytes(size)} groß und überschreitet das ` +
+        `4-GB-Limit von Standard-ZIP. Bitte "In Ordner speichern" verwenden.`
+      );
+    }
+    this._maxFileSize = Math.max(this._maxFileSize, size);
+
+    const lh = new ArrayBuffer(30);
+    const lhv = new DataView(lh);
+    lhv.setUint32(0, 0x04034b50, true);
+    lhv.setUint16(4, 20, true);
+    lhv.setUint16(6, 0x0800, true);
+    lhv.setUint16(8, 0, true);
+    lhv.setUint16(10, 0, true);
+    lhv.setUint16(12, 0x21, true);
+    lhv.setUint32(14, crc, true);
+    lhv.setUint32(18, size, true);
+    lhv.setUint32(22, size, true);
+    lhv.setUint16(26, nameBytes.length, true);
+    lhv.setUint16(28, 0, true);
+
+    this.parts.push(new Uint8Array(lh), nameBytes, bytes);
+    this.entries.push({
+      nameBytes, crc, size, localOffset: this.offset,
+    });
+    this.offset += 30 + nameBytes.length + size;
+  }
+  async close() {
+    const cdStart = this.offset;
+    let cdSize = 0;
+    for (const e of this.entries) {
+      const ch = new ArrayBuffer(46);
+      const v = new DataView(ch);
+      v.setUint32(0, 0x02014b50, true);
+      v.setUint16(4, 20, true);
+      v.setUint16(6, 20, true);
+      v.setUint16(8, 0x0800, true);
+      v.setUint16(10, 0, true);
+      v.setUint16(12, 0, true);
+      v.setUint16(14, 0x21, true);
+      v.setUint32(16, e.crc, true);
+      v.setUint32(20, e.size, true);
+      v.setUint32(24, e.size, true);
+      v.setUint16(28, e.nameBytes.length, true);
+      v.setUint16(30, 0, true);
+      v.setUint16(32, 0, true);
+      v.setUint16(34, 0, true);
+      v.setUint16(36, 0, true);
+      v.setUint32(38, 0, true);
+      v.setUint32(42, e.localOffset, true);
+      this.parts.push(new Uint8Array(ch), e.nameBytes);
+      cdSize += 46 + e.nameBytes.length;
+    }
+    const eocd = new ArrayBuffer(22);
+    const ev = new DataView(eocd);
+    ev.setUint32(0, 0x06054b50, true);
+    ev.setUint16(4, 0, true);
+    ev.setUint16(6, 0, true);
+    ev.setUint16(8, this.entries.length, true);
+    ev.setUint16(10, this.entries.length, true);
+    ev.setUint32(12, cdSize, true);
+    ev.setUint32(16, cdStart, true);
+    ev.setUint16(20, 0, true);
+    this.parts.push(new Uint8Array(eocd));
+
+    const blob = new Blob(this.parts, { type: "application/zip" });
+    this.parts = null;
+    triggerDownload(blob, `${this.rootName}.zip`);
+  }
+}
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+// Download this page itself as a standalone HTML file for offline use.
+async function downloadSelf() {
+  try {
+    const resp = await fetch(window.location.href, { cache: "no-store" });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    triggerDownload(await resp.blob(), "eptrace-anonymizer.html");
+  } catch (err) {
+    // Fallback (e.g. opened via file://): serialize the current document.
+    const html = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
+    triggerDownload(new Blob([html], { type: "text/html" }), "eptrace-anonymizer.html");
+  }
+}
+
+function applyProfileUi() {
+  document.getElementById("system-desc").textContent = _activeProfile.description;
+  const warn = document.getElementById("beta-warning");
+  if (_activeProfile.beta && _activeProfile.betaHtml) {
+    warn.innerHTML = _activeProfile.betaHtml;
+    warn.classList.remove("hidden");
+  } else {
+    warn.innerHTML = "";
+    warn.classList.add("hidden");
+  }
+}
+
+async function rebuildPlan() {
+  if (!_selectedFiles.length) return;
+  _plan = await buildPlan(_selectedFiles, _activeProfile);
+  if (!_plan) return;
+  document.getElementById("log").textContent = "";
+  logLine(`Lab-System: ${_activeProfile.label}`);
+  logLine(`Quellordner: ${_plan.rootName}`);
+  logLine(`${_plan.patientDirs.size} Patientenverzeichnis(se) erkannt.`);
+  if (_plan.patientDirs.size === 0) {
+    logLine(
+      "Hinweis: keine Patientenverzeichnisse erkannt – keine " +
+      "Markierungsdatei des gewählten Lab-Systems gefunden."
+    );
+  }
+  for (const sub of _plan.sortedSubs) {
+    if (_plan.patientDirs.has(sub)) {
+      logLine(`  ${sub}  →  ${_plan.dirRename.get(sub)}`);
+    }
+  }
+  renderPreview(_plan);
+}
+
+document.getElementById("lab-system").addEventListener("change", e => {
+  _activeProfile = LAB_SYSTEMS[e.target.value] || LAB_SYSTEMS.bostonScientific;
+  applyProfileUi();
+  rebuildPlan();
+});
+
+document.getElementById("folder-input").addEventListener("change", e => {
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
+  _selectedFiles = files;
+  rebuildPlan();
+});
+
+document.getElementById("btn-folder").addEventListener("click", async () => {
+  if (!_plan) return;
+  try {
+    const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+    const writer = new FsWriter(handle, _plan.outRoot);
+    setStatus("Schreibe in Ordner...");
+    await runWriter(writer, _plan);
+  } catch (err) {
+    if (err.name === "AbortError") return;
+    logLine(`FEHLER: ${err.message}`);
+    setStatus(`Fehler: ${err.message}`);
+  }
+});
+
+document.getElementById("btn-zip").addEventListener("click", async () => {
+  if (!_plan) return;
+  try {
+    const writer = new ZipWriter(_plan.outRoot);
+    setStatus("Erstelle ZIP...");
+    await runWriter(writer, _plan);
+  } catch (err) {
+    logLine(`FEHLER: ${err.message}`);
+    setStatus(`Fehler: ${err.message}`);
+  }
+});
+
+document.getElementById("btn-download").addEventListener("click", downloadSelf);
+
+// Initialise the lab-system description and beta warning on first load.
+applyProfileUi();
+</script>
+</body>
+</html>
