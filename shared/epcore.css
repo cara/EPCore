@@ -222,9 +222,48 @@ button.btn:disabled { color: var(--text-faint); cursor: default; background: var
   padding: 4px 7px;
   font: inherit;
 }
-select:focus, input:focus { outline: none; border-color: var(--accent-dim); }
-
 label { color: var(--text-dim); }
+
+/* --- focus ---------------------------------------------------------------- */
+/* This block used to be `outline: none` with a border-colour change, which is
+ * how a keyboard user loses their place: a 1px border shift is not an
+ * indicator, and removing the outline is a direct WCAG 2.4.7 failure.
+ *
+ * :focus-visible, not :focus — a mouse click should not draw a ring, or people
+ * start asking for it to be removed again. The ring is 2px with a 2px offset
+ * against the surface, which clears SC 2.4.13's "2px perimeter at 3:1 between
+ * focused and unfocused". */
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
+/* Nothing may reintroduce this. */
+:focus:not(:focus-visible) { outline: none; }
+
+.epcore-tabs button:focus-visible { outline-offset: -3px; }
+
+/* --- target size ---------------------------------------------------------- */
+/* WCAG 2.2 SC 2.5.8 asks for 24x24 CSS px. Inline links in prose are exempt;
+ * anything that is a control is not. */
+button, [role="tab"], select, input[type=submit],
+input[type=file]::file-selector-button {
+  min-height: 24px;
+}
+
+/* --- motion --------------------------------------------------------------- */
+/* Transitions here are decoration. For anyone who has asked the system not to
+ * animate, decoration is not worth the vestibular cost. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 /* --- notes ---------------------------------------------------------------- */
 
