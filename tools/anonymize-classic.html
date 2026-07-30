@@ -200,6 +200,12 @@
 </div>
 
 <script>
+// === SCRUB-CORE START ===
+// Everything between the SCRUB-CORE markers is free of DOM access and is
+// extracted by tests/js/scrub_core.js to run under node:vm. This is the only
+// anonymiser with a Python counterpart, which makes it the only one whose
+// output can be checked against a second implementation rather than against
+// itself — see tests/conformance/.
 "use strict";
 
 const ANON_DOB = "1970-01-01T00:00:00.000";
@@ -237,13 +243,6 @@ function getPseudonym(idx) {
   const last = cycle ? `Patient_${letter}${cycle}` : `Patient_${letter}`;
   return [last, `Subject${n}`, String(n).padStart(6, "0")];
 }
-
-function logLine(msg) {
-  const el = document.getElementById("log");
-  el.textContent += msg + "\n";
-  el.scrollTop = el.scrollHeight;
-}
-function setStatus(msg) { document.getElementById("status").textContent = msg; }
 
 function setText(parent, tag, value) {
   const el = parent.getElementsByTagName(tag)[0];
@@ -338,7 +337,14 @@ const DATA_CONTAINERS = new Set([
 ]);
 
 function normKey(s) {
-  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  // Strip the XML namespace prefix first — "{ns}LastName" is LastName. Without
+  // this, namespaced documents kept their demographics: the field was never
+  // recognised, and the copy was still reported as clean. Python has always
+  // done it; tests/conformance/ is what noticed the browser did not.
+  let name = s || "";
+  const brace = name.lastIndexOf("}");
+  if (brace >= 0) name = name.slice(brace + 1);
+  return name.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 // Returns the replacement string for a demographic field name, or null to
@@ -775,6 +781,16 @@ async function buildPlan(files, profile) {
     dirCtx: new Map(),
   };
 }
+
+// === SCRUB-CORE END ===
+// === SCRUB-CORE EXPORTS: ANON_DOB, ANON_STARTTIME, ANON_PHYSICIAN, ANON_HOST, ANON_INI, FIXED_PSEUDONYMS, COMMON_EXCLUDED_NAMES, getPseudonym, PATIENT_CONTAINERS, DATA_CONTAINERS, normKey, demographicReplacement, anonymizeXml, anonymizeDemographicsXml, anonymizeWmMaster, WM_MASTER_ID_START, WM_MASTER_ID_END, GE_INI_WIPE_KEYS, GE_INI_ID_KEYS ===
+
+function logLine(msg) {
+  const el = document.getElementById("log");
+  el.textContent += msg + "\n";
+  el.scrollTop = el.scrollHeight;
+}
+function setStatus(msg) { document.getElementById("status").textContent = msg; }
 
 function renderPreview(plan) {
   const tbody = document.querySelector("#mapping-table tbody");
