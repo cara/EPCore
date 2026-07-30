@@ -3,77 +3,85 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EPCore — Web-Werkzeuge</title>
+<title>EPCore</title>
+<link href="vendor/fonts/fonts.css" rel="stylesheet">
+<link href="shared/epcore.css" rel="stylesheet">
 <style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body { background:#0a0a14; color:#ccc; font-family:'Consolas','Monaco',monospace;
-         font-size:13px; margin:0; padding:24px 16px 40px; line-height:1.55; }
-  main { max-width: 900px; margin: 0 auto; }
-  h1 { color:#8f8; font-size:18px; margin:0 0 4px; letter-spacing:.5px; }
-  .sub { color:#667; margin:0 0 22px; }
-  h2 { color:#778; font-size:11px; text-transform:uppercase; letter-spacing:1px;
-       font-weight:normal; margin:24px 0 8px; }
-  .tiles { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); }
-  a.tile { display:block; text-decoration:none; color:inherit; background:#14141e;
-           border:1px solid #333; border-radius:4px; padding:14px 16px;
-           transition:border-color .12s, background .12s; }
-  a.tile:hover { border-color:#5a5; background:#191926; }
-  a.tile .t { color:#8f8; font-size:13px; margin-bottom:4px; }
-  a.tile .d { color:#778; }
-  .note { border:1px solid #3a3a2a; background:#1a1a12; border-radius:4px;
-          padding:12px 14px; margin:22px 0 0; color:#cc9; }
-  footer { margin-top:28px; padding-top:14px; border-top:1px solid #23232f; color:#445; }
-  footer a { color:#7a7; }
+  body { padding: 26px 16px 44px; }
+  main { max-width: 940px; margin: 0 auto; }
+  h1 { color: var(--accent); font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--text-dim); margin: 0 0 26px; }
+
+  /* The download is the first thing on the page and the only thing with a
+     filled button. Everything below it works without installing anything,
+     which is useful — but it is not what most people came for. */
+  .get {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 18px;
+    background: var(--bg-1); border: 1px solid var(--accent-dim);
+    border-radius: var(--radius); padding: 20px 22px; margin-bottom: 8px;
+  }
+  .get .what { flex: 1 1 320px; }
+  .get h2 { margin: 0 0 5px; font-size: 16px; color: var(--text); }
+  .get p { margin: 0; color: var(--text-dim); }
+  .get .cta {
+    display: inline-block; text-decoration: none; white-space: nowrap;
+    background: var(--accent); color: var(--bg-0);
+    border-radius: var(--radius); padding: 11px 22px;
+    font-family: var(--ui); font-size: 15px;
+  }
+  .get .cta:hover { background: var(--text); color: var(--bg-0); }
+  .platforms { color: var(--text-faint); font-size: var(--size-min); margin: 8px 0 26px; }
 </style>
 </head>
 <body>
 <main>
-  <h1>EPCore — Web-Werkzeuge</h1>
-  <p class="sub">Elektrophysiologische Studiendaten anonymisieren und Karten ansehen.
-     Alles läuft lokal im Browser; es wird nichts hochgeladen.</p>
+  <h1>EPCore</h1>
+  <p class="sub">Elektrophysiologische Studiendaten — Signale und Karten in einem Programm.</p>
 
-  <h2>Karten</h2>
+  <div class="get">
+    <div class="what">
+      <h2>Die Anwendung herunterladen</h2>
+      <p>Aufnahmen öffnen, messen und konvertieren, Karten in 3D ansehen,
+         Studien anonymisieren — alles lokal, ohne Upload.</p>
+    </div>
+    <a class="cta" href="https://github.com/cara/EPCore/releases/latest">Download</a>
+  </div>
+  <p class="platforms">macOS (signiert und notarisiert) · Windows · Linux (Backend und
+     Befehlszeile, ohne Fenster)</p>
+
+  <h2 class="section">Ohne Installation, direkt im Browser</h2>
   <div class="tiles">
     <a class="tile" href="epview/">
       <div class="t">3D-Kartenviewer</div>
-      <div class="d">Rhythmia-, CARTO- und EnSite-Rohexporte direkt im Browser
-        umwandeln und als Voltage- oder LAT-Karte ansehen. Export als PLY/OBJ/STL.</div>
+      <div class="d">Rhythmia-, CARTO- und EnSite-Rohexporte umwandeln und als
+        Voltage- oder LAT-Karte ansehen. Export als PLY/OBJ/STL.</div>
     </a>
-  </div>
-
-  <h2>Anonymisieren</h2>
-  <div class="tiles">
     <a class="tile" href="tools/anonymize-classic.html">
-      <div class="t">Aufnahmen</div>
+      <div class="t">Anonymisieren — Aufnahmen</div>
       <div class="d">LabSystem PRO, GE CardioLab, Abbott EP-WorkMate.</div>
     </a>
     <a class="tile" href="tools/anonymize-rhythmia.html">
-      <div class="t">Rhythmia</div>
+      <div class="t">Anonymisieren — Rhythmia</div>
       <div class="d">HDx-Mapping-Archive (.000/.001/…).</div>
     </a>
     <a class="tile" href="tools/anonymize-carto.html">
-      <div class="t">CARTO 3</div>
+      <div class="t">Anonymisieren — CARTO 3</div>
       <div class="d">Studien-Export (.zip).</div>
     </a>
     <a class="tile" href="tools/anonymize-ensite.html">
-      <div class="t">EnSite</div>
+      <div class="t">Anonymisieren — EnSite</div>
       <div class="d">NavX / Velocity / Precision XML.</div>
     </a>
   </div>
 
-  <div class="note">
-    Ergebnisse vor der Weitergabe stets selbst prüfen. Für GE, Abbott und Rhythmia
-    liegt kein geprüfter Referenz-Export vor — die Werkzeuge weisen darauf hin.
-    EnSite-<em>Velocity-Studienarchive</em> tragen ihre Patientendaten in SQLite-
-    Datenbanken und DICOM-Dateien; dafür braucht es die Desktop-App bzw.
-    <code>epcore epview anonymize</code>, nicht diese Seite.
+  <div class="warn">
+    <strong>Ergebnisse vor der Weitergabe selbst prüfen.</strong> Für GE, Abbott und
+    Rhythmia liegt kein geprüfter Referenz-Export vor — die Werkzeuge weisen darauf hin.
+    EnSite-<em>Velocity-Studienarchive</em> tragen ihre Patientendaten in SQLite-Datenbanken
+    und DICOM-Dateien; dafür braucht es die Anwendung, nicht diese Seite.
   </div>
 
-  <footer>
-    Der Signal-Viewer braucht den Decoder und läuft nur in der App —
-    <a href="https://github.com/cara/EPCore/releases">Downloads</a>.
-  </footer>
+  <p class="muted">Der Signal-Viewer braucht den Decoder und läuft nur in der Anwendung.</p>
 </main>
 </body>
 </html>
