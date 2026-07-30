@@ -8,8 +8,6 @@
 <style>
   * { box-sizing: border-box; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: #f4f4f7;
     color: var(--text);
     margin: 0;
     padding: 24px;
@@ -26,9 +24,9 @@
     margin-bottom: 14px;
   }
   .card h2 { margin: 0 0 8px; font-size: 16px; }
-  .muted { color: #777; font-size: 13px; }
+  .muted { color: var(--text-faint); font-size: 13px; }
   button {
-    background: #2a5db0;
+    background: var(--accent);
     color: var(--bg-1);
     border: none;
     padding: 8px 16px;
@@ -38,7 +36,8 @@
   }
   button:hover { background: #1f4a8c; }
   button:disabled { background: var(--text-faint); cursor: not-allowed; }
-  button.secondary { background: #6c757d; }
+  button.secondary { background: var(--bg-3); 
+    color: var(--text);}
   button.secondary:hover { background: #555c63; }
   select {
     font-size: 14px;
@@ -52,7 +51,7 @@
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
   th { background: #f8f8fb; font-weight: 600; }
   td.arrow { color: var(--text-faint); width: 30px; text-align: center; }
-  td.dst { color: #2a5db0; font-family: ui-monospace, Menlo, monospace; }
+  td.dst { color: var(--accent); font-family: ui-monospace, Menlo, monospace; }
   td.src { font-family: ui-monospace, Menlo, monospace; }
   td.skipped { color: var(--text-faint); }
   .badge {
@@ -79,17 +78,18 @@
     var(--bg-1)-space: pre-wrap;
   }
   .privacy {
-    background: #fff8e1;
+    background: var(--warn-wash);
     border-left: 4px solid #f5a623;
     padding: 10px 14px;
     border-radius: 4px;
     font-size: 13px;
     margin-bottom: 16px;
-  }
-  .privacy strong { color: #8a6d00; }
+  
+    color: var(--warn);}
+  .privacy strong { color: var(--warn); }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .hidden { display: none !important; }
-  a { color: #2a5db0; }
+  a { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -192,8 +192,8 @@
   </div>
   <p class="muted" style="margin-top:8px">
     Quellcode:
-    <a href="https://github.com/cara/EPTrace/blob/main/scripts/anonymize.html"
-       target="_blank" rel="noopener">scripts/anonymize.html</a>
+    <a href="https://github.com/cara/EPTrace/blob/main/tools/anonymize-classic.html"
+       target="_blank" rel="noopener">tools/anonymize-classic.html</a>
   </p>
 </div>
 

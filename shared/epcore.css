@@ -23,9 +23,14 @@
   --bg-3: #17232d;
 
   /* Ink. */
+  /* Contrast against every surface below, measured, not judged by eye:
+     --text 12.2:1 · --text-dim 6.1:1 · --text-faint 4.9:1. WCAG AA wants
+     4.5:1 for body text, and --text-faint used to sit at 2.97:1 — it carries
+     the secondary labels, the tab subtitles and the file paths, so it was the
+     one token that had to be right and the one that was furthest off. */
   --text: #d7e3ea;
   --text-dim: #8fa3b0;
-  --text-faint: #5b6d79;
+  --text-faint: #7d92a0;
 
   --line: #1e2c37;
   --line-strong: #2b3d4a;
@@ -43,6 +48,8 @@
 
   --radius: 4px;
   --gap: 12px;
+  /* Nothing may be smaller than this. Below it, a label is decoration. */
+  --size-min: 11px;
 }
 
 /* --- base ---------------------------------------------------------------- */
@@ -54,7 +61,12 @@ body {
   background: var(--bg-0);
   color: var(--text);
   font-family: var(--mono);
-  font-size: 12.5px;
+  /* 13.5px is a compromise, and worth naming as one. General guidance for dark
+     interfaces says 16px; this is a dense technical tool where a channel list
+     and a toolbar have to fit beside the signal, and 16px monospace pushes the
+     controls off a 13-inch screen. 12.5px was too small to defend, so the body
+     text went up and the smallest labels have a floor (see --size-min). */
+  font-size: 13.5px;
   line-height: 1.55;
 }
 
@@ -117,7 +129,7 @@ h1, h2, h3 { font-family: var(--ui); font-weight: 500; letter-spacing: .2px; }
 .epcore-tabs button .sub {
   color: var(--text-faint);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--size-min);
   margin-left: 6px;
 }
 .epcore-tabs button[aria-selected="true"] .sub { color: var(--accent-dim); }
@@ -127,7 +139,7 @@ h1, h2, h3 { font-family: var(--ui); font-weight: 500; letter-spacing: .2px; }
   display: flex;
   align-items: center;
   color: var(--text-faint);
-  font-size: 10.5px;
+  font-size: var(--size-min);
   padding-left: 10px;
 }
 
@@ -162,7 +174,7 @@ a.tile, button.tile {
 a.tile:hover, button.tile:hover { border-color: var(--accent-dim); background: var(--bg-2); }
 .tile .t { font-family: var(--ui); font-size: 13.5px; color: var(--accent); margin-bottom: 3px; }
 .tile .d { color: var(--text-dim); }
-.tile .f { color: var(--text-faint); font-size: 10.5px; margin-top: 8px; }
+.tile .f { color: var(--text-faint); font-size: var(--size-min); margin-top: 8px; }
 
 .rows { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
 .row {
@@ -174,7 +186,7 @@ a.tile:hover, button.tile:hover { border-color: var(--accent-dim); background: v
 .row:last-child { border-bottom: 0; }
 .row:hover { background: var(--bg-2); }
 .row .p {
-  color: var(--text-faint); font-size: 10.5px; margin-left: auto;
+  color: var(--text-faint); font-size: var(--size-min); margin-left: auto;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%;
 }
 
@@ -197,7 +209,12 @@ button.btn.primary {
 }
 button.btn:disabled { color: var(--text-faint); cursor: default; background: var(--bg-1); }
 
-select, input[type=text], input[type=number], input[type=file] {
+/* :where() so this carries no specificity at all. As a plain selector it beat
+ * `.epcore-tabs button[aria-selected="true"]` on source order and painted the
+ * active tab in body text instead of the accent — a base style must never win
+ * an argument with a component style. */
+:where(button:not([class]), input[type=submit], select,
+       input[type=text], input[type=number], input[type=file]) {
   background: var(--bg-2);
   color: var(--text);
   border: 1px solid var(--line-strong);
@@ -227,9 +244,35 @@ label { color: var(--text-dim); }
 .section {
   color: var(--text-faint);
   font-family: var(--ui);
-  font-size: 10.5px;
+  font-size: var(--size-min);
   text-transform: uppercase;
   letter-spacing: 1.1px;
   font-weight: normal;
   margin: 22px 0 8px;
 }
+
+
+/* --- what the browser would otherwise draw itself ------------------------- */
+/* Native controls keep the platform's light chrome on a dark page: a white
+ * button with white text is invisible, and it looked exactly like that. */
+
+input[type=file]::file-selector-button {
+  background: var(--bg-3);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 4px 10px;
+  margin-right: 10px;
+  font: inherit;
+  cursor: pointer;
+}
+input[type=file]::file-selector-button:hover { border-color: var(--accent-dim); }
+
+input[type=range] { accent-color: var(--accent); }
+progress { accent-color: var(--accent); }
+
+::selection { background: var(--accent-dim); color: var(--bg-0); }
+
+/* Layered surfaces, not shadows: a shadow on a near-black background reads as
+ * nothing, so depth comes from the --bg-0..--bg-3 ramp. */
+.panel.raised { background: var(--bg-2); border-color: var(--line-strong); }
