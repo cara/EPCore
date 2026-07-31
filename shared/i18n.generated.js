@@ -176,7 +176,17 @@ export const CATALOGUES = {
     "open.button.title": "Studie oder Karte öffnen",
     "epview.demo": "oder Demo-Karte ansehen",
     "shell.tile.bulk.title": "Studienordner umwandeln",
-    "shell.tile.bulk.text": "Jede Studie in einem Ordner auf einmal nach EDF+ oder DICOM schreiben — wahlweise anonymisiert."
+    "shell.tile.bulk.text": "Jede Studie in einem Ordner auf einmal nach EDF+ oder DICOM schreiben — wahlweise anonymisiert.",
+    "update.ask": "Beim Start nach Aktualisierungen suchen? Dazu fragt EPCore einmal GitHub nach der neuesten Versionsnummer — ohne Kennung, ohne Daten aus Ihren Studien.",
+    "update.yes": "Ja, suchen",
+    "update.no": "Nein",
+    "update.available": "Version {version} ist verfügbar",
+    "update.get": "Herunterladen",
+    "update.dismiss": "Später",
+    "update.install": "Jetzt aktualisieren",
+    "update.installing": "Wird geladen und geprüft …",
+    "update.failed": "Aktualisierung fehlgeschlagen: {reason}",
+    "update.restarting": "Geprüft. EPCore startet gleich neu."
   },
   "en": {
     "anon.ambiguous": "The selection matches more than one lab system. EPCore does not guess here: the wrong profile scrubs the wrong fields and still reports the copy as clean. Narrow the selection.",
@@ -350,7 +360,17 @@ export const CATALOGUES = {
     "open.button.title": "Open a study or a map",
     "epview.demo": "or look at a demo map",
     "shell.tile.bulk.title": "Convert a folder of studies",
-    "shell.tile.bulk.text": "Write every study in a folder to EDF+ or DICOM at once — anonymised if you want."
+    "shell.tile.bulk.text": "Write every study in a folder to EDF+ or DICOM at once — anonymised if you want.",
+    "update.ask": "Check for updates at startup? EPCore asks GitHub for the latest version number once — no identifier, nothing from your studies.",
+    "update.yes": "Yes, check",
+    "update.no": "No",
+    "update.available": "Version {version} is available",
+    "update.get": "Download",
+    "update.dismiss": "Later",
+    "update.install": "Update now",
+    "update.installing": "Downloading and checking …",
+    "update.failed": "The update failed: {reason}",
+    "update.restarting": "Checked. EPCore will restart in a moment."
   },
   "es": {
     "anon.ambiguous": "La selección coincide con más de un sistema. EPCore no adivina: el perfil equivocado limpia los campos equivocados y aun así da la copia por limpia. Acota la selección.",
@@ -524,6 +544,16 @@ export const CATALOGUES = {
     "open.button.title": "Abrir un estudio o un mapa",
     "epview.demo": "o ver un mapa de demostración",
     "shell.tile.bulk.title": "Convertir una carpeta de estudios",
-    "shell.tile.bulk.text": "Escribir todos los estudios de una carpeta a EDF+ o DICOM de una vez, anonimizados si se desea."
+    "shell.tile.bulk.text": "Escribir todos los estudios de una carpeta a EDF+ o DICOM de una vez, anonimizados si se desea.",
+    "update.ask": "¿Buscar actualizaciones al iniciar? EPCore consulta a GitHub el número de la última versión — sin identificador ni datos de sus estudios.",
+    "update.yes": "Sí, buscar",
+    "update.no": "No",
+    "update.available": "La versión {version} está disponible",
+    "update.get": "Descargar",
+    "update.dismiss": "Más tarde",
+    "update.install": "Actualizar ahora",
+    "update.installing": "Descargando y comprobando …",
+    "update.failed": "La actualización falló: {reason}",
+    "update.restarting": "Comprobado. EPCore se reiniciará en un momento."
   }
 };
