@@ -239,7 +239,122 @@ export const PROFILES = {
           "waveform",
           "waveforms"
         ]
-      }
+      },
+      "demographic_rules": [
+        {
+          "replacement": "last",
+          "keys": [
+            "familyname",
+            "lastname",
+            "patientlastname",
+            "patlastname",
+            "surname"
+          ]
+        },
+        {
+          "replacement": "first",
+          "keys": [
+            "firstname",
+            "givenname",
+            "patfirstname",
+            "patientfirstname"
+          ]
+        },
+        {
+          "replacement": "full_name",
+          "keys": [
+            "datadirectory",
+            "displayname",
+            "fullname",
+            "name",
+            "patientname",
+            "patname"
+          ]
+        },
+        {
+          "replacement": "pid",
+          "keys": [
+            "id",
+            "medicalrecordnumber",
+            "mrn",
+            "patid",
+            "patientid",
+            "patientidnumber",
+            "patno",
+            "pid"
+          ]
+        },
+        {
+          "replacement": "dob",
+          "keys": [
+            "birthdate",
+            "birthday",
+            "dateofbirth",
+            "dob"
+          ]
+        },
+        {
+          "replacement": "physician",
+          "keys": [
+            "attendingphysician",
+            "doctor",
+            "nurse",
+            "operator",
+            "performingphysician",
+            "physician",
+            "recordedby",
+            "referringphysician",
+            "staff",
+            "studyphysician",
+            "technician"
+          ]
+        },
+        {
+          "replacement": "empty",
+          "keys": [
+            "accountnumber",
+            "address",
+            "address1",
+            "address2",
+            "cellphone",
+            "city",
+            "comment",
+            "comments",
+            "country",
+            "diagnoses",
+            "diagnosis",
+            "email",
+            "emailaddress",
+            "encounternumber",
+            "fax",
+            "history",
+            "homephone",
+            "indication",
+            "medicalhistory",
+            "middleinitial",
+            "middlename",
+            "mobilephone",
+            "nationalid",
+            "note",
+            "notes",
+            "phone",
+            "phonenumber",
+            "postalcode",
+            "province",
+            "socialsecuritynumber",
+            "ssn",
+            "state",
+            "street",
+            "streetaddress",
+            "symptoms",
+            "telephone",
+            "visitnumber",
+            "workphone",
+            "zip",
+            "zipcode"
+          ]
+        }
+      ]
     },
     "verification": "Gegen einen echten LabSystem-PRO-Export geprüft (2026-07-31). Dabei gefunden und behoben: PatientData Export.xml trug den echten Patientennamen 88-mal in Dateipfaden, in einer Ausgabe, die als anonymisiert galt."
   },
