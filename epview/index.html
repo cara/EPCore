@@ -702,7 +702,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=66e29c825d0b",
+    "three": "../vendor/three/three.module.js?v=7d4323fc2c50",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -712,8 +712,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import * as EP from './epconv.js?v=66e29c825d0b';
-import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=66e29c825d0b';
+import * as EP from './epconv.js?v=7d4323fc2c50';
+import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=7d4323fc2c50';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1527,7 +1527,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=66e29c825d0b'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=7d4323fc2c50'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -1607,11 +1607,19 @@ const PAGES_VIEWER = 'https://cara.github.io/EPView/viewer.html';
 let _shareDel = null;  // { url, id, token } for revoke
 
 function shareConfig() {
+  /* Same origin by default. On epcore.app the service answers under /maps on
+   * this very host, so asking the user for an address they have no way of
+   * knowing would be the page making its own deployment their problem. A
+   * stored value still wins, for anyone pointing the viewer at their own
+   * backend. */
   let url = localStorage.getItem('epview_share_url') || '';
-  let tok = localStorage.getItem('epview_share_token') || '';
+  if (!url && /^https?:$/.test(location.protocol)) url = location.origin;
   if (!url) { url = (prompt('Backend-Basis-URL (z.B. https://maps.example.org):') || '').trim().replace(/\/+$/, ''); if (url) localStorage.setItem('epview_share_url', url); }
-  if (url && !tok) { tok = (prompt('Upload-Token (EPVIEW_TOKEN):') || '').trim(); if (tok) localStorage.setItem('epview_share_token', tok); }
-  return { url, tok };
+  /* No token prompt here. Uploads are open on epcore.app, so the box would ask
+   * for a secret that does not exist — and it used to ask before the token was
+   * ever sent anywhere, which meant a stored token and a 401 side by side. The
+   * server says when it wants one; see the 401 branch below. */
+  return { url, tok: localStorage.getItem('epview_share_token') || '' };
 }
 function showShareBox() { document.getElementById('sharebox').classList.add('show'); }
 function hideShareBox() { document.getElementById('sharebox').classList.remove('show'); }
@@ -1642,7 +1650,7 @@ async function doShare() {
         + 'öffentliche Adresse — erst anonymisieren, dann teilen.');
     return;
   }
-  const { url } = shareConfig();
+  const { url, tok } = shareConfig();
   if (!url) { alert('Keine Adresse für den Teilen-Dienst hinterlegt.'); return; }
   document.getElementById('share-result').style.display = 'none';
   document.getElementById('share-err').style.display = 'none';
@@ -1653,16 +1661,25 @@ async function doShare() {
     // binäres PLY (P-8): halbes Upload-Volumen, und das Schreiben blockiert die
     // Oberfläche nicht mehr sekundenlang.
     const ply = EP.exportPLYBinary(m, bakeColorsU8(), current.tagGroups && current.tagGroups.length ? [encodeTagComment(current.tagGroups)] : []);
-    const res = await fetch(url + '/maps', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        // What the server records rather than verifies. It says who claimed
-        // the map was scrubbed; it does not pretend to have checked.
-        'X-EPCore-Anonymised': 'yes',
-      },
-      body: ply,
-    });
+    const headers = {
+      'Content-Type': 'application/octet-stream',
+      // What the server records rather than verifies. It says who claimed
+      // the map was scrubbed; it does not pretend to have checked.
+      'X-EPCore-Anonymised': 'yes',
+    };
+    if (tok) headers.Authorization = 'Bearer ' + tok;
+    let res = await fetch(url + '/maps', { method: 'POST', headers, body: ply });
+    // A backend with EPVIEW_TOKEN set wants one. Ask when it asks — the token
+    // used to be collected up front and then not sent, so a self-hosted
+    // instance answered 401 to someone who had already typed the right secret.
+    if (res.status === 401) {
+      const asked = (prompt('Upload-Token (EPVIEW_TOKEN):') || '').trim();
+      if (asked) {
+        localStorage.setItem('epview_share_token', asked);
+        headers.Authorization = 'Bearer ' + asked;
+        res = await fetch(url + '/maps', { method: 'POST', headers, body: ply });
+      }
+    }
     if (!res.ok) {
       let detail = 'HTTP ' + res.status;
       try {
@@ -1683,7 +1700,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=66e29c825d0b');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=7d4323fc2c50');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -2144,7 +2161,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=66e29c825d0b');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=7d4323fc2c50');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -2192,7 +2209,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=66e29c825d0b';
+import '../shared/bridge.js?v=7d4323fc2c50';
 
 window.epcoreNotify = (msg) => { console.warn('[epcore]', msg); alert(msg); };
 
