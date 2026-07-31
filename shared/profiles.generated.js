@@ -131,7 +131,8 @@ export const PROFILES = {
           "note": "fixed-offset field the XML scrubber never sees"
         }
       ]
-    }
+    },
+    "verification": "Weiterhin ungeprüft: es liegt kein EP-WorkMate- oder Claris-Export vor. Der MASTER-Offset ist gegen die Browser-Umsetzung abgeglichen, nicht gegen eine echte Datei."
   },
   "boston": {
     "id": "boston",
@@ -239,7 +240,8 @@ export const PROFILES = {
           "waveforms"
         ]
       }
-    }
+    },
+    "verification": "Gegen einen echten LabSystem-PRO-Export geprüft (2026-07-31). Dabei gefunden und behoben: PatientData Export.xml trug den echten Patientennamen 88-mal in Dateipfaden, in einer Ausgabe, die als anonymisiert galt."
   },
   "carto": {
     "id": "carto",
@@ -576,7 +578,7 @@ export const PROFILES = {
     "id": "ge",
     "label": "GE CardioLab / Prucka",
     "family": "recording",
-    "verified": false,
+    "verified": true,
     "detect": {
       "marker_files": [
         "Study.xml",
@@ -780,7 +782,8 @@ export const PROFILES = {
           "ENCRYPTED"
         ]
       }
-    }
+    },
+    "verification": "Gegen einen echten CardioLab-Export geprüft (2026-07-31): patient.inf vollständig gescrubbt — LASTNAME/MIDDLENAME/FIRSTNAME/MRN (.ENC) leer, STUDYID und UID ersetzt, ONLINEPATH auf den Pseudonym-Host, STARTTIME auf den Ersatzwert. Kein Name in Pfaden, keine Restkennung in den übrigen Dateien. Die XML-Seite des Profils blieb ungeprüft: dieser Export enthält keine."
   },
   "rhythmia": {
     "id": "rhythmia",
