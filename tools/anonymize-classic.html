@@ -244,9 +244,27 @@ function getPseudonym(idx) {
   return [last, `Subject${n}`, String(n).padStart(6, "0")];
 }
 
+/* Every element with this local name, all of them, namespace or not.
+ *
+ * getElementsByTagName is namespace-literal and returns them in order, and the
+ * two calls it replaced took [0] of that list. Both limits are silent: a
+ * namespaced export matched nothing, and a file with two patients had the
+ * second one skipped — and the copy was reported clean either way. normKey is
+ * the same rule the rest of this core matches keys with. */
+function elementsNamed(root, tag) {
+  const wanted = normKey(tag);
+  const out = [];
+  if (root.tagName && normKey(root.tagName) === wanted) out.push(root);
+  const all = root.getElementsByTagName("*");
+  for (let i = 0; i < all.length; i++) {
+    if (normKey(all[i].tagName) === wanted) out.push(all[i]);
+  }
+  return out;
+}
+
 function setText(parent, tag, value) {
-  const el = parent.getElementsByTagName(tag)[0];
-  if (el) {
+  for (const el of elementsNamed(parent, tag)) {
+    if (el === parent) continue;
     while (el.firstChild) el.removeChild(el.firstChild);
     el.appendChild(el.ownerDocument.createTextNode(value));
   }
@@ -267,15 +285,13 @@ function anonymizeXml(xmlText, last, first, pid) {
   if (root.hasAttribute("name")) root.setAttribute("name", fullName);
   if (root.hasAttribute("dataDirectory")) root.setAttribute("dataDirectory", dirName);
 
-  const patEl = root.getElementsByTagName("Patient")[0];
-  if (patEl) {
+  for (const patEl of elementsNamed(root, "Patient")) {
     if (patEl.hasAttribute("name")) patEl.setAttribute("name", fullName);
     if (patEl.hasAttribute("id")) patEl.setAttribute("id", pid);
     if (patEl.hasAttribute("dataDirectory")) patEl.setAttribute("dataDirectory", dirName);
   }
 
-  const piEl = root.getElementsByTagName("PatientInfo")[0];
-  if (piEl) {
+  for (const piEl of elementsNamed(root, "PatientInfo")) {
     setText(piEl, "ID", pid);
     setText(piEl, "LastName", last);
     setText(piEl, "FirstName", first);
@@ -337,13 +353,22 @@ const DATA_CONTAINERS = new Set([
 ]);
 
 function normKey(s) {
-  // Strip the XML namespace prefix first — "{ns}LastName" is LastName. Without
-  // this, namespaced documents kept their demographics: the field was never
-  // recognised, and the copy was still reported as clean. Python has always
-  // done it; tests/conformance/ is what noticed the browser did not.
+  // A namespace is written two ways and this has to survive both.
+  //
+  // "{urn:x}LastName" is what an ElementTree tag looks like, and stripping it
+  // was the earlier fix. But a DOM tagName is never spelled that way: it is
+  // "ns:LastName", the qualified name. So the fix addressed a form the browser
+  // never sees, and a namespaced export still went through with every
+  // demographic field unrecognised and the copy reported clean.
+  //
+  // Strip both. Without the second line the whole generic scrubber — GE,
+  // Abbott, every field of it — is blind to namespaced XML in the browser and
+  // sighted in the application.
   let name = s || "";
   const brace = name.lastIndexOf("}");
   if (brace >= 0) name = name.slice(brace + 1);
+  const colon = name.lastIndexOf(":");
+  if (colon >= 0) name = name.slice(colon + 1);
   return name.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
@@ -478,6 +503,44 @@ const GE_INI_ID_KEYS = new Set([
   "PATIENTIDNUMBER","PATNO",
 ]);
 
+// Study-structure keys: back-references to the original study rather than
+// demographics. Matched whole, not by base — see geInfBaseKey.
+const GE_INI_STRUCT_KEYS = new Set([
+  "ARCHIVEFOLDER","ENDTIME","ONLINEPATH","PATIENTUID","STARTTIME",
+  "STUDYID","STUDYUID","UID",
+]);
+
+// A key like BIRTHDATE.ENC is the same field under vendor obfuscation.
+// Only these suffixes count: PatientName.Legacy is its own key, not an
+// encoded PatientName, and treating it as one wipes a field Python keeps.
+const GE_INI_ENC_SUFFIXES = new Set([
+  "B64","CIPHER","ENC","ENCRYPTED",
+]);
+
+/* The demographic key a dotted key belongs to: everything before the dot.
+ * Mirrors classic._ge_inf_base_key — one rule for recognising the file and for
+ * scrubbing it, or whether a name survives depends on what else is in it. */
+function geInfBaseKey(ku) {
+  return ku.split(".", 1)[0];
+}
+
+/* True if any line is a key=value whose key this scrubber acts on.
+ * Mirrors classic._looks_like_ge_inf. */
+function geInfKeyRecognized(ku) {
+  const base = geInfBaseKey(ku);
+  return GE_INI_STRUCT_KEYS.has(ku)
+      || GE_INI_WIPE_KEYS.has(base) || GE_INI_ID_KEYS.has(base);
+}
+
+function looksLikeGeInf(text) {
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line.includes("=") || /^[;#[]/.test(line)) continue;
+    if (geInfKeyRecognized(line.split("=", 1)[0].trim().toUpperCase())) return true;
+  }
+  return false;
+}
+
 function anonymizeGeInf(text, pseudo, newUid) {
   // Some GE archives use ".inf" for a one-line file that contains nothing
   // but the study UUID (e.g. study.inf). Treat that as a back-reference to
@@ -489,19 +552,31 @@ function anonymizeGeInf(text, pseudo, newUid) {
     const trailing = /[\r\n]$/.test(text) ? nl : "";
     return newUid + trailing;
   }
-  if (!text.trimStart().startsWith("[")) return null;
+  /* Not "does it start with [". GE archives carry .inf files with no section
+   * header at all — bare key=value — and classic.py says so in as many words
+   * and handles them. Refusing them here meant the same study kept its
+   * demographics when it was anonymised on the web page and lost them when it
+   * was anonymised in the application, with no warning on either side.
+   *
+   * The rule is the one classic.py uses: this is a GE .inf if any key=value
+   * line has a key we act on. Anything else — free text, JSON, binary — has
+   * none and is still refused. */
+  if (!looksLikeGeInf(text)) return null;
   const nl = text.includes("\r\n") ? "\r\n" : "\n";
   const lines = text.split(/\r?\n/);
+  // splitlines() in Python yields no trailing empty element; split() does, and
+  // joining it back added a second line ending on every file.
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
   let changed = false;
   const out = lines.map(raw => {
     if (!raw.includes("=") || /^\s*[;#]/.test(raw)) return raw;
     const eq = raw.indexOf("=");
     const key = raw.slice(0, eq);
     const ku = key.trim().toUpperCase();
-    const base = ku.split(".", 1)[0];
+    const base = geInfBaseKey(ku);
     let newV = null;
     const dotSuffix = ku.includes(".") ? ku.slice(ku.lastIndexOf(".") + 1) : "";
-    const isEncoded = ["ENC","B64","ENCRYPTED","CIPHER"].includes(dotSuffix);
+    const isEncoded = GE_INI_ENC_SUFFIXES.has(dotSuffix);
     if (isEncoded && (GE_INI_WIPE_KEYS.has(base) || GE_INI_ID_KEYS.has(base))) {
       // Vendor-specific obfuscation; wipe instead of writing plain text.
       newV = "";
@@ -783,7 +858,7 @@ async function buildPlan(files, profile) {
 }
 
 // === SCRUB-CORE END ===
-// === SCRUB-CORE EXPORTS: ANON_DOB, ANON_STARTTIME, ANON_PHYSICIAN, ANON_HOST, ANON_INI, FIXED_PSEUDONYMS, COMMON_EXCLUDED_NAMES, getPseudonym, PATIENT_CONTAINERS, DATA_CONTAINERS, normKey, demographicReplacement, anonymizeXml, anonymizeDemographicsXml, anonymizeWmMaster, WM_MASTER_ID_START, WM_MASTER_ID_END, GE_INI_WIPE_KEYS, GE_INI_ID_KEYS ===
+// === SCRUB-CORE EXPORTS: ANON_DOB, ANON_STARTTIME, ANON_PHYSICIAN, ANON_HOST, ANON_INI, FIXED_PSEUDONYMS, COMMON_EXCLUDED_NAMES, getPseudonym, PATIENT_CONTAINERS, DATA_CONTAINERS, normKey, demographicReplacement, anonymizeXml, anonymizeDemographicsXml, anonymizeWmMaster, anonymizeGeInf, WM_MASTER_ID_START, WM_MASTER_ID_END, GE_INI_WIPE_KEYS, GE_INI_ID_KEYS, GE_INI_STRUCT_KEYS, GE_INI_ENC_SUFFIXES ===
 
 function logLine(msg) {
   const el = document.getElementById("log");
