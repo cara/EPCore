@@ -6,7 +6,7 @@
 <title>EPView · 3D Map Viewer</title>
 <link href="../vendor/fonts/fonts.css" rel="stylesheet">
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/i18n.js?v=387f2a882aa0"></script>
+<script type="module" src="../shared/i18n.js?v=1de2e9171485"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -489,12 +489,12 @@
 
 <div class="brand">
   <h1>EP<b>View</b></h1>
-  <div class="sub">3D Electroanatomic Map</div>
+  <div class="sub" data-i18n="map.subtitle"></div>
 </div>
 
 <div id="stats">
-  <div><b id="st-verts">—</b> vertices</div>
-  <div><b id="st-faces">—</b> faces</div>
+  <div><b id="st-verts">—</b> <span data-i18n="map.vertices"></span></div>
+  <div><b id="st-faces">—</b> <span data-i18n="map.faces"></span></div>
 </div>
 
 <div id="toolbar">
@@ -516,69 +516,69 @@
     </div>
   </div>
   <div class="tdrop">
-    <button class="tool" id="t-cam">Kamera ▾</button>
+    <button class="tool" id="t-cam" data-i18n="map.camera"></button>
     <div class="tmenu panel" id="m-cam">
       <button class="tool" data-view="AP">AP</button>
       <button class="tool" data-view="PA">PA</button>
       <button class="tool" data-view="LAO">LAO</button>
       <button class="tool" data-view="RAO">RAO</button>
-      <button class="tool" id="t-reset">Reset View</button>
-      <button class="tool" id="t-rotate">Auto-Rotate</button>
+      <button class="tool" id="t-reset" data-i18n="map.reset"></button>
+      <button class="tool" id="t-rotate" data-i18n="map.autorotate"></button>
     </div>
   </div>
   <div class="tdrop">
-    <button class="tool" id="t-vid">Video ▾</button>
+    <button class="tool" id="t-vid" data-i18n="map.video"></button>
     <div class="tmenu panel" id="m-vid">
-      <button class="tool" id="t-orbit">● Aufnahme (Kamerafahrt)</button>
-      <button class="tool" id="t-export">🎥 Export (Aktivierung)</button>
-      <button class="tool" id="t-recset">⚙ Einstellungen</button>
+      <button class="tool" id="t-orbit" data-i18n="map.rec.orbit"></button>
+      <button class="tool" id="t-export" data-i18n="map.rec.activation"></button>
+      <button class="tool" id="t-recset" data-i18n="map.rec.settings"></button>
     </div>
   </div>
   <div class="tdrop">
-    <button class="tool" id="t-save">Speichern ▾</button>
+    <button class="tool" id="t-save" data-i18n="map.save"></button>
     <div class="tmenu panel" id="m-save">
-      <button class="tool" id="t-shot">PNG Snapshot</button>
-      <button class="tool" id="ex-ply">↓ PLY (binär)</button>
-      <button class="tool" id="ex-ply-ascii">↓ PLY (ASCII)</button>
-      <button class="tool" id="ex-obj">↓ OBJ</button>
-      <button class="tool" id="ex-stl">↓ STL</button>
+      <button class="tool" id="t-shot" data-i18n="map.snapshot"></button>
+      <button class="tool" id="ex-ply" data-i18n="map.ply.binary"></button>
+      <button class="tool" id="ex-ply-ascii" data-i18n="map.ply.ascii"></button>
+      <button class="tool" id="ex-obj" data-i18n="map.obj"></button>
+      <button class="tool" id="ex-stl" data-i18n="map.stl"></button>
     </div>
   </div>
-  <button class="tool" id="t-anonymise">Anonymisieren</button>
-<button class="tool" id="t-share" disabled title="Erst anonymisieren — geteilte Karten bekommen eine öffentliche Adresse.">🔗 Teilen</button>
+  <button class="tool" id="t-anonymise" data-i18n="map.anonymise"></button>
+<button class="tool" id="t-share" disabled title="Erst anonymisieren — geteilte Karten bekommen eine öffentliche Adresse." data-i18n="map.share"></button>
   <span class="tool" id="rec-dot" style="display:none; color:var(--warn)">● REC</span>
 </div>
 
-<div id="controls-legend">Drag rotieren · ⌘+Drag verschieben · Rad zoomen · Q/E rollen</div>
+<div id="controls-legend" data-i18n="map.hint.mouse"></div>
 
 <div id="recset" class="panel">
-  <div class="row"><label>Farbskala einbacken</label><input type="checkbox" id="rs-legend" checked></div>
-  <div class="row"><label>Gizmo ausblenden</label><input type="checkbox" id="rs-gizmo" checked></div>
+  <div class="row"><label data-i18n="map.bake.scale"></label><input type="checkbox" id="rs-legend" checked></div>
+  <div class="row"><label data-i18n="map.hide.gizmo"></label><input type="checkbox" id="rs-gizmo" checked></div>
   <div class="row"><label>FPS</label>
     <select id="rs-fps"><option>24</option><option selected>30</option><option>60</option></select></div>
-  <div class="row"><label>Orbit · s</label><input type="number" id="rs-orbit" min="2" max="60" step="1" value="8"></div>
-  <div class="row"><label>Aktivierung · s</label><input type="number" id="rs-export" min="2" max="60" step="1" placeholder="auto"></div>
-  <div class="row"><label>Loop-Zyklen</label><input type="number" id="rs-cycles" min="1" max="20" step="1" value="1"></div>
-  <div class="row"><label>Pfad</label>
+  <div class="row"><label data-i18n="map.orbit.seconds"></label><input type="number" id="rs-orbit" min="2" max="60" step="1" value="8"></div>
+  <div class="row"><label data-i18n="map.activation.seconds"></label><input type="number" id="rs-export" min="2" max="60" step="1" placeholder="auto"></div>
+  <div class="row"><label data-i18n="map.loop.cycles"></label><input type="number" id="rs-cycles" min="1" max="20" step="1" value="1"></div>
+  <div class="row"><label data-i18n="map.path"></label>
     <select id="rs-path"><option value="turntable" selected>Turntable</option><option value="tilt">Tilt-Orbit</option><option value="rock">Rock/Sway</option></select></div>
-  <div class="row"><label>Ease-in/out</label><input type="checkbox" id="rs-ease" checked></div>
-  <div class="row"><label>Format</label><span class="fmt" id="rs-fmt">—</span></div>
+  <div class="row"><label data-i18n="map.ease"></label><input type="checkbox" id="rs-ease" checked></div>
+  <div class="row"><label data-i18n="map.format"></label><span class="fmt" id="rs-fmt">—</span></div>
 </div>
 
 <div id="sharebox" class="panel" style="display:none">
   <div class="row" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-    <b style="letter-spacing:.1em">SHARE LINK</b>
+    <b style="letter-spacing:.1em" data-i18n="map.share.link"></b>
     <button class="tool" id="share-close" style="padding:4px 10px">✕</button>
   </div>
-  <div id="share-busy" class="field"><small>Lade hoch…</small></div>
+  <div id="share-busy" class="field"><small data-i18n="map.uploading"></small></div>
   <div id="share-result" style="display:none">
     <img id="share-qr" alt="QR" style="width:180px;height:180px;display:block;margin:0 auto 12px;background:#fff;border-radius:8px"/>
-    <div class="field" style="margin-bottom:10px"><small style="color:var(--muted)">Beschriftungen werden per Muster (Zeit, Datum, lange IDs) ersetzt; Geometrie und Messwerte bleiben. Das ist keine geprüfte Anonymisierung — vor dem Teilen selbst prüfen. Geteilte Karten laufen nach 30 Tagen ab.</small></div>
-    <div class="field"><small>Link</small>
+    <div class="field" style="margin-bottom:10px"><small style="color:var(--muted)" data-i18n="map.share.caveat"></small></div>
+    <div class="field"><small data-i18n="map.link"></small>
       <input type="text" id="share-link" readonly style="width:100%"></div>
     <div class="anim-row">
-      <button class="chip" id="share-copy">Link kopieren</button>
-      <button class="chip" id="share-revoke">Widerrufen</button>
+      <button class="chip" id="share-copy" data-i18n="map.copy.link"></button>
+      <button class="chip" id="share-revoke" data-i18n="map.revoke"></button>
     </div>
     <div class="field" style="margin-top:8px"><small>ID</small> <span id="share-id" class="fmt"></span></div>
   </div>
@@ -587,19 +587,19 @@
 
 <div id="controls" class="panel">
   <button type="button" id="ctrl-toggle" aria-label="Bedienfeld ein-/ausklappen">
-    <span>Steuerung</span>
+    <span data-i18n="map.controls"></span>
     <span class="chev">▾</span>
   </button>
   <div class="grp" id="grp-mesh" style="display:none">
-    <label>Anatomie</label>
+    <label data-i18n="map.anatomy"></label>
     <select id="meshsel"></select>
   </div>
   <div class="grp">
-    <label>Map / Color Source</label>
+    <label data-i18n="map.source"></label>
     <select id="mode"></select>
   </div>
   <div class="grp" id="grp-cmap">
-    <label>Color Scale</label>
+    <label data-i18n="map.colorscale"></label>
     <select id="cmap">
       <option value="rhythmia_voltage">Rhythmia · Voltage</option>
       <option value="rhythmia_lat">Rhythmia · LAT</option>
@@ -608,72 +608,72 @@
     </select>
   </div>
   <div class="grp" id="grp-range">
-    <label>Window <span id="range-unit" style="color:var(--accent-dim)"></span>
+    <label><span data-i18n="map.window"></span> <span id="range-unit" style="color:var(--accent-dim)"></span>
       <span id="vwin-readout" style="float:right; font-family:var(--mono); font-size:10px; color:var(--text); text-transform:none; letter-spacing:0; opacity:0.9"></span></label>
     <div class="dual" id="vwin">
       <input type="range" id="vmin-s">
       <input type="range" id="vmax-s">
     </div>
     <details class="advanced">
-      <summary>Erweitert</summary>
+      <summary data-i18n="map.advanced"></summary>
       <div class="range-row">
         <div class="field"><small>min</small><input type="number" id="vmin" step="0.01"></div>
         <div class="field"><small>max</small><input type="number" id="vmax" step="0.01"></div>
       </div>
       <div class="toggles" id="vpresets"></div>
       <div id="conf-mask-row" style="display:none; gap:6px; align-items:center">
-        <button class="chip" id="conf-mask" style="flex:1">Conf-Maske ≤ <span id="conf-mask-th-lbl">0.03</span> mV</button>
-        <div class="field" style="flex:0 0 84px"><small>Schwelle · mV</small><input type="number" id="conf-mask-th" step="0.01" min="0" value="0.03"></div>
+        <button class="chip" id="conf-mask" style="flex:1"><span data-i18n="map.conf.mask"></span> <span id="conf-mask-th-lbl">0.03</span> mV</button>
+        <div class="field" style="flex:0 0 84px"><small data-i18n="map.threshold"></small><input type="number" id="conf-mask-th" step="0.01" min="0" value="0.03"></div>
       </div>
     </details>
   </div>
   <div class="grp" id="grp-smooth" style="display:none">
-    <label>Interpolation <span id="smooth-val" style="color:var(--accent-dim)">0</span></label>
+    <label><span data-i18n="map.interpolation"></span> <span id="smooth-val" style="color:var(--accent-dim)">0</span></label>
     <input type="range" id="smooth-level" min="0" max="10" step="1" value="0">
   </div>
   <div class="grp" id="grp-area" style="display:none">
-    <label>Fläche <span style="color:var(--accent-dim)">· cm²</span></label>
+    <label><span data-i18n="map.area"></span> <span style="color:var(--accent-dim)">· cm²</span></label>
     <div id="area-summary"><b id="area-total">—</b><span id="area-mid" style="color:var(--muted)">—</span></div>
     <details class="advanced">
-      <summary>Aufschlüsselung</summary>
+      <summary data-i18n="map.breakdown"></summary>
       <div id="area-readout"></div>
-      <button class="chip" id="area-isolate" style="margin-top:8px; width:100%">Window isolieren</button>
+      <button class="chip" id="area-isolate" style="margin-top:8px; width:100%" data-i18n="map.isolate"></button>
     </details>
   </div>
   <div class="grp" id="grp-anim" style="display:none">
-    <label>Activation <span id="anim-t" style="color:var(--accent-dim)"></span></label>
+    <label><span data-i18n="map.activation"></span> <span id="anim-t" style="color:var(--accent-dim)"></span></label>
     <div class="seg" id="anim-mode">
-      <button data-mode="loop" class="on">Loop · Reentry</button>
-      <button data-mode="linear">Linear</button>
+      <button data-mode="loop" class="on" data-i18n="map.loop.reentry"></button>
+      <button data-mode="linear" data-i18n="map.linear"></button>
     </div>
     <div class="anim-row">
-      <button class="chip" id="anim-play">▶ Play</button>
+      <button class="chip" id="anim-play" data-i18n="map.play"></button>
     </div>
-    <div class="field" style="margin-top:8px"><small>Cursor · ms</small>
+    <div class="field" style="margin-top:8px"><small data-i18n="map.cursor.ms"></small>
       <input type="range" id="anim-cursor"></div>
-    <div class="field" style="margin-top:6px"><small>Speed · ms/s</small>
+    <div class="field" style="margin-top:6px"><small data-i18n="map.speed"></small>
       <input type="range" id="anim-speed" min="1" max="500" step="1" value="60"></div>
-    <div class="field" style="margin-top:6px"><small>Band · ms</small>
+    <div class="field" style="margin-top:6px"><small data-i18n="map.band"></small>
       <input type="range" id="anim-band"></div>
   </div>
   <div class="grp">
-    <label>Surface Opacity</label>
+    <label data-i18n="map.opacity"></label>
     <input type="range" id="opacity" min="0.15" max="1" step="0.01" value="1">
   </div>
   <div class="grp">
-    <label>Display</label>
+    <label data-i18n="map.display"></label>
     <div class="toggles">
-      <button class="chip on" id="c-axes">Orientierung</button>
-      <button class="chip" id="c-wire">Wireframe</button>
-      <button class="chip" id="c-smooth">Smooth</button>
+      <button class="chip on" id="c-axes" data-i18n="map.orientation"></button>
+      <button class="chip" id="c-wire" data-i18n="map.wireframe"></button>
+      <button class="chip" id="c-smooth" data-i18n="map.smooth"></button>
     </div>
   </div>
   <div class="grp" id="grp-tags" style="display:none">
-    <label>Tags <button class="chip" id="tags-all" style="float:right; padding:2px 8px">Alle</button></label>
-    <div class="field" style="margin-top:6px"><small>Punktgröße <span id="tag-size-val" style="color:var(--accent-dim)">1.0×</span></small>
+    <label><span data-i18n="map.tags"></span> <button class="chip" id="tags-all" style="float:right; padding:2px 8px" data-i18n="map.all"></button></label>
+    <div class="field" style="margin-top:6px"><small><span data-i18n="map.pointsize"></span> <span id="tag-size-val" style="color:var(--accent-dim)">1.0×</span></small>
       <input type="range" id="tag-size" min="0.3" max="4" step="0.05" value="1"></div>
     <div class="toggles" style="margin-top:6px">
-      <button class="chip" id="tag-project">Auf Oberfläche projizieren</button>
+      <button class="chip" id="tag-project" data-i18n="map.project"></button>
     </div>
     <div class="toggles" id="tag-list" style="margin-top:6px"></div>
   </div>
@@ -692,7 +692,7 @@
 <div id="loading">
   <div class="ld-box">
     <div class="ld-spin"></div>
-    <div class="ld-text" id="loading-text">Lade…</div>
+    <div class="ld-text" id="loading-text" data-i18n="map.loading"></div>
   </div>
 </div>
 
@@ -701,11 +701,8 @@
     <div class="glyph">
       <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14"/></svg>
     </div>
-    <h2>3D-Map laden</h2>
-    <p>Rohexport direkt ablegen — <b>Rhythmia</b> (.000/.001…, alle Teile zusammen),
-       <b>CARTO</b> (.zip) oder <b>EnSite</b> (.xml). Wird im Browser konvertiert;
-       Voltage/LAT live umschaltbar, Export als OBJ/STL/PLY. Fertige PLY/OBJ/STL
-       gehen auch.</p>
+    <h2 data-i18n="map.drop.title"></h2>
+    <p data-i18n="map.drop.text"></p>
     <div class="formats">Rhythmia · CARTO · EnSite · PLY · OBJ · STL</div>
     <button class="pick" id="pick-dir" data-i18n="open.folder"></button>
     <button class="pick" id="pick" data-i18n="open.files"></button>
@@ -723,7 +720,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=387f2a882aa0",
+    "three": "../vendor/three/three.module.js?v=1de2e9171485",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -733,8 +730,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import * as EP from './epconv.js?v=387f2a882aa0';
-import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=387f2a882aa0';
+import * as EP from './epconv.js?v=1de2e9171485';
+import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=1de2e9171485';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1266,11 +1263,11 @@ let _animLast = null;
 function startAnim() {
   if (!state.mode || !state.mode.startsWith('scalar:') || !isLatField(state.mode.slice(7))) return;
   state.anim.playing = true; state.anim.engaged = true; _animLast = null;
-  const b = document.getElementById('anim-play'); b.textContent = '❚❚ Pause'; b.classList.add('on');
+  const b = document.getElementById('anim-play'); b.textContent = T('map.pause'); b.classList.add('on');
 }
 function stopAnim() {
   state.anim.playing = false;
-  const b = document.getElementById('anim-play'); b.textContent = '▶ Play'; b.classList.remove('on');
+  const b = document.getElementById('anim-play'); b.textContent = T('map.play'); b.classList.remove('on');
 }
 function stepAnim(now) {
   if (!state.anim.playing || !mesh || !state.mode.startsWith('scalar:') || !isLatField(state.mode.slice(7))) { _animLast = now; return; }
@@ -1548,7 +1545,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=387f2a882aa0'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=1de2e9171485'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -1559,7 +1556,7 @@ async function loadFiles(fileList) {
     populateMeshSelector(meshes);
     loadParsedMesh(meshes[0]);
   } catch (err) {
-    alert('Fehler beim Laden:\n' + err.message);
+    alert(T('map.msg.load.failed') + '\n' + err.message);
     console.error(err);
   } finally {
     hideLoading();
@@ -1607,7 +1604,7 @@ function download(name, data, mime) {
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 function exportMesh(fmt) {
-  if (!current) { alert('Erst eine Map laden.'); return; }
+  if (!current) { alert(T('map.msg.load.first')); return; }
   const m = { positions: current.positions, normals: current.normals || null, faces: current.faces, scalars: current.scalars || {} };
   const base = (currentName || 'epview').replace(/\.[^.]+$/, '').replace(/[^\w\-.]/g, '_');
   // Binäres PLY ist Default (P-8): 43x schneller zu schreiben, rund halb so
@@ -1711,7 +1708,7 @@ async function markAnonymised(yes) {
 }
 
 async function doShare() {
-  if (!current) { alert('Erst eine Map laden.'); return; }
+  if (!current) { alert(T('map.msg.load.first')); return; }
   if (!_anonymised) {
     alert('Diese Karte wurde nicht anonymisiert. Geteilte Karten bekommen eine '
         + 'öffentliche Adresse — erst anonymisieren, dann teilen.');
@@ -1770,7 +1767,7 @@ async function doShare() {
                  + '(siehe docs/DEPLOY.md, client_max_body_size).';
         }
       }
-      shareError('Upload fehlgeschlagen: ' + detail);
+      shareError(T('map.msg.upload.failed') + ' ' + detail);
       return;
     }
     const body = await res.json();
@@ -1784,11 +1781,11 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=387f2a882aa0');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=1de2e9171485');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
-  } catch (err) { shareError('Fehler: ' + err.message); }
+  } catch (err) { shareError(T('map.msg.error') + ' ' + err.message); }
 }
 
 async function doRevoke() {
@@ -1796,9 +1793,9 @@ async function doRevoke() {
   const { url, id, token } = _shareDel;
   try {
     const res = await fetch(`${url}/maps/${id}`, { method: 'DELETE', headers: { 'X-Delete-Token': token } });
-    if (res.ok) shareError('Widerrufen — Link ist tot.');
-    else shareError('Widerruf fehlgeschlagen: HTTP ' + res.status);
-  } catch (err) { shareError('Widerruf-Fehler: ' + err.message); }
+    if (res.ok) shareError(T('map.msg.revoked'));
+    else shareError(T('map.msg.revoke.failed') + ' HTTP ' + res.status);
+  } catch (err) { shareError(T('map.msg.revoke.failed') + ' ' + err.message); }
 }
 
 /* =====================================================================
@@ -1855,10 +1852,10 @@ function setRecButtonsDisabled(d) {
 
 // spec: { mode:'driver'|'live', kind, driver?, durationMs, label }
 function startRecording(spec) {
-  if (!mesh) { alert('Erst eine Map laden.'); return; }
+  if (!mesh) { alert(T('map.msg.load.first')); return; }
   if (state.recording) return;
   const mime = pickMime();
-  if (!mime) { alert('Video-Aufnahme von diesem Browser nicht unterstützt.'); return; }
+  if (!mime) { alert(T('map.msg.norecorder')); return; }
   const savedAnim = { t: state.anim.t, engaged: state.anim.engaged };  // capture BEFORE priming (driver(0) may move the cursor)
   // prime the first frame so capture doesn't start blank
   renderer.setScissorTest(false); renderer.setViewport(0, 0, innerWidth, innerHeight);
@@ -1872,7 +1869,7 @@ function startRecording(spec) {
   const chunks = [];
   recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
   recorder.onstop = () => download(`epview-${spec.label}.${mimeExt(mime)}`, new Blob(chunks, { type: mime }), mime);
-  recorder.onerror = ev => { alert('Aufnahme-Fehler: ' + (ev.error?.message || ev.error)); finishRecording(); };
+  recorder.onerror = ev => { alert(T('map.msg.rec.error') + ' ' + (ev.error?.message || ev.error)); finishRecording(); };
   state.recording = { ...spec, start: null, recorder, savedAnim };
   recorder.start();
   recIndicator(true);
@@ -1904,7 +1901,7 @@ function orbitFrame(progress) {
   camera.lookAt(c.x, c.y, c.z);
 }
 function startOrbit() {
-  if (!mesh) { alert('Erst eine Map laden.'); return; }
+  if (!mesh) { alert(T('map.msg.load.first')); return; }
   mesh.geometry.computeBoundingSphere();
   const r = mesh.geometry.boundingSphere.radius || 50;
   const target = controls.target.clone();
@@ -1922,7 +1919,7 @@ function activationFrame(progress) {
   applyColors();
 }
 function startExport() {
-  if (!mesh) { alert('Erst eine Map laden.'); return; }
+  if (!mesh) { alert(T('map.msg.load.first')); return; }
   const field = state.mode && state.mode.startsWith('scalar:') ? state.mode.slice(7) : null;
   if (field && isLatField(field)) {
     state.anim.engaged = true;
@@ -1976,6 +1973,12 @@ function buildDemo() {
  * ===================================================================== */
 const fileInput = document.getElementById('file');
 document.getElementById('pick').onclick = () => fileInput.click();
+/* The catalogue, or the key in brackets when it is missing. Same helper the
+ * other pages use — a message the user is meant to read has to follow the
+ * language they chose, and these were German literals in a three-language
+ * application. */
+const T = (key, params) => (window.epcoreI18n ? window.epcoreI18n.t(key, params) : key);
+
 const dirInput = document.getElementById('file-dir');
 dirInput.onchange = () => { if (dirInput.files.length) loadFiles(dirInput.files); };
 
@@ -2256,7 +2259,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=387f2a882aa0');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=1de2e9171485');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -2304,7 +2307,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=387f2a882aa0';
+import '../shared/bridge.js?v=1de2e9171485';
 
 window.epcoreNotify = (msg) => { console.warn('[epcore]', msg); alert(msg); };
 
