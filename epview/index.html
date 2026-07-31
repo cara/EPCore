@@ -6,6 +6,7 @@
 <title>EPView · 3D Map Viewer</title>
 <link href="../vendor/fonts/fonts.css" rel="stylesheet">
 <link href="../shared/epcore.css" rel="stylesheet">
+<script type="module" src="../shared/i18n.js?v=90be518f0598"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -497,7 +498,23 @@
 </div>
 
 <div id="toolbar">
-  <button class="tool" id="t-open">Öffnen…</button>
+  <div class="tdrop">
+    <button class="tool" id="t-open" data-i18n-keep-label
+            data-i18n-title="open.button.title"><span data-i18n="open.button"></span> ▾</button>
+    <!-- Folder first, as in EPTrace: a Rhythmia export is a directory of
+         .000/.001 parts and a CARTO export is a directory too, so picking
+         single files was the awkward way round for the common case. -->
+    <div class="tmenu panel" id="m-open">
+      <button class="tool" id="t-open-dir">
+        <span data-i18n="open.folder"></span>
+        <span class="sub" data-i18n="open.folder.maps"></span>
+      </button>
+      <button class="tool" id="t-open-files">
+        <span data-i18n="open.files"></span>
+        <span class="sub" data-i18n="open.files.maps"></span>
+      </button>
+    </div>
+  </div>
   <div class="tdrop">
     <button class="tool" id="t-cam">Kamera ▾</button>
     <div class="tmenu panel" id="m-cam">
@@ -690,19 +707,23 @@
        Voltage/LAT live umschaltbar, Export als OBJ/STL/PLY. Fertige PLY/OBJ/STL
        gehen auch.</p>
     <div class="formats">Rhythmia · CARTO · EnSite · PLY · OBJ · STL</div>
-    <button class="pick" id="pick">Dateien wählen</button>
-    <button class="demo" id="demo">oder Demo-Map ansehen</button>
+    <button class="pick" id="pick-dir" data-i18n="open.folder"></button>
+    <button class="pick" id="pick" data-i18n="open.files"></button>
+    <button class="demo" id="demo" data-i18n="epview.demo"></button>
   </div>
 </div>
 
 <!-- kein accept-Filter: Rhythmia-Teile (.000…010…) sonst im Dialog ausgegraut;
      Validierung passiert im Code (loadFiles) -->
 <input type="file" id="file" class="hidden" multiple>
+<!-- A whole export directory. Rhythmia writes one file per part and CARTO a
+     folder of meshes; selecting them by hand was the only way in before. -->
+<input type="file" id="file-dir" class="hidden" webkitdirectory directory multiple>
 
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=81f938a5f7c5",
+    "three": "../vendor/three/three.module.js?v=90be518f0598",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -712,8 +733,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import * as EP from './epconv.js?v=81f938a5f7c5';
-import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=81f938a5f7c5';
+import * as EP from './epconv.js?v=90be518f0598';
+import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=90be518f0598';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1527,7 +1548,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=81f938a5f7c5'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=90be518f0598'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -1763,7 +1784,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=81f938a5f7c5');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=90be518f0598');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -1955,7 +1976,18 @@ function buildDemo() {
  * ===================================================================== */
 const fileInput = document.getElementById('file');
 document.getElementById('pick').onclick = () => fileInput.click();
-document.getElementById('t-open').onclick = () => fileInput.click();
+const dirInput = document.getElementById('file-dir');
+dirInput.onchange = () => { if (dirInput.files.length) loadFiles(dirInput.files); };
+
+const openMenu = document.getElementById('m-open');
+document.getElementById('t-open').onclick = (e) => {
+  e.stopPropagation();
+  openMenu.classList.toggle('open');
+};
+document.getElementById('t-open-dir').onclick = () => { openMenu.classList.remove('open'); dirInput.click(); };
+document.getElementById('t-open-files').onclick = () => { openMenu.classList.remove('open'); fileInput.click(); };
+document.addEventListener('click', () => openMenu.classList.remove('open'));
+document.getElementById('pick-dir').onclick = () => dirInput.click();
 document.getElementById('demo').onclick = buildDemo;
 fileInput.onchange = () => { if (fileInput.files.length) loadFiles(fileInput.files); };
 
@@ -2224,7 +2256,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=81f938a5f7c5');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=90be518f0598');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -2272,7 +2304,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=81f938a5f7c5';
+import '../shared/bridge.js?v=90be518f0598';
 
 window.epcoreNotify = (msg) => { console.warn('[epcore]', msg); alert(msg); };
 

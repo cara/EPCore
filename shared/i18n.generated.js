@@ -167,7 +167,16 @@ export const CATALOGUES = {
     "viewer.theme.title": "Hell/Dunkel umschalten (T)",
     "viewer.toolbar": "Werkzeuge",
     "viewer.window": "Fenster",
-    "viewer.window.title": "Zeitfenster"
+    "viewer.window.title": "Zeitfenster",
+    "open.folder": "Studienordner öffnen …",
+    "open.folder.maps": "Rhythmia, CARTO oder EnSite",
+    "open.files": "Einzeldateien öffnen …",
+    "open.files.maps": "PLY, OBJ, STL oder Rohexport",
+    "open.button": "Öffnen",
+    "open.button.title": "Studie oder Karte öffnen",
+    "epview.demo": "oder Demo-Karte ansehen",
+    "shell.tile.bulk.title": "Studienordner umwandeln",
+    "shell.tile.bulk.text": "Jede Studie in einem Ordner auf einmal nach EDF+ oder DICOM schreiben — wahlweise anonymisiert."
   },
   "en": {
     "anon.ambiguous": "The selection matches more than one lab system. EPCore does not guess here: the wrong profile scrubs the wrong fields and still reports the copy as clean. Narrow the selection.",
@@ -332,7 +341,16 @@ export const CATALOGUES = {
     "viewer.theme.title": "Toggle light/dark (T)",
     "viewer.toolbar": "Tools",
     "viewer.window": "Window",
-    "viewer.window.title": "Time window"
+    "viewer.window.title": "Time window",
+    "open.folder": "Open study folder …",
+    "open.folder.maps": "Rhythmia, CARTO or EnSite",
+    "open.files": "Open single files …",
+    "open.files.maps": "PLY, OBJ, STL or a raw export",
+    "open.button": "Open",
+    "open.button.title": "Open a study or a map",
+    "epview.demo": "or look at a demo map",
+    "shell.tile.bulk.title": "Convert a folder of studies",
+    "shell.tile.bulk.text": "Write every study in a folder to EDF+ or DICOM at once — anonymised if you want."
   },
   "es": {
     "anon.ambiguous": "La selección coincide con más de un sistema. EPCore no adivina: el perfil equivocado limpia los campos equivocados y aun así da la copia por limpia. Acota la selección.",
@@ -497,6 +515,15 @@ export const CATALOGUES = {
     "viewer.theme.title": "Cambiar claro/oscuro (T)",
     "viewer.toolbar": "Herramientas",
     "viewer.window": "Ventana",
-    "viewer.window.title": "Ventana temporal"
+    "viewer.window.title": "Ventana temporal",
+    "open.folder": "Abrir carpeta de estudio …",
+    "open.folder.maps": "Rhythmia, CARTO o EnSite",
+    "open.files": "Abrir archivos sueltos …",
+    "open.files.maps": "PLY, OBJ, STL o exportación en bruto",
+    "open.button": "Abrir",
+    "open.button.title": "Abrir un estudio o un mapa",
+    "epview.demo": "o ver un mapa de demostración",
+    "shell.tile.bulk.title": "Convertir una carpeta de estudios",
+    "shell.tile.bulk.text": "Escribir todos los estudios de una carpeta a EDF+ o DICOM de una vez, anonimizados si se desea."
   }
 };

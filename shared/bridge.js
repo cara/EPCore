@@ -22,6 +22,7 @@ const OWNER = {
   openPath: '/eptrace',
   openFile: '/eptrace',
   openFolder: '/eptrace',
+  openBulk: '/eptrace',
   openExport: '/eptrace',
   exportPNG: '/eptrace',
   exportPDF: '/eptrace',
