@@ -671,7 +671,7 @@
   <p class="muted" style="margin-top:26px" data-i18n="anon.footer"></p>
 </main>
 
-<script type="module" src="../shared/i18n.js?v=1de2e9171485"></script>
+<script type="module" src="../shared/i18n.js?v=ded9513ee1e3"></script>
 <script>
 /* ===================== DETECTION ==========================================
  * Which lab system produced these files. The same question epcore.core.study
@@ -1931,11 +1931,37 @@ function partNumber(name) {
   return Number.isFinite(n) ? n : 9999;
 }
 
+/* A Rhythmia export is .000, .001, … and nothing else.
+ *
+ * Everything else in that directory is sorted to 9999 and used to be appended
+ * to the archive stream as if it were the last part — including `patient_info`,
+ * which holds the patient's id and an encrypted block of their details, and
+ * which the scrubber passes through untouched because it is not the XML it
+ * knows. Its bytes came out inside the anonymised copy.
+ *
+ * Nobody used to select it, because the picker took files. Selecting the whole
+ * study folder is the ordinary thing to do now, which is what turned a latent
+ * mistake into a likely one. */
+const PART_NAME = /\.\d{3,}$/;
+
+function isArchivePart(name) {
+  return PART_NAME.test(name);
+}
+
 function setFiles(files) {
-  selectedFiles = Array.from(files).sort(
-    (a, b) => partNumber(a.name) - partNumber(b.name)
-  );
+  const all = Array.from(files);
+  const parts = all.filter(f => isArchivePart(f.name));
+  const rejected = all.filter(f => !isArchivePart(f.name));
+  selectedFiles = parts.sort((a, b) => partNumber(a.name) - partNumber(b.name));
   fileList.innerHTML = "";
+  for (const f of rejected) {
+    // Named, not silently dropped: the user has to know that this file was not
+    // processed and is still sitting in the original folder.
+    log(`Übersprungen (kein Archivteil): ${f.name}` +
+        (/patient_?info/i.test(f.name)
+          ? " — enthält die Patientenkennung. Nicht mitkopieren."
+          : ""));
+  }
   if (!selectedFiles.length) return;
   const ul = document.createElement("ul");
   ul.className = "files";
