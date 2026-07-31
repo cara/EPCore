@@ -527,7 +527,8 @@
       <button class="tool" id="ex-stl">↓ STL</button>
     </div>
   </div>
-  <button class="tool" id="t-share">🔗 Teilen</button>
+  <button class="tool" id="t-anonymise">Anonymisieren</button>
+<button class="tool" id="t-share" disabled title="Erst anonymisieren — geteilte Karten bekommen eine öffentliche Adresse.">🔗 Teilen</button>
   <span class="tool" id="rec-dot" style="display:none; color:var(--warn)">● REC</span>
 </div>
 
@@ -555,7 +556,7 @@
   <div id="share-busy" class="field"><small>Lade hoch…</small></div>
   <div id="share-result" style="display:none">
     <img id="share-qr" alt="QR" style="width:180px;height:180px;display:block;margin:0 auto 12px;background:#fff;border-radius:8px"/>
-    <div class="field" style="margin-bottom:10px"><small style="color:var(--muted)">Labels werden nur per Muster (Zeit/Datum/ID) anonymisiert — vor dem Teilen prüfen.</small></div>
+    <div class="field" style="margin-bottom:10px"><small style="color:var(--muted)">Beschriftungen werden per Muster (Zeit, Datum, lange IDs) ersetzt; Geometrie und Messwerte bleiben. Das ist keine geprüfte Anonymisierung — vor dem Teilen selbst prüfen. Geteilte Karten laufen nach 30 Tagen ab.</small></div>
     <div class="field"><small>Link</small>
       <input type="text" id="share-link" readonly style="width:100%"></div>
     <div class="anim-row">
@@ -701,7 +702,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=0ee2ad1d0df1",
+    "three": "../vendor/three/three.module.js?v=66e29c825d0b",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -711,8 +712,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import * as EP from './epconv.js?v=0ee2ad1d0df1';
-import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=0ee2ad1d0df1';
+import * as EP from './epconv.js?v=66e29c825d0b';
+import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=66e29c825d0b';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1016,6 +1017,9 @@ function buildTagUI() {
 function loadGeometry(data, name) {
   disposeMesh();
   current = data;
+  // A new map is a new decision. Carrying the previous one over is how an
+  // unscrubbed map inherits permission to be published.
+  if (typeof markAnonymised === 'function') markAnonymised(false);
   currentName = name;
   // Farbfenster gehören zum Datensatz, nicht zum Feldnamen: ohne Reset gilt
   // nach dem Laden einer zweiten Studie weiter das Fenster der ersten und die
@@ -1523,7 +1527,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=0ee2ad1d0df1'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=66e29c825d0b'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -1616,10 +1620,30 @@ function shareError(msg) {
   const e = document.getElementById('share-err'); e.style.display = ''; e.textContent = msg;
 }
 
+/* Set once the tag labels have been scrubbed. The server refuses what it can
+ * recognise, but it cannot prove a mesh is anonymous — so a map nobody has
+ * scrubbed does not get offered a public URL in the first place. */
+let _anonymised = false;
+
+function markAnonymised(yes) {
+  _anonymised = !!yes;
+  const button = document.getElementById('t-share');
+  if (!button) return;
+  button.disabled = !_anonymised;
+  button.title = _anonymised
+    ? ''
+    : 'Erst anonymisieren — geteilte Karten bekommen eine öffentliche Adresse.';
+}
+
 async function doShare() {
   if (!current) { alert('Erst eine Map laden.'); return; }
-  const { url, tok } = shareConfig();
-  if (!url || !tok) { alert('Backend-URL und Token nötig.'); return; }
+  if (!_anonymised) {
+    alert('Diese Karte wurde nicht anonymisiert. Geteilte Karten bekommen eine '
+        + 'öffentliche Adresse — erst anonymisieren, dann teilen.');
+    return;
+  }
+  const { url } = shareConfig();
+  if (!url) { alert('Keine Adresse für den Teilen-Dienst hinterlegt.'); return; }
   document.getElementById('share-result').style.display = 'none';
   document.getElementById('share-err').style.display = 'none';
   document.getElementById('share-busy').style.display = '';
@@ -1629,17 +1653,37 @@ async function doShare() {
     // binäres PLY (P-8): halbes Upload-Volumen, und das Schreiben blockiert die
     // Oberfläche nicht mehr sekundenlang.
     const ply = EP.exportPLYBinary(m, bakeColorsU8(), current.tagGroups && current.tagGroups.length ? [encodeTagComment(current.tagGroups)] : []);
-    const res = await fetch(url + '/maps', { method: 'POST', headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/octet-stream' }, body: ply });
-    if (!res.ok) { shareError('Upload fehlgeschlagen: HTTP ' + res.status); return; }
-    const { id, delete_token } = await res.json();
-    const link = `${PAGES_VIEWER}?src=${encodeURIComponent(url + '/maps/' + id + '.ply')}`;
+    const res = await fetch(url + '/maps', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        // What the server records rather than verifies. It says who claimed
+        // the map was scrubbed; it does not pretend to have checked.
+        'X-EPCore-Anonymised': 'yes',
+      },
+      body: ply,
+    });
+    if (!res.ok) {
+      let detail = 'HTTP ' + res.status;
+      try {
+        const body = await res.json();
+        if (body && body.detail) detail = body.detail;
+      } catch { /* the status is all there is */ }
+      shareError('Upload fehlgeschlagen: ' + detail);
+      return;
+    }
+    const body = await res.json();
+    const { id, delete_token } = body;
+    // The address people paste. It stays valid if the viewer moves, which
+    // ?src=<url> did not.
+    const link = body.url || `${location.origin}/view/${id}`;
     _shareDel = { url, id, token: delete_token };
     document.getElementById('share-link').value = link;
     document.getElementById('share-id').textContent = id;
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=0ee2ad1d0df1');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=66e29c825d0b');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -1978,6 +2022,27 @@ document.getElementById('rs-cycles').onchange = e => { recOpts.cycles = Math.max
 document.getElementById('rs-path').onchange = e => { recOpts.path = e.target.value; };
 document.getElementById('rs-ease').onchange = e => { recOpts.ease = e.target.checked; };
 
+document.getElementById('t-anonymise').onclick = (e) => {
+  e.stopPropagation();
+  if (!current) { alert('Erst eine Karte laden.'); return; }
+  const groups = current.tagGroups || [];
+  const before = groups.filter(g => isIdentifyingLabel(g.label)).length;
+  current.tagGroups = scrubTagGroups(groups);
+  markAnonymised(true);
+  // Redraw the markers so the new labels are what is on screen — the point of
+  // scrubbing is that the reader can see it happened.
+  try {
+    const radius = mesh?.geometry?.boundingSphere?.radius || 1;
+    buildTagMarkers(current.tagGroups, radius);
+  } catch (e) {
+    console.warn('tag markers not rebuilt', e);
+  }
+  alert(before
+    ? `${before} identifizierende Beschriftung(en) ersetzt. Geometrie und `
+      + 'Messwerte bleiben unverändert. Ergebnis vor dem Teilen selbst prüfen.'
+    : 'Keine identifizierenden Beschriftungen gefunden. Die Karte trägt nur '
+      + 'Geometrie und Messwerte — vor dem Teilen trotzdem selbst prüfen.');
+};
 document.getElementById('t-share').onclick = (e) => { e.stopPropagation(); doShare(); };
 document.getElementById('share-close').onclick = hideShareBox;
 document.getElementById('share-copy').onclick = () => { const i = document.getElementById('share-link'); i.select(); navigator.clipboard?.writeText(i.value); };
@@ -2079,7 +2144,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=0ee2ad1d0df1');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=66e29c825d0b');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -2104,13 +2169,30 @@ if (_params.has('demo')) {
   try { buildDemo(); } catch (e) { console.error('demo failed', e); }
 } else if (_params.get('src')) {
   loadURL(_params.get('src'));
+} else {
+  /* A shared map: /view/<id>. The path is the link people paste, so the id
+   * comes from it rather than from a query string — and the same page serves
+   * both, because nginx hands /view/<id> to this file unchanged. */
+  const shared = location.pathname.match(/\/view\/([A-Za-z0-9_-]{16,64})$/);
+  if (shared) {
+    loadURL(`/maps/${shared[1]}.ply`).catch((e) => {
+      console.error('shared map failed', e);
+      // 410 means the link outlived the map. That is a different thing from a
+      // broken link and the reader should be told which.
+      const message = String(e && e.message || e);
+      alert(/410|expired/i.test(message)
+        ? 'Dieser Link ist abgelaufen. Geteilte Karten werden nach der '
+          + 'vereinbarten Frist gelöscht.'
+        : 'Die geteilte Karte konnte nicht geladen werden.');
+    });
+  }
 }
 </script>
 
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=0ee2ad1d0df1';
+import '../shared/bridge.js?v=66e29c825d0b';
 
 window.epcoreNotify = (msg) => { console.warn('[epcore]', msg); alert(msg); };
 
