@@ -671,7 +671,7 @@
   <p class="muted" style="margin-top:26px" data-i18n="anon.footer"></p>
 </main>
 
-<script type="module" src="../shared/i18n.js?v=8933e5e3c1e3"></script>
+<script type="module" src="../shared/i18n.js?v=f2922480a034"></script>
 <script>
 /* ===================== DETECTION ==========================================
  * Which lab system produced these files. The same question epcore.core.study
@@ -2997,13 +2997,11 @@ async function buildPlan(files, profile) {
 // Der Browser kann sie nicht anonymisieren — dafür bräuchte er einen
 // DICOM-Parser und eine SQLite-Umsetzung. Er kann aber sagen, dass er es nicht
 // kann, und das ist der Unterschied zwischen einer Lücke und einer stillen.
-const PASSTHROUGH_MAGIC = [
-  // DICOM steht hier nicht mehr: es wird seit dem byte-weisen Schreiber
-  // anonymisiert, längenerhaltend und byte-identisch zu velocity.py.
-  { name: "SQLite-Datenbank", at: 0,
-    bytes: [0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66, 0x6f, 0x72,
-            0x6d, 0x61, 0x74, 0x20, 0x33, 0x00] },
-];
+// Beide früheren Einträge — DICOM und SQLite — werden inzwischen anonymisiert,
+// also steht hier nichts mehr. Die Liste bleibt: sie ist die Stelle, an der die
+// nächste Dateiart landet, die diese Seite nicht kann, und eine Lücke soll
+// weiterhin gemeldet und nicht verschwiegen werden.
+const PASSTHROUGH_MAGIC = [];
 
 async function unanonymisableKind(file) {
   for (const { name, at, bytes } of PASSTHROUGH_MAGIC) {
@@ -3204,11 +3202,219 @@ function anonymizeDicomBytes(bytes, replacement, targets, withDates) {
   return { changes, notes };
 }
 
+// ===========================================================================
+// SQLite, Seite für Seite
+// ===========================================================================
+//
+// Eine EnSite-Velocity-Studie hält ihre Demografie in `database/dws.db`:
+// Tabelle `patients` mit last_name, first_name, patient_id, date_of_birth,
+// Tabelle `studies` mit dem Klinikname. Weder Text noch XML — die Seite reichte
+// die Datei wortlos durch.
+//
+// Kein sql.js: ein Megabyte WASM in ein Werkzeug zu legen, das man als *eine*
+// Datei herunterlädt, wäre der falsche Handel. Stattdessen dieselbe Regel wie
+// bei DICOM — **längenerhaltend** überschreiben. Der Serial-Type im
+// Record-Header kodiert die Länge, also bleibt der Header unangetastet, keine
+// Zelle wächst, keine Seite muss geteilt werden, keine Freiliste anfassen.
+//
+// Zwei Preise, beide sichtbar:
+//
+//  * Ein Wert, der länger war als „Anonymous", behält Leerzeichen dahinter.
+//    `WHERE last_name = 'Anonymous'` findet ihn dann nicht. Die Python-Seite
+//    schreibt per UPDATE und hat das nicht — die Ausgaben unterscheiden sich
+//    also in den Auffüllzeichen, und das ist dokumentiert statt weggerundet.
+//  * **Die Länge des Originals überlebt.** Ein Vorname aus drei Buchstaben wird
+//    „Ano", einer aus fünf „Anony". Das identifiziert niemanden, verrät aber
+//    eine Kleinigkeit, und wer das nicht will, nimmt den Python-Pfad — der
+//    schreibt echte Werte, weil er echtes SQLite benutzen kann.
+//    Dasselbe gilt seit jeher für den DICOM-Pfad auf beiden Seiten.
+//
+// Was **nicht** angefasst wird: Zellen, deren Nutzlast auf Overflow-Seiten
+// weiterläuft. Sie werden gemeldet. Ein halb überschriebener Datensatz wäre
+// eine kaputte Datenbank, die sich öffnen lässt.
+const SQLITE_MAGIC_TEXT = "SQLite format 3\0";
+
+function sqliteVarint(bytes, at) {
+  let value = 0n;
+  for (let i = 0; i < 8; i++) {
+    const b = bytes[at + i];
+    value = (value << 7n) | BigInt(b & 0x7f);
+    if (!(b & 0x80)) return [Number(value), i + 1];
+  }
+  value = (value << 8n) | BigInt(bytes[at + 8]);
+  return [Number(BigInt.asIntN(64, value)), 9];
+}
+
+function sqliteHeader(bytes) {
+  if (bytes.length < 100) return null;
+  for (let i = 0; i < SQLITE_MAGIC_TEXT.length; i++) {
+    if (bytes[i] !== SQLITE_MAGIC_TEXT.charCodeAt(i)) return null;
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let pageSize = view.getUint16(16);
+  if (pageSize === 1) pageSize = 65536;
+  const reserved = bytes[20];
+  return { pageSize, reserved, pages: view.getUint32(28) };
+}
+
+/** Every table-leaf page reachable from `root`, as page numbers (1-based). */
+function sqliteLeafPages(bytes, header, root, seen) {
+  const out = [];
+  const stack = [root];
+  while (stack.length) {
+    const page = stack.pop();
+    if (page < 1 || seen.has(page)) continue;
+    seen.add(page);
+    const at = (page - 1) * header.pageSize;
+    if (at + header.pageSize > bytes.length) continue;
+    const view = new DataView(bytes.buffer, bytes.byteOffset + at,
+                              header.pageSize);
+    const offset = page === 1 ? 100 : 0;
+    const type = view.getUint8(offset);
+    const cells = view.getUint16(offset + 3);
+    if (type === 0x0d) { out.push(page); continue; }
+    if (type !== 0x05) continue;                     // not a table b-tree page
+    stack.push(view.getUint32(offset + 8));          // rightmost pointer
+    for (let i = 0; i < cells; i++) {
+      const cellAt = view.getUint16(offset + 12 + i * 2);
+      if (cellAt + 4 <= header.pageSize) stack.push(view.getUint32(cellAt));
+    }
+  }
+  return out;
+}
+
+/** Rows of one table leaf page: the record header and where each value sits. */
+function sqliteCells(bytes, header, page) {
+  const base = (page - 1) * header.pageSize;
+  const view = new DataView(bytes.buffer, bytes.byteOffset + base,
+                            header.pageSize);
+  const offset = page === 1 ? 100 : 0;
+  if (view.getUint8(offset) !== 0x0d) return [];
+  const count = view.getUint16(offset + 3);
+  const usable = header.pageSize - header.reserved;
+  const rows = [];
+  // Eine Blattseite hat acht Kopfbytes, eine innere zwölf (der zusätzliche
+  // Rechtszeiger). Mit zwölf gerechnet zeigt das Zellenfeld zwei Einträge zu
+  // weit — und findet dann Zellen, die keine sind, ohne dass etwas kaputtgeht:
+  // es wird schlicht nichts ersetzt und der Lauf meldet Erfolg.
+  for (let i = 0; i < count; i++) {
+    const cellAt = base + view.getUint16(offset + 8 + i * 2);
+    let at = cellAt;
+    const [payload, n1] = sqliteVarint(bytes, at); at += n1;
+    const [, n2] = sqliteVarint(bytes, at); at += n2;    // rowid
+    // Overflow: the local part of a large payload ends with a page pointer and
+    // the rest lives elsewhere. Reported, never half-written.
+    const maxLocal = usable - 35;
+    if (payload > maxLocal) { rows.push({ overflow: true }); continue; }
+    const recordAt = at;
+    const [headerLen, n3] = sqliteVarint(bytes, recordAt);
+    let typeAt = recordAt + n3;
+    let valueAt = recordAt + headerLen;
+    const values = [];
+    while (typeAt < recordAt + headerLen) {
+      const [serial, n] = sqliteVarint(bytes, typeAt); typeAt += n;
+      let size = 0;
+      if (serial >= 13 && serial % 2 === 1) size = (serial - 13) / 2;
+      else if (serial >= 12 && serial % 2 === 0) size = (serial - 12) / 2;
+      else size = [0, 1, 2, 3, 4, 6, 8, 8, 0, 0][serial] || 0;
+      values.push({ serial, at: valueAt, size,
+                    isText: serial >= 13 && serial % 2 === 1 });
+      valueAt += size;
+    }
+    rows.push({ values });
+  }
+  return rows;
+}
+
+/** Table name -> {root, columns} out of sqlite_master. */
+function sqliteSchema(bytes, header) {
+  const tables = {};
+  for (const page of sqliteLeafPages(bytes, header, 1, new Set())) {
+    for (const row of sqliteCells(bytes, header, page)) {
+      if (row.overflow || !row.values || row.values.length < 5) continue;
+      const [kind, name, , root, sql] = row.values;
+      if (!kind.isText || dicomLatin1(bytes.subarray(kind.at, kind.at + kind.size)) !== "table") {
+        continue;
+      }
+      const text = sql.isText
+        ? dicomLatin1(bytes.subarray(sql.at, sql.at + sql.size)) : "";
+      const inside = text.slice(text.indexOf("(") + 1, text.lastIndexOf(")"));
+      const columns = inside.split(",")
+        .map(part => part.trim().split(/[\s(]/)[0].replace(/^["'`\[]|["'`\]]$/g, ""))
+        .filter(Boolean);
+      let rootPage = 0;
+      if (root.serial >= 1 && root.serial <= 6) {
+        for (let i = 0; i < root.size; i++) rootPage = (rootPage << 8) | bytes[root.at + i];
+      }
+      tables[dicomLatin1(bytes.subarray(name.at, name.at + name.size))] =
+        { root: rootPage, columns };
+    }
+  }
+  return tables;
+}
+
+function sqliteIsPii(rules, table, column) {
+  const t = table.toLowerCase(), c = column.toLowerCase();
+  if (t.startsWith("sqlite_")) return false;
+  if ((rules.column_allowlist || []).some(a => c === a || c.endsWith(a))) return false;
+  if ((rules.pii_columns || []).includes(c)) return true;
+  return (rules.table_keywords || []).some(k => t.includes(k))
+      && (c === "value" || c === "name");
+}
+
+/**
+ * Overwrite the identifying columns in place. Returns
+ * `{ changes, overflow, tables }`; `bytes` is modified.
+ */
+function anonymizeSqliteBytes(bytes, rules, replacement, withDates) {
+  const header = sqliteHeader(bytes);
+  if (!header) return { changes: 0, overflow: 0, tables: 0, notes: ["kein SQLite-Kopf"] };
+  const schema = sqliteSchema(bytes, header);
+  let changes = 0, overflow = 0, tables = 0;
+
+  for (const [table, info] of Object.entries(schema)) {
+    if (!info.root) continue;
+    const wanted = info.columns
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => sqliteIsPii(rules, table, c));
+    if (!wanted.length) continue;
+    tables++;
+    for (const page of sqliteLeafPages(bytes, header, info.root, new Set())) {
+      for (const row of sqliteCells(bytes, header, page)) {
+        if (row.overflow) { overflow++; continue; }
+        for (const { c, i } of wanted) {
+          const value = row.values[i];
+          if (!value || !value.isText || value.size === 0) continue;
+          const isDate = (rules.date_columns || []).includes(c.toLowerCase());
+          if (isDate && !withDates && !/birth/.test(c.toLowerCase())) continue;
+          const base = (isDate && !/time/.test(c.toLowerCase()))
+            ? "20000101" : replacement;
+          const repl = dicomBytesOf(base.slice(0, value.size));
+          const out = new Uint8Array(value.size).fill(0x20);
+          out.set(repl);
+          let differs = false;
+          for (let k = 0; k < value.size; k++) {
+            if (bytes[value.at + k] !== out[k]) { differs = true; break; }
+          }
+          if (differs) { bytes.set(out, value.at); changes++; }
+        }
+      }
+    }
+  }
+  const notes = [];
+  if (overflow) {
+    notes.push(`${overflow} Datensatz/Datensätze laufen auf Overflow-Seiten `
+             + `weiter und wurden NICHT geändert`);
+  }
+  return { changes, overflow, tables, notes };
+}
+
 // === SCRUB-CORE END ===
 // === SCRUB-CORE EXPORTS: ANON_DOB, ANON_STARTTIME, ANON_PHYSICIAN, ANON_HOST, ANON_INI, FIXED_PSEUDONYMS, COMMON_EXCLUDED_NAMES, getPseudonym, PATIENT_CONTAINERS, DATA_CONTAINERS, normKey, demographicReplacement, DEMOGRAPHIC_RULES, anonymizeXml, anonymizeDemographicsXml, scrubPaths, anonymizeWmMaster, anonymizeGeInf, WM_MASTER_ID_START, WM_MASTER_ID_END, GE_INI_WIPE_KEYS, GE_INI_ID_KEYS, GE_INI_STRUCT_KEYS, GE_INI_ENC_SUFFIXES, PASSTHROUGH_MAGIC,
 //     unanonymisableKind, isDicomBytes, readDicomMeta, padReplacement,
 //     anonymizeDicomBytes, dicomTargets, dicomTagKey, dicomLatin1,
-//     dicomBytesOf, dicomArchiveRules ===
+//     dicomBytesOf, dicomArchiveRules, sqliteHeader, sqliteSchema,
+//     sqliteVarint, sqliteIsPii, anonymizeSqliteBytes ===
 
 function logLine(msg) {
   const el = document.getElementById('classic-log');
@@ -3287,6 +3493,8 @@ async function processFile(entry, plan) {
   // einem Geschwister der Patientenordner — eine Prüfung nur innerhalb fände
   // keine einzige davon.
   const head = new Uint8Array(await file.slice(0, 132).arrayBuffer());
+  // 132 Byte reichen für beide Erkennungen: DICM sitzt bei 128, der
+  // SQLite-Kopf in den ersten 100.
   if (isDicomBytes(head)) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const rules = dicomArchiveRules();
@@ -3297,6 +3505,23 @@ async function processFile(entry, plan) {
                                 : `DICOM: ${r.changes} Feld(er) ersetzt`;
     return { outPath, data: new Blob([bytes]), note,
              unanonymisable: r.notes.length ? "DICOM" : null };
+  }
+
+  // SQLite: an Ort und Stelle, längenerhaltend. Auch außerhalb eines
+  // Patientenordners — `database/dws.db` liegt im Studienbaum, nicht dort.
+  if (sqliteHeader(head)) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const rules = (dicomArchiveRules() || {}).sqlite;
+    if (rules) {
+      const r = anonymizeSqliteBytes(bytes, rules,
+                                     (dicomArchiveRules() || {}).replacement
+                                       || "Anonymous", true);
+      const note = r.notes.length
+        ? `SQLite: ${r.changes} Feld(er) ersetzt; ${r.notes.join("; ")}`
+        : `SQLite: ${r.changes} Feld(er) in ${r.tables} Tabelle(n) ersetzt`;
+      return { outPath, data: new Blob([bytes]), note,
+               unanonymisable: r.notes.length ? "SQLite-Datenbank" : null };
+    }
   }
 
   const kind = await unanonymisableKind(file);
