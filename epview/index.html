@@ -6,7 +6,7 @@
 <title>EPView · 3D Map Viewer</title>
 <link href="../vendor/fonts/fonts.css" rel="stylesheet">
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/i18n.js?v=2c7cce1158dd"></script>
+<script type="module" src="../shared/i18n.js?v=2abd79a533bc"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -221,6 +221,35 @@
   }
 
   /* readout (hover value) */
+  /* Elektrogramm-Panel: erscheint erst, wenn ein Mapping-Punkt angeklickt
+     wurde. Eine Studie kann tausende Punkte tragen, und keiner davon wird
+     gelesen, bevor jemand ihn sehen will. */
+  #egm {
+    position: fixed; right: 14px; bottom: 14px; z-index: 12; display: none;
+    width: min(440px, calc(100vw - 28px)); max-height: min(62vh, 560px);
+    overflow: auto;
+    font-family: var(--mono); font-size: 12px; color: var(--text);
+    background: rgba(5, 9, 12, 0.94); border: 1px solid var(--line-strong);
+    border-radius: 9px; box-shadow: var(--shadow);
+  }
+  #egm header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; background: inherit;
+  }
+  #egm header b { color: var(--accent); font-weight: 500; }
+  #egm header .sp { flex: 1; }
+  #egm .meta { padding: 6px 10px; color: var(--muted); line-height: 1.5; }
+  #egm .traces { padding: 2px 10px 10px; }
+  #egm .trace { margin-bottom: 6px; }
+  #egm .trace .lbl {
+    display: flex; justify-content: space-between; color: var(--muted);
+    font-size: 11px; margin-bottom: 1px;
+  }
+  #egm svg { display: block; width: 100%; height: 46px; }
+  #egm .warn { color: var(--warn, #e0b050); }
+  #egm-close { cursor: pointer; }
+
   #readout {
     position: fixed; z-index: 11; pointer-events: none; display: none;
     transform: translate(14px, -50%);
@@ -687,6 +716,14 @@
   <div class="cap" id="legend-cap">Voltage · mV</div>
 </div>
 
+<div id="egm" role="dialog" aria-label="Elektrogramm">
+  <header>
+    <b id="egm-title">—</b><span class="sp"></span>
+    <button class="chip" id="egm-close" title="Schließen">×</button>
+  </header>
+  <div class="meta" id="egm-meta"></div>
+  <div class="traces" id="egm-traces"></div>
+</div>
 <div id="readout"></div>
 
 <div id="loading">
@@ -720,7 +757,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=2c7cce1158dd",
+    "three": "../vendor/three/three.module.js?v=2abd79a533bc",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -730,8 +767,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import * as EP from './epconv.js?v=2c7cce1158dd';
-import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=2c7cce1158dd';
+import * as EP from './epconv.js?v=2abd79a533bc';
+import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=2abd79a533bc';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1034,6 +1071,8 @@ function buildTagUI() {
 
 function loadGeometry(data, name) {
   disposeMesh();
+  // Ein Elektrogramm gehört zu der Karte, aus der es kam.
+  if (typeof hideEgm === 'function') hideEgm();
   current = data;
   // A new map is a new decision. Carrying the previous one over is how an
   // unscrubbed map inherits permission to be published.
@@ -1441,6 +1480,118 @@ renderer.domElement.addEventListener('pointerleave', () => {
 });
 // Kamerabewegung ändert, was unter dem Zeiger liegt — aber nur, solange er drin ist.
 function onControlsChange() { if (_pointerInside) _readoutDirty = true; }
+/* =====================================================================
+ *  Elektrogramm eines Mapping-Punktes
+ *
+ *  Ein CARTO-Export legt pro Punkt eine eigene Signaldatei an, rund 1,9 MB.
+ *  Deshalb wird hier nichts vorgehalten: der Klick löst das Lesen aus, und
+ *  gelesen wird genau eine Datei.
+ * ===================================================================== */
+const egmBox = document.getElementById('egm');
+const egmTitle = document.getElementById('egm-title');
+const egmMeta = document.getElementById('egm-meta');
+const egmTraces = document.getElementById('egm-traces');
+
+// Was gezeigt wird: der bipolare Mapping-Kanal, sein unipolarer Partner und
+// eine Oberflächenableitung als Zeitbezug. Mehr als drei Kurven in einem
+// Panel dieser Größe liest niemand.
+const EGM_PREFERRED = ['M1-M2', 'M1', 'I', 'II'];
+const EGM_MAX_TRACES = 3;
+
+function hideEgm() { egmBox.style.display = 'none'; egmTraces.innerHTML = ''; }
+document.getElementById('egm-close').onclick = hideEgm;
+
+function egmChannels(egm) {
+  const chosen = EGM_PREFERRED.filter(n => egm.channels.includes(n));
+  // Nennt der Kopf andere Kanäle, nimm die ersten — eine leere Anzeige wäre
+  // schlechter als eine mit unerwarteten Namen.
+  if (!chosen.length) return egm.channels.slice(0, EGM_MAX_TRACES);
+  return chosen.slice(0, EGM_MAX_TRACES);
+}
+
+function traceSvg(samples, gainMv) {
+  const n = samples.length;
+  if (!n) return '<svg viewBox="0 0 100 46"></svg>';
+  const W = 400, H = 46, pad = 3;
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < n; i++) { const v = samples[i]; if (v < lo) lo = v; if (v > hi) hi = v; }
+  // Eine flache Spur ist eine Aussage; sie auf volle Höhe zu spreizen wäre
+  // eine erfundene.
+  const span = (hi - lo) || 1;
+  const step = Math.max(1, Math.floor(n / W));
+  const pts = [];
+  for (let i = 0; i < n; i += step) {
+    const x = (i / (n - 1)) * W;
+    const y = pad + (1 - (samples[i] - lo) / span) * (H - 2 * pad);
+    pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`
+       + `<polyline points="${pts.join(' ')}" fill="none" `
+       + `stroke="var(--accent)" stroke-width="1" vector-effect="non-scaling-stroke"/>`
+       + `</svg>`;
+}
+
+function showEgm(point, readEgm) {
+  let egm = null, failure = null;
+  try { egm = readEgm ? readEgm(point) : null; }
+  catch (err) { failure = err.message || String(err); }
+
+  egmTitle.textContent = `Punkt ${point.id}`;
+  egmTraces.innerHTML = '';
+
+  const bits = [];
+  if (point.bipolarMv != null) bits.push(`bipolar ${point.bipolarMv} mV`);
+  if (point.unipolarMv != null) bits.push(`unipolar ${point.unipolarMv} mV`);
+  if (point.woiMs) bits.push(`WOI ${point.woiMs[0]}…${point.woiMs[1]} ms`);
+  let meta = bits.join(' · ') || 'keine Messwerte im Export';
+
+  if (failure) {
+    meta += `<br><span class="warn">Signal nicht lesbar: ${failure}</span>`;
+  } else if (!egm) {
+    meta += '<br><span class="warn">Dieser Punkt trägt kein Elektrogramm.</span>';
+  } else {
+    const seconds = egm.samples[0].length / egm.sampleRateHz;
+    meta += `<br>${egm.channels.length} Kanäle · ${seconds.toFixed(2)} s`;
+    // Die Rate steht nicht in der Datei. Das gehört auf den Schirm, nicht in
+    // einen Kommentar: eine Zeitachse, die auf einer Annahme beruht, sieht
+    // aus wie eine gemessene.
+    if (egm.rateAssumed) {
+      meta += ` · <span class="warn">${egm.sampleRateHz} Hz angenommen</span>`;
+    }
+    for (const name of egmChannels(egm)) {
+      const idx = egm.channels.indexOf(name);
+      const data = egm.samples[idx];
+      let lo = Infinity, hi = -Infinity;
+      for (const v of data) { if (v < lo) lo = v; if (v > hi) hi = v; }
+      const ptp = ((hi - lo) * egm.gainMv).toFixed(3);
+      const row = document.createElement('div');
+      row.className = 'trace';
+      row.innerHTML = `<div class="lbl"><span>${name}</span><span>${ptp} mV</span></div>`
+                    + traceSvg(data, egm.gainMv);
+      egmTraces.appendChild(row);
+    }
+  }
+  egmMeta.innerHTML = meta;
+  egmBox.style.display = 'block';
+}
+
+// Klick auf einen Marker. Dieselben Objekte, die `tagHover` prüft — was
+// angezeigt wird, ist damit auch das, was getroffen wird.
+renderer.domElement.addEventListener('click', (e) => {
+  if (!tagMeshes.length) return;
+  ptr.x = (e.clientX / innerWidth) * 2 - 1;
+  ptr.y = -(e.clientY / innerHeight) * 2 + 1;
+  ray.setFromCamera(ptr, camera);
+  const objs = tagMeshes.filter(t => t.inst.visible).map(t => t.inst);
+  if (!objs.length) return;
+  const hit = ray.intersectObjects(objs, false)[0];
+  if (!hit || hit.instanceId == null) return;
+  const g = hit.object.userData.group;
+  const marker = g && g.points && g.points[hit.instanceId];
+  if (!marker || !marker.egm) return;      // ein Tag ohne Signal bleibt ein Tag
+  showEgm(marker.egm, current && current.readEgm);
+});
+
 // Raycast tag markers first; on hit show "<point label> · <group label>" in the readout.
 function tagHover() {
   if (!tagMeshes.length) return false;
@@ -1527,6 +1678,11 @@ function loadParsedMesh(m) {
     positions: m.positions, normals: m.normals || null, colors: null,
     scalars: m.scalars || {}, scalarNames: Object.keys(m.scalars || {}),
     faces: m.faces, tagGroups: m.tagGroups || null, source: m.source || null,
+    // Named, like everything else here: the field list is deliberate, so a
+    // parser that starts returning something new has to say so. `readEgm` is
+    // the closure that reads one point's signal on demand — dropping it left
+    // every mapping point reporting that it had no electrogram.
+    points: m.points || null, readEgm: m.readEgm || null,
   }, m.name || 'Mesh');
 }
 
@@ -1545,7 +1701,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=2c7cce1158dd'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=2abd79a533bc'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -1781,7 +1937,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=2c7cce1158dd');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=2abd79a533bc');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -2275,7 +2431,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=2c7cce1158dd');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=2abd79a533bc');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -2323,7 +2479,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=2c7cce1158dd';
+import '../shared/bridge.js?v=2abd79a533bc';
 
 window.epcoreNotify = (msg) => { console.warn('[epcore]', msg); alert(msg); };
 

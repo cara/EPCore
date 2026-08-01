@@ -12,7 +12,7 @@
  *  Parameter injiziert, damit das Modul ohne Bundler testbar bleibt.
  * ===================================================================== */
 
-import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=2c7cce1158dd';
+import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=2abd79a533bc';
 
 const SENTINEL = 1e4;
 
@@ -550,6 +550,183 @@ export function parseCartoMesh(text, name = 'CARTO') {
   return { name, positions, normals, faces, scalars, source: 'carto' };
 }
 
+/* ===================================================================== *
+ *  CARTO: Mapping-Punkte und ihre Elektrogramme
+ *
+ *  Ein Export legt pro Punkt eine eigene Signaldatei an, jede rund 1,9 MB.
+ *  Eine Studie mit zweitausend Punkten trägt darum Gigabytes an Signal, das
+ *  niemand sehen will, bevor er einen Punkt anklickt — also wird die
+ *  Punktliste sofort gelesen (ein paar Kilobyte XML je Punkt) und ein
+ *  Elektrogramm erst auf Abruf.
+ *
+ *  Die Python-Seite (epcore/epview/carto_points.py) liest dasselbe Format;
+ *  die Regeln unten sind dieselben, weil sie sonst auseinanderlaufen.
+ * ===================================================================== */
+
+// Jede Spalte einer Signaldatei ist so breit. Auf Whitespace zu trennen
+// verschiebt bei einem leeren Feld jeden folgenden Kanal um eine Spalte —
+// eine echte Kurve auf der falschen Ableitung, und die sieht normal aus.
+const CARTO_FIELD = 30;
+
+// CARTO 3 exportiert mit 1 kHz. Die Rate steht nicht in der Datei und lässt
+// sich aus ihr nicht herleiten, also reist die Annahme sichtbar mit.
+export const CARTO_ASSUMED_RATE_HZ = 1000;
+
+// Was CARTO schreibt, wo es keinen Wert hat.
+const CARTO_ABSENT = 10000;
+
+function cartoNumber(value) {
+  if (value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) && Math.abs(n) < CARTO_ABSENT ? n : null;
+}
+
+export function parseCartoEcg(text) {
+  const lines = text.split(/\r?\n/);
+  if (lines.length < 5 || !lines[0].startsWith('ECG_Export')) {
+    throw new Error('Keine CARTO-Signaldatei.');
+  }
+  let gain = null;
+  for (const line of lines.slice(1, 3)) {
+    const m = line.match(/gain\)\s*=\s*([0-9.eE+-]+)/);
+    if (m) gain = parseFloat(m[1]);
+  }
+  if (gain == null) {
+    throw new Error('Der Kopf nennt keine Verstärkung — die Zählwerte lassen '
+                  + 'sich nicht in Millivolt umrechnen.');
+  }
+
+  const header = lines[3];
+  if (header.length % CARTO_FIELD) {
+    throw new Error(`Kanalkopf ist ${header.length} Zeichen lang, kein `
+                  + `Vielfaches der Spaltenbreite ${CARTO_FIELD}.`);
+  }
+  const n = header.length / CARTO_FIELD;
+  const channels = [];
+  for (let i = 0; i < n; i++) {
+    const raw = header.slice(i * CARTO_FIELD, (i + 1) * CARTO_FIELD).trim();
+    const named = raw.match(/^(.*?)\((\d+)\)$/);
+    channels.push(named ? named[1] : raw);
+  }
+
+  const body = lines.slice(4).filter(l => l.trim().length);
+  const samples = channels.map(() => new Int32Array(body.length));
+  for (let row = 0; row < body.length; row++) {
+    const line = body[row];
+    for (let col = 0; col < n; col++) {
+      const cell = line.slice(col * CARTO_FIELD, (col + 1) * CARTO_FIELD).trim();
+      samples[col][row] = cell ? parseInt(cell, 10) || 0 : 0;
+    }
+  }
+  return { channels, samples, gainMv: gain,
+           sampleRateHz: CARTO_ASSUMED_RATE_HZ, rateAssumed: true };
+}
+
+// Positionstabelle: zwei Kopfzeilen, dann "Nr Zeit X Y Z".
+function parseCartoPositions(text) {
+  const out = new Map();
+  for (const line of text.split(/\r?\n/).slice(2)) {
+    const f = line.trim().split(/\s+/);
+    if (f.length < 5) continue;
+    const id = parseInt(f[0], 10);
+    const [x, y, z] = [f[2], f[3], f[4]].map(Number);
+    if (Number.isInteger(id) && [x, y, z].every(Number.isFinite)) out.set(id, [x, y, z]);
+  }
+  return out;
+}
+
+// Wo ein Punkt sitzt. Zwei Dateien tragen eine Position und meinen nicht
+// dasselbe: der Lagesensor sitzt im Katheterkörper, die Elektroden sind die
+// Elektroden. Der Punkt gehört an die Mapping-Elektrode — der Kopf der
+// Signaldatei nennt M1 als unipolaren Mapping-Kanal — also ist Elektrode 1
+// der Anker. (Die Schreibweise "Eleclectrode" ist die des Herstellers.)
+function cartoPositionOf(files, stem) {
+  for (const kind of ['Eleclectrode_Positions_OnAnnotation',
+                      'Sensor_Positions_OnAnnotation']) {
+    for (const name of Object.keys(files)) {
+      const bare = name.replace(/^.*\//, '');
+      if (!bare.startsWith(stem) || !bare.endsWith(kind + '.txt')) continue;
+      const found = parseCartoPositions(decodeLatin1(files[name]));
+      if (found.has(1)) return found.get(1);
+      if (found.size) return found.get(Math.min(...found.keys()));
+    }
+  }
+  // Kein Ort ist besser als der Ursprung: ein Punkt auf (0,0,0) läge mitten
+  // in der Kammer und sähe aus wie eine Messung.
+  return null;
+}
+
+export function parseCartoPoints(files) {
+  const names = Object.keys(files)
+    .filter(n => n.replace(/^.*\//, '').endsWith('_Point_Export.xml'));
+  if (!names.length) return [];
+
+  // Ohne XML-Parser gibt es keine Punkte zu lesen — aber eine leere Liste
+  // zurückzugeben heißt "diese Studie hat keine", und das ist etwas anderes.
+  // Der Unterschied ist genau der, den ein stiller Fehlschlag verwischt.
+  const parser = getDOMParser();
+  if (!parser) {
+    throw new Error('Kein XML-Parser verfügbar — Mapping-Punkte können nicht '
+                  + 'gelesen werden.');
+  }
+
+  const points = [];
+  const unreadable = [];
+  for (const name of names) {
+    const bare = name.replace(/^.*\//, '');
+
+    let root;
+    try {
+      root = parser.parseFromString(decodeLatin1(files[name]), 'text/xml')
+                   .documentElement;
+    } catch { root = null; }
+    if (!root || root.nodeName === 'parsererror') { unreadable.push(bare); continue; }
+
+    const attr = (tag, key) => {
+      const el = firstTag(root, tag);
+      return el ? el.getAttribute(key) : null;
+    };
+    const woiFrom = cartoNumber(attr('WOI', 'From'));
+    const woiTo = cartoNumber(attr('WOI', 'To'));
+    const ecgName = attr('ECG', 'FileName');
+
+    points.push({
+      id: root.getAttribute('ID') || bare,
+      xyz: cartoPositionOf(files, bare.replace('_Point_Export.xml', '')),
+      bipolarMv: cartoNumber(attr('Voltages', 'Bipolar')),
+      unipolarMv: cartoNumber(attr('Voltages', 'Unipolar')),
+      woiMs: (woiFrom != null && woiTo != null) ? [woiFrom, woiTo] : null,
+      mapAnnotation: cartoNumber(attr('Annotations', 'Map_Annotation')),
+      // Nur der nackte Name: ein Verzeichnispfad aus dem Export gehört nicht
+      // in etwas, das mit einer Karte weiterreist.
+      egmName: ecgName ? ecgName.replace(/^.*[\\/]/, '') : null,
+    });
+  }
+  points.sort((a, b) => (parseInt(a.id, 10) || 0) - (parseInt(b.id, 10) || 0));
+  if (unreadable.length) {
+    console.warn(`[epview] ${unreadable.length} von ${names.length} `
+               + `Punktdateien nicht lesbar: ${unreadable.slice(0, 5).join(', ')}`);
+  }
+  return points;
+}
+
+// Ein Elektrogramm auf Abruf. Der Aufrufer bekommt die Funktion, nicht die
+// Daten — das ist der ganze Punkt: erst beim Klick wird gelesen.
+export function cartoEgmReader(files) {
+  const byName = new Map();
+  for (const name of Object.keys(files)) byName.set(name.replace(/^.*\//, ''), name);
+  const cache = new Map();
+  return (point) => {
+    if (!point || !point.egmName) return null;
+    if (cache.has(point.egmName)) return cache.get(point.egmName);
+    const entry = byName.get(point.egmName);
+    if (!entry) return null;
+    const egm = parseCartoEcg(decodeLatin1(files[entry]));
+    cache.set(point.egmName, egm);
+    return egm;
+  };
+}
+
 // fflate.unzipSync wird injiziert (Browser: per import; Node-Test: nur .mesh direkt)
 export function parseCarto(bytes, unzipSync) {
   if (!unzipSync) throw new Error('ZIP-Entpacker (fflate) nicht verfügbar.');
@@ -559,6 +736,29 @@ export function parseCarto(bytes, unzipSync) {
     if (!name.toLowerCase().endsWith('.mesh')) continue;
     const text = decodeLatin1(files[name]);
     meshes.push(parseCartoMesh(text, name.replace(/^.*\//, '').replace(/\.mesh$/i, '')));
+  }
+  // Die Punktliste gehört zur Studie, nicht zu einem einzelnen Mesh, und ist
+  // billig. Die Elektrogramme sind es nicht — `readEgm` liest eines erst,
+  // wenn danach gefragt wird.
+  const points = parseCartoPoints(files);
+  const readEgm = cartoEgmReader(files);
+
+  // Punkte ohne Ort bekommen keinen Marker: einer auf (0,0,0) läge mitten in
+  // der Kammer und sähe aus wie eine Messung. Sie bleiben in `points`, damit
+  // eine Liste sie zeigen kann.
+  const placed = points.filter(p => p.xyz);
+  const tagGroups = placed.length ? [{
+    id: 'carto-points', label: 'Mapping-Punkte', category: 'mapping',
+    color: tagCategoryColor('annotation'),
+    points: placed.map(p => ({ position: p.xyz, label: `P${p.id}`, egm: p })),
+  }] : [];
+
+  for (const mesh of meshes) {
+    mesh.points = points;
+    mesh.readEgm = readEgm;
+    // An die bestehende Marker-Ebene angehängt statt daneben gebaut: Sichtbar-
+    // keit, Größe und Projektion gelten dann für beides gleich.
+    mesh.tagGroups = (mesh.tagGroups || []).concat(tagGroups);
   }
   return meshes;
 }
