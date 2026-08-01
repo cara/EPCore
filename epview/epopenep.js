@@ -110,6 +110,14 @@ function charArray(name, text) {
   return element(miMATRIX, w.concat());
 }
 
+/** A cell array of strings — how MATLAB holds a list of names. */
+function cellOfStrings(name, values) {
+  const w = new Writer();
+  w.bytes(arrayHead(1, [values.length ? 1 : 0, values.length], name));  // mxCELL
+  for (const value of values) w.bytes(charArray('', String(value)));
+  return element(miMATRIX, w.concat());
+}
+
 /** An empty double matrix — a field that exists and holds nothing. */
 function emptyMatrix(name, rows = 0, cols = 0) {
   const w = new Writer();
@@ -145,16 +153,22 @@ const column = (values, n) => (r) => {
 export function buildOpenEP(positions, faces, {
   activation = null, bipolar = null, unipolar = null,
   impedance = null, force = null, name = '', notes = '',
+  points = null, curves = null, pointNames = null,
 } = {}) {
   const n = positions.length / 3;
   const m = faces.length / 3;
   if (!n || !m) throw new Error('Leere Oberfläche: nichts zu schreiben.');
 
-  const told = notes || (
-    'Written by EPCore from a converted vendor export. It holds the surface '
-    + 'and its per-vertex scalars; there are no mapping points, electrograms '
-    + 'or ablation records in it, and those fields are empty rather than '
-    + 'filled with something invented.');
+  const placed = (points || []).filter(Boolean);
+  const told = notes || (placed.length
+    ? `Written by EPCore from a vendor export. It holds the surface, its `
+      + `per-vertex scalars and ${placed.length} mapping point(s) with their `
+      + `electrograms. There are no ablation records in it, and that field is `
+      + `empty rather than filled with something invented.`
+    : 'Written by EPCore from a converted vendor export. It holds the surface '
+      + 'and its per-vertex scalars; there are no mapping points, electrograms '
+      + 'or ablation records in it, and those fields are empty rather than '
+      + 'filled with something invented.');
 
   const triRep = structArray('triRep', [
     ['X', doubleMatrix('X', n, 3, (r, c) => positions[r * 3 + c])],
@@ -174,12 +188,37 @@ export function buildOpenEP(positions, faces, {
                                  (r, c) => (c === 0 ? uni(r) : c === 1 ? imp(r) : frc(r)))],
   ]);
 
-  // Empty on purpose: a converted surface carries no points.
+  // Empty when there are none — which is the case for a converted surface and
+  // not for a raw export the viewer read the points out of.
+  const rows = placed.length;
+  const width = Math.max(0, ...(curves || []).map(c => (c ? c.length : 0)));
+  const at = (list, r, c) => {
+    const p = placed[r];
+    const xyz = list === 'surf' ? (p.surfaceXyz || p.surface_xyz) : p.xyz;
+    return xyz && xyz[c] != null ? xyz[c] : NaN;
+  };
   const electric = structArray('electric', [
-    ['isPointLocationOnly', emptyMatrix('isPointLocationOnly')],
-    ['tags', emptyMatrix('tags')], ['names', emptyMatrix('names')],
-    ['egmX', emptyMatrix('egmX', 0, 3)], ['egmSurfX', emptyMatrix('egmSurfX', 0, 3)],
-    ['egm', emptyMatrix('egm')], ['egmUni', emptyMatrix('egmUni')],
+    ['isPointLocationOnly', rows ? logicalColumn('isPointLocationOnly', rows)
+                                 : emptyMatrix('isPointLocationOnly')],
+    ['tags', emptyMatrix('tags')],
+    ['names', rows ? cellOfStrings('names',
+        (pointNames && pointNames.length === rows) ? pointNames
+          : placed.map(p => String(p.id ?? p.label ?? '')))
+      : emptyMatrix('names')],
+    ['egmX', rows ? doubleMatrix('egmX', rows, 3, (r, c) => at('rov', r, c))
+                  : emptyMatrix('egmX', 0, 3)],
+    ['egmSurfX', rows ? doubleMatrix('egmSurfX', rows, 3, (r, c) => at('surf', r, c))
+                      : emptyMatrix('egmSurfX', 0, 3)],
+    // One point per row, padded with NaN to the longest. Not with zeros: a
+    // short sweep followed by zeros reads as a signal that went flat, which is
+    // a measurement nobody made.
+    ['egm', (rows && width)
+      ? doubleMatrix('egm', rows, width, (r, c) => {
+          const curve = (curves || [])[r];
+          return curve && c < curve.length ? curve[c] : NaN;
+        })
+      : emptyMatrix('egm')],
+    ['egmUni', emptyMatrix('egmUni')],
     ['ecgNames', emptyMatrix('ecgNames')], ['ecg', emptyMatrix('ecg')],
   ]);
 
