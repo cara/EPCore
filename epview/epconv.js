@@ -12,7 +12,7 @@
  *  Parameter injiziert, damit das Modul ohne Bundler testbar bleibt.
  * ===================================================================== */
 
-import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=2abd79a533bc';
+import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=5eac9e2ab1b7';
 
 const SENTINEL = 1e4;
 
@@ -214,7 +214,10 @@ function extractRhythmiaTags(root) {
       const pos = parseXyz(elText(xyzEl)); if (!pos) continue;
       const ppr = childByTag(ap, 'Properties');
       const plabel = (ppr && (elText(childByTag(ppr, 'OverrideLabel')) || elText(childByTag(ppr, 'Label')))) || '';
-      points.push({ position: pos, label: plabel });
+      const ts = ppr && (elText(childByTag(ppr, 'Timestamp'))
+                     || elText(childByTag(ppr, 'StartTime')));
+      points.push({ position: pos, label: plabel,
+                    time: ts != null && ts !== '' ? Number(ts) : null });
     }
     if (points.length) groups.push({ id: (set.getAttribute && set.getAttribute('id')) || label, label, category: 'annotation', color, points });
   }
@@ -224,7 +227,10 @@ function extractRhythmiaTags(root) {
     const pos = parseXyz(elText(xyzEl)); if (!pos) continue;
     const ppr = childByTag(ap, 'Properties');
     const seq = ppr && elText(childByTag(ppr, 'SequenceNumber'));
-    abl.push({ position: pos, label: seq ? ('Abl ' + seq) : 'Abl' });
+    const ats = ppr && (elText(childByTag(ppr, 'Timestamp'))
+                    || elText(childByTag(ppr, 'StartTime')));
+    abl.push({ position: pos, label: seq ? ('Abl ' + seq) : 'Abl',
+               time: ats != null && ats !== '' ? Number(ats) : null });
   }
   if (abl.length) groups.unshift({ id: 'ablation', label: 'Ablation', category: 'ablation', color: tagCategoryColor('ablation'), points: abl });
   return groups;
@@ -237,7 +243,162 @@ export function parseRhythmiaTagsFromXml(xml) {
 
 // XML -> Meshes. getPayload(idx) liefert die Binärbytes (sync ODER Promise);
 // beim Streaming werden so nur die wirklich benötigten Blöcke gelesen.
-async function buildRhythmiaMeshes(xml, getPayload) {
+/* Rhythmia: die durchgehenden Aufzeichnungen.
+ *
+ * Anders als CARTO und EnSite legt Rhythmia kein Signal *je Punkt* ab, sondern
+ * fortlaufende Blöcke *je Katheter* — `sigblk_..._cardiac_953_<Katheter>_<B|U|W>`
+ * mit einer eigenen Float64-Zeitachse daneben. Ein angeklickter Punkt trägt
+ * einen Zeitstempel; gezeigt wird also, was zu diesem Zeitpunkt aufgezeichnet
+ * war.
+ *
+ * Zwei Eigenschaften des Formats, die man messen muss statt sie zu raten:
+ *
+ * * Die Werte liegen **spaltenweise**: erst Kanal 0 über die ganze Aufnahme,
+ *   dann Kanal 1. Zeilenweise gelesen ergäbe das aus 64 Kanälen einen einzigen
+ *   verschränkten Strom — plausibel aussehendes Rauschen. Belegt über die
+ *   Autokorrelation (Versatz 1 deutlich höher als Versatz `cols`).
+ * * Die Werte sind Float32 in **Volt**. Belegt an drei Signalarten mit
+ *   verschiedenen erwarteten Größen: Korb-Bipolar 0,40 mV, Decapolar 2,9 mV,
+ *   12-Kanal-Oberflächen-EKG 1,8 mV Spitze-Tal.
+ *
+ * Die Abtastrate steht nicht im Namen zu raten, sondern folgt aus der
+ * Zeitachse selbst.
+ */
+const SIG_NAME = /sigblk_[0-9a-f]*_?cardiac_\d+_(.+?)_([BUW])\.dat$/;
+
+//: Wie viel um den Zeitpunkt herum gezeigt wird.
+const SIG_WINDOW_S = 1.0;
+
+function rhythmiaSignalIndex(root) {
+  const blocks = [];
+  for (const el of iterTag(root, 'inlinedbin')) {
+    const fname = el.getAttribute && el.getAttribute('fname');
+    if (!fname) continue;
+    const idx = parseInt((el.textContent || '').trim(), 10);
+    if (!Number.isFinite(idx)) continue;
+    const bare = fname.replace(/^.*\//, '');
+    const named = SIG_NAME.exec(bare);
+    const cols = parseInt(el.getAttribute('cols'), 10);
+    const rows = parseInt(el.getAttribute('rows'), 10);
+    const type = el.getAttribute('type');
+    if (named && type === 'Cardiac') {
+      blocks.push({ kind: 'signal', catheter: named[1], flavour: named[2],
+                    cols, rows, idx, prefix: bare.slice(0, bare.lastIndexOf('_' + named[2] + '.dat')) });
+    } else if (/cardiac_\d+_ts\.dat$/.test(bare) && type === 'Float64') {
+      blocks.push({ kind: 'time', rows, idx,
+                    prefix: bare.slice(0, bare.lastIndexOf('_ts.dat')) });
+    }
+  }
+  return blocks;
+}
+
+/** A reader that returns the recording around a point's timestamp. */
+function rhythmiaEgmReader(root, getRange) {
+  const blocks = rhythmiaSignalIndex(root);
+  const signals = blocks.filter(b => b.kind === 'signal');
+  const times = blocks.filter(b => b.kind === 'time');
+  if (!signals.length || !times.length || !getRange) return null;
+
+  // Bipolar zuerst: das ist, was ein Mapping-Punkt misst. Dann unipolar, dann
+  // was übrig ist. Der Korb hat 64 Kanäle, ein Diagnostikkatheter zehn — der
+  // mit den wenigsten ist der, dessen Kanäle einzeln etwas bedeuten.
+  const rank = (b) => (b.flavour === 'B' ? 0 : b.flavour === 'U' ? 1 : 2) * 100 + b.cols;
+  signals.sort((a, b) => rank(a) - rank(b));
+
+  // Typisierte Sichten verlangen Ausrichtung: ein Float64Array braucht einen
+  // durch 8 teilbaren Versatz. Der Streaming-Pfad liefert frische Puffer und
+  // erfüllt das zufällig; eine Sicht in ein bereits geladenes Archiv nicht,
+  // und dann wirft der Konstruktor statt etwas Falsches zu liefern. Kopieren,
+  // wenn nötig — ein Fenster ist klein.
+  const aligned = (raw, Type) => {
+    const size = Type.BYTES_PER_ELEMENT;
+    if (raw.byteOffset % size === 0) {
+      return new Type(raw.buffer, raw.byteOffset, Math.floor(raw.byteLength / size));
+    }
+    return new Type(raw.slice().buffer, 0, Math.floor(raw.byteLength / size));
+  };
+
+  const timeCache = new Map();
+  const readTimes = async (block) => {
+    if (timeCache.has(block.idx)) return timeCache.get(block.idx);
+    const raw = await getRange(block.idx, 0, block.rows * 8);
+    const t = aligned(raw, Float64Array);
+    timeCache.set(block.idx, t);
+    return t;
+  };
+
+  // Eine Oberflächenableitung als Zeitbezug: ohne sie sagt ein intrakardiales
+  // Signal nichts darüber, wo im Herzzyklus man sich befindet.
+  //
+  // Nur aus derselben Signalgruppe. Ein Archiv enthält mehrere, jede mit
+  // eigener Zeitachse und eigener Länge — die Indizes der einen in einem Block
+  // der anderen zu benutzen zeigte die falsche Sekunde neben der richtigen,
+  // und nichts daran sähe verkehrt aus.
+  // Gegen die gefundene Uhr verglichen, nicht gegen ein zurechtgeschnittenes
+  // Präfix: Katheternamen enthalten selbst Unterstriche, und "eine Ebene
+  // abschneiden" traf SurfaceECG12_1 nie.
+  const surfaceFor = (sig, clock) => signals.find(
+    b => /surfaceecg/i.test(b.catheter) && b !== sig
+      && b.prefix.startsWith(clock.prefix) && b.rows === sig.rows);
+
+  const windowOf = async (block, from, to) => {
+    const raw = await getRange(block.idx, from * 4, (to - from) * 4);
+    return aligned(raw, Float32Array);
+  };
+
+  return async (point) => {
+    if (!point || point.time == null) return null;
+
+    for (const sig of signals) {
+      if (/surfaceecg/i.test(sig.catheter) && signals.length > 1) continue;
+      const clock = times.find(t => t.prefix === sig.prefix
+                                 || sig.prefix.startsWith(t.prefix));
+      if (!clock) continue;
+      const t = await readTimes(clock);
+      if (!t.length || point.time < t[0] || point.time > t[t.length - 1]) continue;
+
+      // Binäre Suche: die Zeitachse ist monoton.
+      let lo = 0, hi = t.length - 1;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (t[mid] < point.time) lo = mid + 1; else hi = mid; }
+      const rate = t.length > 1 ? 1 / ((t[t.length - 1] - t[0]) / (t.length - 1)) : 0;
+      const half = Math.max(1, Math.round(rate * SIG_WINDOW_S / 2));
+      const from = Math.max(0, lo - half);
+      const to = Math.min(sig.rows, lo + half);
+      if (to <= from) continue;
+
+      // Spaltenweise: Kanal c beginnt bei c * rows * 4.
+      const channels = [], samples = [];
+      const suffix = sig.flavour === 'B' ? ' bi' : sig.flavour === 'U' ? ' uni' : '';
+      const many = Math.min(sig.cols, 3);
+      for (let c = 0; c < many; c++) {
+        const raw = await getRange(sig.idx, (c * sig.rows + from) * 4, (to - from) * 4);
+        samples.push(aligned(raw, Float32Array));
+        // Rhythmia benennt die einzelnen Kanäle im Export nicht; die Nummer
+        // ist die Spalte, nicht eine Ableitung, und wird auch so beschriftet.
+        channels.push(`${sig.catheter} ${c + 1}${suffix}`);
+      }
+      // Und, wenn vorhanden, eine Oberflächenableitung derselben Uhr darunter.
+      const surface = surfaceFor(sig, clock);
+      if (surface) {
+        try {
+          samples.push(await windowOf(surface, from, to));
+          channels.push(`${surface.catheter} 1`);
+        } catch (e) { /* fehlt sie, fehlt nur der Zeitbezug */ }
+      }
+      return {
+        channels, samples,
+        gainMv: 1000,                      // Float32 in Volt
+        sampleRateHz: Math.round(rate * 1000) / 1000,
+        rateAssumed: false,                // aus der Zeitachse gerechnet
+        window: [t[from], t[Math.min(to, t.length) - 1]],
+        atSeconds: point.time,
+      };
+    }
+    return null;
+  };
+}
+
+async function buildRhythmiaMeshes(xml, getPayload, getRange) {
   const doc = parseXmlTolerant(xml);
   const root = doc.documentElement;
 
@@ -327,13 +488,26 @@ async function buildRhythmiaMeshes(xml, getPayload) {
     const per = assignTagsToMeshes(meshes, tagGroups);
     for (let i = 0; i < meshes.length; i++) if (per[i].length) meshes[i].tagGroups = per[i];
   }
+  // Ein Punkt zeigt hier keine eigene Aufnahme, sondern das Fenster der
+  // laufenden um seinen Zeitstempel — Rhythmia legt Signale je Katheter ab,
+  // nicht je Punkt.
+  const readEgm = rhythmiaEgmReader(root, getRange);
+  if (readEgm) {
+    for (const mesh of meshes) {
+      mesh.readEgm = readEgm;
+      for (const g of (mesh.tagGroups || [])) {
+        for (const pt of g.points) if (pt.time != null) pt.egm = pt;
+      }
+    }
+  }
   return meshes;
 }
 
 // In-Memory (kleine Archive / ?src / Tests)
 export async function parseRhythmia(bytes) {
   const { xml, payloads } = extractRhythmia(bytes);
-  return buildRhythmiaMeshes(xml, idx => payloads[idx]);
+  return buildRhythmiaMeshes(xml, idx => payloads[idx],
+    (idx, at, len) => payloads[idx].subarray(at, at + len));
 }
 
 // Streaming aus File-Objekten — für sehr große Archive (mehrere GB, 10+ Teile):
@@ -427,14 +601,15 @@ export async function parseRhythmiaFiles(files, onProgress) {
   if (onProgress) onProgress({ phase: 'build', done: total, total });
   let xml = xmlParts.join('').replace(/BIN=([0-9]+)/g, 'BIN="$1"');
   xml = sanitizeXml(xml);
-  return buildRhythmiaMeshes(xml, idx => readRange(payloadLoc[idx].start, payloadLoc[idx].len));
+  return buildRhythmiaMeshes(xml, idx => readRange(payloadLoc[idx].start, payloadLoc[idx].len),
+    (idx, at, len) => readRange(payloadLoc[idx].start + at, len));
 }
 
 /* ===================================================================== *
  *  EnSite (NavX / Velocity / Precision)
  * ===================================================================== */
 
-export function parseEnSite(text) {
+export function parseEnSite(text, dxlText = null) {
   const dp = getDOMParser();
   if (!dp) throw new Error('DOMParser nicht verfügbar (Browser erforderlich).');
   const doc = dp.parseFromString(text, 'application/xml');
@@ -495,7 +670,30 @@ export function parseEnSite(text) {
     }
     volIdx++;
   }
+
+  // Die Punkte liegen nicht im DIF, sondern im DxL-Export daneben. Ohne ihn
+  // ist die Karte vollständig und hat eben keine Punkte — das ist kein Fehler,
+  // sondern eine Datei, die der Benutzer nicht mitgegeben hat.
+  if (dxlText) attachDxL(meshes, dxlText);
   return meshes;
+}
+
+// Punkte und Kurven an die Meshes hängen, in derselben Form wie bei CARTO,
+// damit die Anzeige nur eine kennt.
+function attachDxL(meshes, dxlText) {
+  const dxl = parseDxL(dxlText);
+  const placed = dxl.points.filter(p => p.xyz);
+  const tagGroups = placed.length ? [{
+    id: 'ensite-points', label: 'Mapping-Punkte', category: 'mapping',
+    color: tagCategoryColor('annotation'),
+    points: placed.map(p => ({ position: p.xyz, label: p.label || ('P' + p.id),
+                               egm: p })),
+  }] : [];
+  for (const mesh of meshes) {
+    mesh.points = dxl.points;
+    mesh.readEgm = dxl.readEgm;
+    mesh.tagGroups = (mesh.tagGroups || []).concat(tagGroups);
+  }
 }
 
 /* ===================================================================== *
@@ -548,6 +746,132 @@ export function parseCartoMesh(text, name = 'CARTO') {
   if (la) scalars.lat = cleanScalar(fitToVertexCount(la, nv));
 
   return { name, positions, normals, faces, scalars, source: 'carto' };
+}
+
+/* ===================================================================== *
+ *  EnSite: Mapping-Punkte und ihre Kurven aus dem DxL-Export
+ *
+ *  EnSite trennt Geometrie von Messwerten: die Oberfläche steht im DIF-XML,
+ *  die Punkte und ihre Kurven in einer eigenen CSV. Deren Kopf beschreibt sich
+ *  selbst — eine Spalte je Punkt, benannte Zeilen für Position, LAT und
+ *  Spannung, und weiter unten Blöcke mit den Abtastwerten.
+ *
+ *  Die Abtastrate steht in der Datei ("Sample rate:"). Sie wird von dort
+ *  gelesen und nicht angenommen — anders als bei CARTO, wo sie fehlt.
+ * ===================================================================== */
+
+// Zeilen, die einen Punkt beschreiben: Name -> Feld. Was hier nicht steht,
+// wird nicht gelesen; eine Zeile, die der Hersteller später umbenennt, fehlt
+// dann sichtbar, statt still auf einem falschen Feld zu landen.
+const DXL_FIELDS = {
+  'pt number': 'number', 'rov trace': 'label', 'ref trace': 'reference',
+  'rov LAT': 'latSeconds', 'ref LAT': 'referenceLatSeconds',
+  'peak2peak': 'bipolarMv', 'peak neg': 'peakNegativeMv',
+  'roving x': 'x', 'roving y': 'y', 'roving z': 'z',
+  'surfPt x': 'sx', 'surfPt y': 'sy', 'surfPt z': 'sz',
+  'cycle len': 'cycleLengthMs', 'utilized': 'utilized',
+};
+
+function dxlCells(line) {
+  const parts = line.split(',');
+  return { key: parts[0].replace(/:\s*$/, '').trim(), values: parts.slice(1) };
+}
+
+function dxlNumber(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  // Eine leere Zelle ist kein Wert. `Number('')` ist 0, und eine 0 sieht aus
+  // wie eine Messung: 0,0 mV Spitze-Tal heißt "flach", nicht "nicht erhoben".
+  if (!text) return null;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function parseDxL(text) {
+  const lines = text.split(/\r?\n/);
+
+  let sampleRateHz = null;
+  const rows = new Map();          // Feldname -> Werte
+  let waveStart = -1, waveLabels = null;
+  let seenFields = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line || line[0] === '*') continue;
+    const { key, values } = dxlCells(line);
+
+    if (key === 'Sample rate') { sampleRateHz = dxlNumber(values[0]); continue; }
+    if (key in DXL_FIELDS && !rows.has(key)) {
+      rows.set(key, values);
+      seenFields = true;
+      continue;
+    }
+    // Der zweite "rov trace:"-Kopf leitet die Kurven ein: erst die Felder,
+    // dann derselbe Kopf noch einmal, dann Zeile für Zeile die Abtastwerte.
+    if (key === 'rov trace' && seenFields && rows.has('rov trace') && waveStart < 0) {
+      waveLabels = values.map(v => v.trim());
+      waveStart = i + 1;
+    }
+  }
+
+  if (!rows.size) throw new Error('Keine DxL-Datenzeilen gefunden.');
+  if (!(sampleRateHz > 0)) {
+    // Ohne Rate ist die Zeitachse unbekannt. Sie zu raten hieße, eine gemessene
+    // vorzutäuschen — die Datei nennt sie, also ist ihr Fehlen ein Befund.
+    // Auch die 0 wird abgelehnt: eine Sekunde mit 0 Hz ist unendlich lang.
+    throw new Error('Der DxL-Export nennt keine brauchbare Abtastrate '
+                  + `("Sample rate:" = ${sampleRateHz}).`);
+  }
+
+  const count = Math.max(...[...rows.values()].map(v => v.length));
+  const points = [];
+  for (let c = 0; c < count; c++) {
+    const get = (key) => { const v = rows.get(key); return v ? v[c] : undefined; };
+    const p = { id: String(c + 1), column: c };
+    for (const [key, field] of Object.entries(DXL_FIELDS)) {
+      const raw = get(key);
+      if (raw == null) continue;
+      p[field] = (field === 'label' || field === 'reference')
+        ? String(raw).trim() : dxlNumber(raw);
+    }
+    // Der Punkt gehört an die Roving-Elektrode. Die auf die Oberfläche
+    // projizierte Position ist die Karte, nicht die Messung.
+    p.xyz = [p.x, p.y, p.z].every(v => v != null) ? [p.x, p.y, p.z] : null;
+    p.surfaceXyz = [p.sx, p.sy, p.sz].every(v => v != null) ? [p.sx, p.sy, p.sz] : null;
+    if (p.number != null) p.id = String(p.number) + '.' + (c + 1);
+    points.push(p);
+  }
+
+  // Auf Abruf: die Kurve eines Punktes ist eine Spalte über zehntausend
+  // Zeilen. Alle auf einmal zu lesen wäre bei achtzig Punkten das
+  // Achtzigfache der Arbeit für das, was einer sehen will.
+  const cache = new Map();
+  const readEgm = (point) => {
+    if (!point || waveStart < 0 || point.column == null) return null;
+    if (cache.has(point.column)) return cache.get(point.column);
+    const values = [];
+    for (let i = waveStart; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line || !line.length) break;             // Leerzeile trennt die Blöcke
+      const cell = line.split(',')[point.column + 1];
+      if (cell === undefined) break;
+      const n = Number(cell);
+      if (!Number.isFinite(n)) break;               // nächster Kopf, nicht mehr Daten
+      values.push(n);
+    }
+    if (!values.length) return null;
+    // Die Werte stehen bereits in Millivolt; die Verstärkung ist deshalb 1 und
+    // nicht etwa unbekannt.
+    const egm = {
+      channels: [waveLabels && waveLabels[point.column] || point.label || 'rov'],
+      samples: [Float32Array.from(values)],
+      gainMv: 1, sampleRateHz, rateAssumed: false,
+    };
+    cache.set(point.column, egm);
+    return egm;
+  };
+
+  return { points, sampleRateHz, readEgm, labels: waveLabels };
 }
 
 /* ===================================================================== *
@@ -1130,6 +1454,12 @@ export async function loadRawFiles(files, unzipSync, onProgress) {
     return parseRhythmiaFiles(files, onProgress);
   }
   if (zip) return parseCarto(new Uint8Array(await zip.arrayBuffer()), unzipSync);
-  if (xml) return parseEnSite(await xml.text());
-  throw new Error('Unbekanntes Rohformat. Erwartet: Rhythmia (.000/.001…), CARTO (.zip) oder EnSite (.xml).');
+  if (xml) {
+    // EnSite trennt Geometrie und Messwerte auf zwei Dateien. Liegt die CSV
+    // dabei, kommen die Punkte mit; liegt sie nicht dabei, bleibt es bei der
+    // Oberfläche.
+    const csv = files.find(f => f.name.toLowerCase().endsWith('.csv'));
+    return parseEnSite(await xml.text(), csv ? await csv.text() : null);
+  }
+  throw new Error('Unbekanntes Rohformat. Erwartet: Rhythmia (.000/.001…), CARTO (.zip) oder EnSite (.xml, optional mit DxL-.csv).');
 }

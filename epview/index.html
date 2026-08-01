@@ -6,7 +6,7 @@
 <title>EPView · 3D Map Viewer</title>
 <link href="../vendor/fonts/fonts.css" rel="stylesheet">
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/i18n.js?v=2abd79a533bc"></script>
+<script type="module" src="../shared/i18n.js?v=5eac9e2ab1b7"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -757,7 +757,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=2abd79a533bc",
+    "three": "../vendor/three/three.module.js?v=5eac9e2ab1b7",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -767,8 +767,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import * as EP from './epconv.js?v=2abd79a533bc';
-import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=2abd79a533bc';
+import * as EP from './epconv.js?v=5eac9e2ab1b7';
+import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=5eac9e2ab1b7';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1531,18 +1531,26 @@ function traceSvg(samples, gainMv) {
        + `</svg>`;
 }
 
-function showEgm(point, readEgm) {
-  let egm = null, failure = null;
-  try { egm = readEgm ? readEgm(point) : null; }
-  catch (err) { failure = err.message || String(err); }
-
-  egmTitle.textContent = `Punkt ${point.id}`;
+async function showEgm(point, readEgm) {
+  // Rhythmia liest ein Fenster aus einem mehrere Gigabyte großen Archiv und
+  // antwortet deshalb mit einem Promise; CARTO und EnSite haben ihre Datei
+  // schon. Beides wird hier abgewartet, damit der Aufrufer den Unterschied
+  // nicht kennen muss.
+  egmTitle.textContent = `Punkt ${point.id ?? point.label ?? '—'}`;
   egmTraces.innerHTML = '';
+  egmMeta.textContent = 'Lade Signal…';
+  egmBox.style.display = 'block';
+
+  let egm = null, failure = null;
+  try { egm = readEgm ? await readEgm(point) : null; }
+  catch (err) { failure = err.message || String(err); }
 
   const bits = [];
   if (point.bipolarMv != null) bits.push(`bipolar ${point.bipolarMv} mV`);
   if (point.unipolarMv != null) bits.push(`unipolar ${point.unipolarMv} mV`);
+  if (point.peakNegativeMv != null) bits.push(`peak neg ${point.peakNegativeMv} mV`);
   if (point.woiMs) bits.push(`WOI ${point.woiMs[0]}…${point.woiMs[1]} ms`);
+  if (point.cycleLengthMs != null) bits.push(`CL ${point.cycleLengthMs} ms`);
   let meta = bits.join(' · ') || 'keine Messwerte im Export';
 
   if (failure) {
@@ -1557,6 +1565,15 @@ function showEgm(point, readEgm) {
     // aus wie eine gemessene.
     if (egm.rateAssumed) {
       meta += ` · <span class="warn">${egm.sampleRateHz} Hz angenommen</span>`;
+    } else {
+      meta += ` · ${egm.sampleRateHz} Hz`;
+    }
+    // Rhythmia legt kein Signal je Punkt ab, sondern durchgehende Aufnahmen je
+    // Katheter. Was hier steht, ist ein Fenster um den Zeitpunkt des Punktes —
+    // und das gehört dazugesagt, sonst liest es sich wie seine eigene Messung.
+    if (egm.window) {
+      meta += '<br>Fenster aus der laufenden Aufzeichnung um den Zeitpunkt '
+            + 'dieses Punktes, nicht seine eigene Messung.';
     }
     for (const name of egmChannels(egm)) {
       const idx = egm.channels.indexOf(name);
@@ -1589,7 +1606,8 @@ renderer.domElement.addEventListener('click', (e) => {
   const g = hit.object.userData.group;
   const marker = g && g.points && g.points[hit.instanceId];
   if (!marker || !marker.egm) return;      // ein Tag ohne Signal bleibt ein Tag
-  showEgm(marker.egm, current && current.readEgm);
+  showEgm(marker.egm, current && current.readEgm)
+    .catch(err => console.error('[epview] Elektrogramm:', err));
 });
 
 // Raycast tag markers first; on hit show "<point label> · <group label>" in the readout.
@@ -1701,7 +1719,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=2abd79a533bc'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=5eac9e2ab1b7'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -1937,7 +1955,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=2abd79a533bc');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=5eac9e2ab1b7');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -2431,7 +2449,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=2abd79a533bc');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=5eac9e2ab1b7');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -2479,7 +2497,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=2abd79a533bc';
+import '../shared/bridge.js?v=5eac9e2ab1b7';
 
 window.epcoreNotify = (msg) => { console.warn('[epcore]', msg); alert(msg); };
 
