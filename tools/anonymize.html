@@ -671,7 +671,7 @@
   <p class="muted" style="margin-top:26px" data-i18n="anon.footer"></p>
 </main>
 
-<script type="module" src="../shared/i18n.js?v=00fd46cbcb0f"></script>
+<script type="module" src="../shared/i18n.js?v=35c3891c3b99"></script>
 <script>
 /* ===================== DETECTION ==========================================
  * Which lab system produced these files. The same question epcore.core.study
@@ -1355,6 +1355,8 @@ const PROFILES = {
         "backup_suffix": ".epview-backup",
         "sqlite": {
           "pii_columns": [
+            "accession_number",
+            "accessionnumber",
             "address",
             "birthdate",
             "birthday",
@@ -1416,6 +1418,11 @@ const PROFILES = {
         },
         "dicom": {
           "pii_tags": [
+            {
+              "group": 8,
+              "element": 80,
+              "name": "AccessionNumber"
+            },
             {
               "group": 8,
               "element": 128,

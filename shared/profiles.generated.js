@@ -496,6 +496,8 @@ export const PROFILES = {
         "backup_suffix": ".epview-backup",
         "sqlite": {
           "pii_columns": [
+            "accession_number",
+            "accessionnumber",
             "address",
             "birthdate",
             "birthday",
@@ -557,6 +559,11 @@ export const PROFILES = {
         },
         "dicom": {
           "pii_tags": [
+            {
+              "group": 8,
+              "element": 80,
+              "name": "AccessionNumber"
+            },
             {
               "group": 8,
               "element": 128,
