@@ -6,7 +6,7 @@
 <title>EPView · 3D Map Viewer</title>
 <link href="../vendor/fonts/fonts.css" rel="stylesheet">
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/i18n.js?v=39eddcc58e0a"></script>
+<script type="module" src="../shared/i18n.js?v=e5905472e7c5"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -240,6 +240,17 @@
   #egm header b { color: var(--accent); font-weight: 500; }
   #egm header .sp { flex: 1; }
   #egm .meta { padding: 6px 10px; color: var(--muted); line-height: 1.5; }
+  #egm .chans {
+    display: flex; flex-wrap: wrap; gap: 4px;
+    padding: 6px 10px; border-bottom: 1px solid var(--line);
+  }
+  #egm .chans button {
+    font: inherit; font-size: 11px; cursor: pointer;
+    padding: 1px 6px; border-radius: 5px;
+    border: 1px solid var(--line-strong); background: transparent;
+    color: var(--muted);
+  }
+  #egm .chans button.on { color: var(--accent); border-color: var(--accent); }
   #egm .traces { padding: 2px 10px 10px; }
   #egm .trace { margin-bottom: 6px; }
   #egm .trace .lbl {
@@ -724,6 +735,7 @@
     <button class="chip" id="egm-close" title="Schließen">×</button>
   </header>
   <div class="meta" id="egm-meta"></div>
+  <div class="chans" id="egm-chans"></div>
   <div class="traces" id="egm-traces"></div>
 </div>
 <div id="readout"></div>
@@ -759,7 +771,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=39eddcc58e0a",
+    "three": "../vendor/three/three.module.js?v=e5905472e7c5",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -769,10 +781,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import * as EP from './epconv.js?v=39eddcc58e0a';
-import * as EPM from './epmetrics.js?v=39eddcc58e0a';
-import * as EPO from './epopenep.js?v=39eddcc58e0a';
-import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=39eddcc58e0a';
+import * as EP from './epconv.js?v=e5905472e7c5';
+import * as EPM from './epmetrics.js?v=e5905472e7c5';
+import * as EPO from './epopenep.js?v=e5905472e7c5';
+import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=e5905472e7c5';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1555,6 +1567,11 @@ const egmBox = document.getElementById('egm');
 const egmTitle = document.getElementById('egm-title');
 const egmMeta = document.getElementById('egm-meta');
 const egmTraces = document.getElementById('egm-traces');
+const egmChans = document.getElementById('egm-chans');
+
+// Welche Kanäle gezeigt werden, über Punkte hinweg. Wer einen Kanal gewählt
+// hat, will ihn am nächsten Punkt wiedersehen und nicht erneut suchen.
+let egmChosen = null;
 
 // Was gezeigt wird: der bipolare Mapping-Kanal, sein unipolarer Partner und
 // eine Oberflächenableitung als Zeitbezug. Mehr als drei Kurven in einem
@@ -1562,15 +1579,65 @@ const egmTraces = document.getElementById('egm-traces');
 const EGM_PREFERRED = ['M1-M2', 'M1', 'I', 'II'];
 const EGM_MAX_TRACES = 3;
 
-function hideEgm() { egmBox.style.display = 'none'; egmTraces.innerHTML = ''; }
+function hideEgm() {
+  egmBox.style.display = 'none';
+  egmTraces.innerHTML = '';
+  egmChans.innerHTML = '';
+}
 document.getElementById('egm-close').onclick = hideEgm;
 
 function egmChannels(egm) {
+  // Eine getroffene Wahl gilt weiter, solange die Kanäle sie hergeben.
+  if (egmChosen) {
+    const kept = egmChosen.filter(n => egm.channels.includes(n));
+    if (kept.length) return kept;
+  }
   const chosen = EGM_PREFERRED.filter(n => egm.channels.includes(n));
   // Nennt der Kopf andere Kanäle, nimm die ersten — eine leere Anzeige wäre
   // schlechter als eine mit unerwarteten Namen.
   if (!chosen.length) return egm.channels.slice(0, EGM_MAX_TRACES);
   return chosen.slice(0, EGM_MAX_TRACES);
+}
+
+/* Die Kanalauswahl. Ein CARTO-Punkt trägt 26 Kanäle und drei davon zu zeigen
+ * ist eine Vorauswahl, keine Beschränkung — wer die vierte Ableitung sehen
+ * will, soll sie sehen können, ohne die Datei woanders zu öffnen. */
+function buildChannelChips(egm, point) {
+  egmChans.innerHTML = '';
+  if (!egm || egm.channels.length < 2) return;
+  const showing = new Set(egmChannels(egm));
+  for (const name of egm.channels) {
+    const chip = document.createElement('button');
+    chip.textContent = name;
+    chip.className = showing.has(name) ? 'on' : '';
+    chip.onclick = () => {
+      const next = new Set(egmChannels(egm));
+      if (next.has(name)) next.delete(name); else next.add(name);
+      // Nicht auf null zurückfallen: ein Panel ohne Kurve sieht aus wie ein
+      // Punkt ohne Signal, und das ist etwas anderes.
+      if (!next.size) return;
+      egmChosen = egm.channels.filter(c => next.has(c));
+      drawTraces(egm);
+      buildChannelChips(egm, point);
+    };
+    egmChans.appendChild(chip);
+  }
+}
+
+function drawTraces(egm) {
+  egmTraces.innerHTML = '';
+  for (const name of egmChannels(egm)) {
+    const idx = egm.channels.indexOf(name);
+    const data = egm.samples[idx];
+    let lo = Infinity, hi = -Infinity;
+    for (const v of data) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    const ptp = ((hi - lo) * egm.gainMv).toFixed(3);
+    const row = document.createElement('div');
+    row.className = 'trace';
+    row.innerHTML = `<div class="lbl"><span>${name}</span><span>${ptp} mV</span></div>`
+                  + traceSvg(data, egm.gainMv);
+    egmTraces.appendChild(row);
+  }
 }
 
 function traceSvg(samples, gainMv) {
@@ -1639,18 +1706,8 @@ async function showEgm(point, readEgm) {
       meta += '<br>Fenster aus der laufenden Aufzeichnung um den Zeitpunkt '
             + 'dieses Punktes, nicht seine eigene Messung.';
     }
-    for (const name of egmChannels(egm)) {
-      const idx = egm.channels.indexOf(name);
-      const data = egm.samples[idx];
-      let lo = Infinity, hi = -Infinity;
-      for (const v of data) { if (v < lo) lo = v; if (v > hi) hi = v; }
-      const ptp = ((hi - lo) * egm.gainMv).toFixed(3);
-      const row = document.createElement('div');
-      row.className = 'trace';
-      row.innerHTML = `<div class="lbl"><span>${name}</span><span>${ptp} mV</span></div>`
-                    + traceSvg(data, egm.gainMv);
-      egmTraces.appendChild(row);
-    }
+    drawTraces(egm);
+    buildChannelChips(egm, point);
   }
   egmMeta.innerHTML = meta;
   egmBox.style.display = 'block';
@@ -1783,7 +1840,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=39eddcc58e0a'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=e5905472e7c5'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -2031,7 +2088,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=39eddcc58e0a');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=e5905472e7c5');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -2526,7 +2583,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=39eddcc58e0a');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=e5905472e7c5');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -2574,7 +2631,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=39eddcc58e0a';
+import '../shared/bridge.js?v=e5905472e7c5';
 
 window.epcoreNotify = (msg) => { console.warn('[epcore]', msg); alert(msg); };
 
