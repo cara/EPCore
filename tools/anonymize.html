@@ -671,7 +671,7 @@
   <p class="muted" style="margin-top:26px" data-i18n="anon.footer"></p>
 </main>
 
-<script type="module" src="../shared/i18n.js?v=93087b1bc2af"></script>
+<script type="module" src="../shared/i18n.js?v=df7208797d7e"></script>
 <script>
 /* ===================== DETECTION ==========================================
  * Which lab system produced these files. The same question epcore.core.study
@@ -2984,8 +2984,39 @@ async function buildPlan(files, profile) {
   };
 }
 
+// Dateiarten, die dieses Werkzeug nicht anonymisieren kann und die trotzdem
+// Kennungen tragen. Erkannt an ihren Magic-Bytes, nicht an der Endung: das
+// Format schreibt keine vor, und die Profile schließen nur `*.dcm` aus — und
+// das auch nur bei Boston, GE und Abbott, nicht bei CARTO, EnSite und Rhythmia.
+//
+// Gemessen an einem echten EnSite-Export: drei DICOM mit den Namen des
+// überweisenden und des durchführenden Arztes, und `database/dws.db` mit
+// Nachname, Vorname, Patienten-ID und Geburtsdatum in der Tabelle `patients`.
+// Beides ist weder Text noch XML, also ging es hier unangetastet durch.
+//
+// Der Browser kann sie nicht anonymisieren — dafür bräuchte er einen
+// DICOM-Parser und eine SQLite-Umsetzung. Er kann aber sagen, dass er es nicht
+// kann, und das ist der Unterschied zwischen einer Lücke und einer stillen.
+const PASSTHROUGH_MAGIC = [
+  { name: "DICOM", at: 128, bytes: [0x44, 0x49, 0x43, 0x4d] },              // "DICM"
+  { name: "SQLite-Datenbank", at: 0,
+    bytes: [0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66, 0x6f, 0x72,
+            0x6d, 0x61, 0x74, 0x20, 0x33, 0x00] },
+];
+
+async function unanonymisableKind(file) {
+  for (const { name, at, bytes } of PASSTHROUGH_MAGIC) {
+    if (file.size < at + bytes.length) continue;
+    const head = new Uint8Array(
+      await file.slice(at, at + bytes.length).arrayBuffer());
+    if (bytes.every((b, i) => head[i] === b)) return name;
+  }
+  return null;
+}
+
 // === SCRUB-CORE END ===
-// === SCRUB-CORE EXPORTS: ANON_DOB, ANON_STARTTIME, ANON_PHYSICIAN, ANON_HOST, ANON_INI, FIXED_PSEUDONYMS, COMMON_EXCLUDED_NAMES, getPseudonym, PATIENT_CONTAINERS, DATA_CONTAINERS, normKey, demographicReplacement, DEMOGRAPHIC_RULES, anonymizeXml, anonymizeDemographicsXml, scrubPaths, anonymizeWmMaster, anonymizeGeInf, WM_MASTER_ID_START, WM_MASTER_ID_END, GE_INI_WIPE_KEYS, GE_INI_ID_KEYS, GE_INI_STRUCT_KEYS, GE_INI_ENC_SUFFIXES ===
+// === SCRUB-CORE EXPORTS: ANON_DOB, ANON_STARTTIME, ANON_PHYSICIAN, ANON_HOST, ANON_INI, FIXED_PSEUDONYMS, COMMON_EXCLUDED_NAMES, getPseudonym, PATIENT_CONTAINERS, DATA_CONTAINERS, normKey, demographicReplacement, DEMOGRAPHIC_RULES, anonymizeXml, anonymizeDemographicsXml, scrubPaths, anonymizeWmMaster, anonymizeGeInf, WM_MASTER_ID_START, WM_MASTER_ID_END, GE_INI_WIPE_KEYS, GE_INI_ID_KEYS, GE_INI_STRUCT_KEYS, GE_INI_ENC_SUFFIXES, PASSTHROUGH_MAGIC,
+//     unanonymisableKind ===
 
 function logLine(msg) {
   const el = document.getElementById('classic-log');
@@ -3059,6 +3090,11 @@ async function processFile(entry, plan) {
     if (out) return { outPath, data: out.data, note: out.note };
   }
 
+  const kind = await unanonymisableKind(file);
+  if (kind) {
+    return { outPath, data: file, unanonymisable: kind,
+             note: `${kind} — NICHT anonymisiert` };
+  }
   return { outPath, data: file, note: null };
 }
 
@@ -3081,6 +3117,7 @@ async function runWriter(writer, plan) {
   progress.value = 0;
   progress.max = total;
 
+  const untouched = new Map();
   for (const entry of all) {
     const out = await processFile(entry, plan);
     await writer.write(out.outPath, out.data);
@@ -3088,10 +3125,28 @@ async function runWriter(writer, plan) {
     progress.value = done;
     setStatus(`${done} / ${total}: ${out.outPath}`);
     if (out.note) logLine(`[${out.note}] ${out.outPath}`);
+    if (out.unanonymisable) {
+      untouched.set(out.unanonymisable,
+                    (untouched.get(out.unanonymisable) || 0) + 1);
+    }
   }
   await writer.close();
   setStatus(`Fertig. ${done} Dateien geschrieben.`);
   logLine(`✓ ${done} Dateien geschrieben.`);
+
+  // Zuletzt und deutlich: eine Ausgabe mit diesen Dateien darf nicht als
+  // anonymisiert gelten. Die Zeile je Datei oben geht in einer langen Liste
+  // unter; diese hier steht am Ende, wo der Blick landet.
+  if (untouched.size) {
+    const what = [...untouched].map(([k, n]) => `${n}× ${k}`).join(", ");
+    logLine("");
+    logLine(`⚠ ACHTUNG: ${what} wurden unverändert übernommen. Sie tragen `
+          + `typischerweise Patienten- und Arztnamen und können hier nicht `
+          + `anonymisiert werden.`);
+    logLine(`  Die Anwendung (epcore anonymize) behandelt beide. Diese Ausgabe `
+          + `nicht weitergeben, bevor das geschehen ist.`);
+    setStatus(`Fertig — aber ${what} sind NICHT anonymisiert.`);
+  }
 }
 
 class FsWriter {
