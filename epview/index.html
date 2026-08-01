@@ -6,7 +6,7 @@
 <title>EPView · 3D Map Viewer</title>
 <link href="../vendor/fonts/fonts.css" rel="stylesheet">
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/i18n.js?v=5eac9e2ab1b7"></script>
+<script type="module" src="../shared/i18n.js?v=39eddcc58e0a"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -524,6 +524,7 @@
 <div id="stats">
   <div><b id="st-verts">—</b> <span data-i18n="map.vertices"></span></div>
   <div><b id="st-faces">—</b> <span data-i18n="map.faces"></span></div>
+  <div id="st-metrics"></div>
 </div>
 
 <div id="toolbar">
@@ -571,6 +572,7 @@
       <button class="tool" id="ex-ply-ascii" data-i18n="map.ply.ascii"></button>
       <button class="tool" id="ex-obj" data-i18n="map.obj"></button>
       <button class="tool" id="ex-stl" data-i18n="map.stl"></button>
+<button class="tool" id="ex-mat" data-i18n="map.openep"></button>
     </div>
   </div>
   <button class="tool" id="t-anonymise" data-i18n="map.anonymise"></button>
@@ -757,7 +759,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=5eac9e2ab1b7",
+    "three": "../vendor/three/three.module.js?v=39eddcc58e0a",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -767,8 +769,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import * as EP from './epconv.js?v=5eac9e2ab1b7';
-import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=5eac9e2ab1b7';
+import * as EP from './epconv.js?v=39eddcc58e0a';
+import * as EPM from './epmetrics.js?v=39eddcc58e0a';
+import * as EPO from './epopenep.js?v=39eddcc58e0a';
+import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=39eddcc58e0a';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1452,9 +1456,69 @@ function refreshDisplayToggles() {
 }
 
 /* ---------- stats ---------- */
+const N = (v, digits = 1) => v.toLocaleString('de-DE',
+  { minimumFractionDigits: digits, maximumFractionDigits: digits });
+
 function updateStats(data) {
   document.getElementById('st-verts').textContent = (data.positions.length/3).toLocaleString('de-DE');
   document.getElementById('st-faces').textContent = (data.faces.length/3).toLocaleString('de-DE');
+  updateMetrics(data);
+}
+
+/* Die Kennzahlen, die eine Karte gelesen wird: Fläche, Volumen, Narbenanteil,
+ * Aktivierungszeit. Dieselben Regeln wie `epcore epview metrics`, damit eine
+ * Zahl vom Schirm und eine von der Kommandozeile dieselbe ist.
+ *
+ * Was nicht bestimmbar ist, steht als solches da statt als Zahl: ein offenes
+ * Netz hat kein Volumen, und eine Karte ohne Spannungswerte keinen
+ * Narbenanteil. */
+function updateMetrics(data) {
+  const box = document.getElementById('st-metrics');
+  box.innerHTML = '';
+  if (!data || !data.positions || !data.faces || !data.faces.length) return;
+
+  let m;
+  try {
+    m = EPM.summarise(data.positions, data.faces, {
+      voltage: data.scalars && data.scalars.voltage,
+      lat: data.scalars && data.scalars.lat,
+    });
+  } catch (err) { console.warn('[epview] Kennzahlen:', err); return; }
+
+  const rows = [];
+  rows.push([T('map.metrics.area') || 'Oberfläche', `${N(m.surfaceAreaMm2 / 100)} cm²`]);
+  if (m.volumeMm3 != null) {
+    rows.push([T('map.metrics.volume') || 'Volumen', `${N(m.volumeMm3 / 1000)} ml`]);
+  } else {
+    // Ein offenes Netz umschließt nichts. Eine Zahl zu zeigen, die die Formel
+    // trotzdem liefert, wäre eine erfundene.
+    rows.push([T('map.metrics.volume') || 'Volumen',
+               `<span class="muted">${T('map.metrics.open') || 'offene Fläche'}</span>`]);
+  }
+  if (m.lowVoltage && m.lowVoltage.fraction != null) {
+    rows.push([`&lt; ${N(m.lowVoltage.thresholdMv, 1)} mV`,
+               `${N(m.lowVoltage.areaMm2 / 100)} cm² (${N(m.lowVoltage.fraction * 100)} %)`]);
+    rows.push([T('map.metrics.mean') || 'Mittlere Spannung', `${N(m.meanVoltageMv, 2)} mV`]);
+    if (m.lowVoltage.unmeasuredMm2 > 0) {
+      // Der Anteil bezieht sich auf die gemessene Fläche. Wie viel nicht
+      // gemessen wurde, gehört daneben, sonst liest sich der Anteil als
+      // Aussage über die ganze Karte.
+      rows.push([T('map.metrics.unmeasured') || 'ungemessen',
+                 `${N(m.lowVoltage.unmeasuredMm2 / 100)} cm²`]);
+    }
+  }
+  if (m.activation && m.activation.totalActivationTimeMs != null) {
+    const a = m.activation;
+    const cover = a.coverage < 0.999 ? ` (${N(a.coverage * 100, 0)} %)` : '';
+    rows.push([T('map.metrics.tat') || 'Aktivierungszeit',
+               `${N(a.totalActivationTimeMs, 0)} ms${cover}`]);
+  }
+
+  for (const [label, value] of rows) {
+    const el = document.createElement('div');
+    el.innerHTML = `<b>${value}</b> <span>${label}</span>`;
+    box.appendChild(el);
+  }
 }
 
 /* =====================================================================
@@ -1719,7 +1783,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=5eac9e2ab1b7'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=39eddcc58e0a'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -1788,6 +1852,18 @@ function exportMesh(fmt) {
   else if (fmt === 'ply-ascii') download(base + '.ply', EP.exportPLY(m, bakeColorsU8()), 'text/plain');
   else if (fmt === 'obj') download(base + '.obj', EP.exportOBJ(m, bakeColorsU8()), 'text/plain');
   else if (fmt === 'stl') download(base + '.stl', EP.exportSTL(m), 'application/octet-stream');
+  else if (fmt === 'openep') {
+    // Die Oberfläche mit ihren Messwerten im OpenEP-Format, damit sie dort
+    // ausgewertet werden kann. Mapping-Punkte und Elektrogramme reisen nicht
+    // mit — eine umgewandelte Karte hat sie nicht, und die Datei sagt das in
+    // ihrem `notes`-Feld selbst.
+    const sc = m.scalars || {};
+    download(base + '.mat',
+             EPO.buildOpenEP(m.positions, m.faces, {
+               activation: sc.lat, bipolar: sc.voltage, unipolar: sc.unipolar,
+               impedance: sc.impedance, force: sc.force, name: base }),
+             'application/octet-stream');
+  }
 }
 
 /* =====================================================================
@@ -1955,7 +2031,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=5eac9e2ab1b7');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=39eddcc58e0a');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -2197,6 +2273,7 @@ document.getElementById('ex-ply').onclick = () => exportMesh('ply');
 document.getElementById('ex-ply-ascii').onclick = () => exportMesh('ply-ascii');
 document.getElementById('ex-obj').onclick = () => exportMesh('obj');
 document.getElementById('ex-stl').onclick = () => exportMesh('stl');
+document.getElementById('ex-mat').onclick = () => exportMesh('openep');
 
 document.getElementById('mode').onchange = e => { selectMode(e.target.value); applyColors(); };
 document.getElementById('cmap').onchange = e => { state.cmap = e.target.value; applyColors(); };
@@ -2449,7 +2526,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=5eac9e2ab1b7');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=39eddcc58e0a');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -2497,7 +2574,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=5eac9e2ab1b7';
+import '../shared/bridge.js?v=39eddcc58e0a';
 
 window.epcoreNotify = (msg) => { console.warn('[epcore]', msg); alert(msg); };
 
