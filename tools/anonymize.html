@@ -671,7 +671,7 @@
   <p class="muted" style="margin-top:26px" data-i18n="anon.footer"></p>
 </main>
 
-<script type="module" src="../shared/i18n.js?v=3bbc3714043e"></script>
+<script type="module" src="../shared/i18n.js?v=8933e5e3c1e3"></script>
 <script>
 /* ===================== DETECTION ==========================================
  * Which lab system produced these files. The same question epcore.core.study
@@ -2998,7 +2998,8 @@ async function buildPlan(files, profile) {
 // DICOM-Parser und eine SQLite-Umsetzung. Er kann aber sagen, dass er es nicht
 // kann, und das ist der Unterschied zwischen einer Lücke und einer stillen.
 const PASSTHROUGH_MAGIC = [
-  { name: "DICOM", at: 128, bytes: [0x44, 0x49, 0x43, 0x4d] },              // "DICM"
+  // DICOM steht hier nicht mehr: es wird seit dem byte-weisen Schreiber
+  // anonymisiert, längenerhaltend und byte-identisch zu velocity.py.
   { name: "SQLite-Datenbank", at: 0,
     bytes: [0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66, 0x6f, 0x72,
             0x6d, 0x61, 0x74, 0x20, 0x33, 0x00] },
@@ -3014,9 +3015,200 @@ async function unanonymisableKind(file) {
   return null;
 }
 
+// ===========================================================================
+// DICOM, byte für byte
+// ===========================================================================
+//
+// Der Browser hat keinen DICOM-Parser und soll auch keinen 1-MB-WASM-Klotz
+// mitschleppen. Er braucht auch keinen: die Werte werden **längenerhaltend**
+// überschrieben, genau wie in velocity.py. Ein Ersatzwert wird auf die Länge
+// des Originals aufgefüllt oder abgeschnitten, also verschiebt sich kein Byte,
+// keine Sequenzlänge muss neu gerechnet werden und kein Offset wandert.
+//
+// Der Preis steht in `padReplacement`: ein Pseudonym, das länger ist als der
+// echte Wert, wird gekürzt. Das ist kein Datenverlust, der jemanden
+// identifizierbar lässt — der Originalwert ist weg —, aber es soll niemanden
+// überraschen.
+//
+// Die Tag-Listen kommen aus demselben Profil wie auf der Python-Seite. Zwei
+// Listen wären zwei Meinungen darüber, was eine Kennung ist.
+// Latin-1 in beide Richtungen. DICOM-Zeichenketten sind byteweise, und ein
+// TextDecoder("utf-8") würde aus einem Umlaut zwei Bytes machen — in einem
+// längenerhaltenden Schreibvorgang wäre das genau der Fehler, den er vermeidet.
+function dicomLatin1(bytes) {
+  let out = "";
+  for (let i = 0; i < bytes.length; i++) out += String.fromCharCode(bytes[i]);
+  return out;
+}
+
+function dicomBytesOf(text) {
+  const out = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) out[i] = text.charCodeAt(i) & 0xff;
+  return out;
+}
+
+const TS_IMPLICIT_LE = "1.2.840.10008.1.2";
+const TS_EXPLICIT_LE = "1.2.840.10008.1.2.1";
+const TS_EXPLICIT_BE = "1.2.840.10008.1.2.2";
+
+const DICOM_LONG_VR = new Set(["OB", "OW", "OF", "SQ", "UT", "UN"]);
+
+// Bei Implicit VR steht die VR nicht in der Datei. Für die Tags, die hier
+// überhaupt angefasst werden, ist sie bekannt.
+const DICOM_IMPLICIT_VR = new Map([
+  [0x00080020, "DA"], [0x00080021, "DA"], [0x00080022, "DA"], [0x00080023, "DA"],
+  [0x00100030, "DA"], [0x00100032, "TM"], [0x00100040, "CS"], [0x00102160, "SH"],
+  [0x00100020, "LO"], [0x00101000, "LO"], [0x00101040, "LO"], [0x00102154, "SH"],
+  [0x00104000, "LT"],
+]);
+
+function dicomTagKey(group, element) { return (group << 16) | element; }
+
+// Ein DICOM ist ein DICOM, gleich welches Labsystem den Export geschrieben hat.
+// Die Tag-Liste steht im EnSite-Profil, weil dort die Archiv-Regeln stehen, gilt
+// aber für jede Datei mit DICM an Byte 128.
+function dicomArchiveRules() {
+  for (const key of Object.keys(PROFILES)) {
+    const arch = PROFILES[key] && PROFILES[key].scrub && PROFILES[key].scrub.archive;
+    if (arch && arch.dicom) return arch;
+  }
+  return null;
+}
+
+function dicomTargets(profile, withDates) {
+  const arch = profile && profile.archive;
+  const dcm = (arch && arch.dicom) || { pii_tags: [], date_tags: [] };
+  const out = new Map();
+  for (const t of dcm.pii_tags || []) out.set(dicomTagKey(t.group, t.element), t.name);
+  if (withDates) {
+    for (const t of dcm.date_tags || []) out.set(dicomTagKey(t.group, t.element), t.name);
+  }
+  return out;
+}
+
+function isDicomBytes(bytes) {
+  return bytes.length >= 132 && bytes[128] === 0x44 && bytes[129] === 0x49
+      && bytes[130] === 0x43 && bytes[131] === 0x4d;      // "DICM"
+}
+
+// Die File-Meta-Gruppe ist immer Explicit VR LE. Ohne (0002,0010) läuft der
+// Walker bei Implicit VR sofort aus dem Tritt und meldet still "0 Felder" —
+// die Datei sähe sauber aus und wäre es nicht.
+function readDicomMeta(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let o = 132, groupEnd = null, ts = null;
+  const n = bytes.length;
+  while (o + 8 <= n) {
+    const g = view.getUint16(o, true), e = view.getUint16(o + 2, true);
+    if (g !== 0x0002) break;
+    const vr = String.fromCharCode(bytes[o + 4], bytes[o + 5]);
+    let len, hdr;
+    if (DICOM_LONG_VR.has(vr)) {
+      if (o + 12 > n) break;
+      len = view.getUint32(o + 8, true); hdr = 12;
+    } else {
+      len = view.getUint16(o + 6, true); hdr = 8;
+    }
+    const start = o + hdr;
+    if (start + len > n) break;
+    if (g === 0x0002 && e === 0x0000 && len >= 4) {
+      groupEnd = start + len + view.getUint32(start, true);
+    } else if (g === 0x0002 && e === 0x0010) {
+      ts = dicomLatin1(bytes.subarray(start, start + len)).trim().replace(/\0+$/, "");
+    }
+    o = start + len;
+  }
+  return { transferSyntax: ts, datasetAt: groupEnd === null ? o : groupEnd };
+}
+
+function padReplacement(vr, length, replacement) {
+  if (length === 0) return null;
+  let base;
+  if (vr === "DA") base = "20000101";
+  else if (vr === "TM") base = "000000";
+  else if (vr === "CS") base = "O";                // Geschlecht "other"
+  else base = replacement;
+  const bytes = dicomBytesOf(base);
+  if (bytes.length >= length) return bytes.subarray(0, length);
+  const out = new Uint8Array(length);
+  out.set(bytes);
+  out.fill(vr === "UI" ? 0x00 : 0x20, bytes.length);
+  return out;
+}
+
+// Gibt { changes, notes } zurück und verändert `bytes` an Ort und Stelle.
+function anonymizeDicomBytes(bytes, replacement, targets, withDates) {
+  const notes = [];
+  if (!isDicomBytes(bytes)) {
+    return { changes: 0, notes: ["kein DICM-Magic — NICHT geprüft"] };
+  }
+  let { transferSyntax, datasetAt } = readDicomMeta(bytes);
+  if (transferSyntax === null) {
+    // Rohes Dataset ohne Meta-Gruppe: Explicit VR LE annehmen, aber sichtbar
+    // machen, dass geraten wurde.
+    transferSyntax = TS_EXPLICIT_LE;
+    datasetAt = 132;
+    notes.push("keine TransferSyntaxUID — Explicit VR LE angenommen");
+  }
+  if (transferSyntax === TS_EXPLICIT_BE) {
+    // Lieber laut abbrechen als still "0 Felder" melden.
+    return { changes: 0,
+             notes: ["Explicit VR Big Endian wird nicht unterstützt — NICHT anonymisiert"] };
+  }
+  const implicit = transferSyntax === TS_IMPLICIT_LE;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const n = bytes.length;
+  let o = datasetAt, changes = 0;
+
+  while (o + 8 <= n) {
+    const g = view.getUint16(o, true), e = view.getUint16(o + 2, true);
+    if (g === 0x7fe0 && e === 0x0010) break;        // ab PixelData keine PII
+    if (g === 0xfffe) { o += 8; continue; }         // Item / Delimiter
+    let vr, len, hdr, isSeq;
+    if (implicit) {
+      len = view.getUint32(o + 4, true);
+      hdr = 8;
+      vr = DICOM_IMPLICIT_VR.get(dicomTagKey(g, e)) || "LO";
+      isSeq = len === 0xffffffff;
+      if (!isSeq && len >= 8 && o + hdr + 4 <= n
+          && view.getUint16(o + hdr, true) === 0xfffe
+          && view.getUint16(o + hdr + 2, true) === 0xe000) {
+        isSeq = true;   // SQ mit definierter Länge, nur am ersten Item erkennbar
+      }
+    } else {
+      vr = String.fromCharCode(bytes[o + 4], bytes[o + 5]);
+      if (DICOM_LONG_VR.has(vr)) {
+        if (o + 12 > n) break;
+        len = view.getUint32(o + 8, true); hdr = 12;
+      } else {
+        len = view.getUint16(o + 6, true); hdr = 8;
+      }
+      isSeq = vr === "SQ" || len === 0xffffffff;
+    }
+    const start = o + hdr;
+    if (isSeq) { o = start; continue; }   // hineinlaufen, nicht überspringen
+    if (start + len > n) break;
+    const key = dicomTagKey(g, e);
+    if (targets.has(key) && len > 0) {
+      const repl = padReplacement(vr, len, replacement);
+      if (repl) {
+        let differs = false;
+        for (let i = 0; i < len; i++) {
+          if (bytes[start + i] !== repl[i]) { differs = true; break; }
+        }
+        if (differs) { bytes.set(repl, start); changes++; }
+      }
+    }
+    o = start + len;
+  }
+  return { changes, notes };
+}
+
 // === SCRUB-CORE END ===
 // === SCRUB-CORE EXPORTS: ANON_DOB, ANON_STARTTIME, ANON_PHYSICIAN, ANON_HOST, ANON_INI, FIXED_PSEUDONYMS, COMMON_EXCLUDED_NAMES, getPseudonym, PATIENT_CONTAINERS, DATA_CONTAINERS, normKey, demographicReplacement, DEMOGRAPHIC_RULES, anonymizeXml, anonymizeDemographicsXml, scrubPaths, anonymizeWmMaster, anonymizeGeInf, WM_MASTER_ID_START, WM_MASTER_ID_END, GE_INI_WIPE_KEYS, GE_INI_ID_KEYS, GE_INI_STRUCT_KEYS, GE_INI_ENC_SUFFIXES, PASSTHROUGH_MAGIC,
-//     unanonymisableKind ===
+//     unanonymisableKind, isDicomBytes, readDicomMeta, padReplacement,
+//     anonymizeDicomBytes, dicomTargets, dicomTagKey, dicomLatin1,
+//     dicomBytesOf, dicomArchiveRules ===
 
 function logLine(msg) {
   const el = document.getElementById('classic-log');
@@ -3088,6 +3280,23 @@ async function processFile(entry, plan) {
     const ctx = plan.dirCtx.get(sub);
     const out = await plan.profile.anonymizeFile(subPath, file, pseudo, ctx);
     if (out) return { outPath, data: out.data, note: out.note };
+  }
+
+  // DICOM: byte-weise, längenerhaltend. Auch außerhalb eines Patientenordners,
+  // denn in einem echten EnSite-Export liegen sie in `Velocity_Internal/`,
+  // einem Geschwister der Patientenordner — eine Prüfung nur innerhalb fände
+  // keine einzige davon.
+  const head = new Uint8Array(await file.slice(0, 132).arrayBuffer());
+  if (isDicomBytes(head)) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const rules = dicomArchiveRules();
+    const targets = dicomTargets(rules, true);
+    const r = anonymizeDicomBytes(bytes, (rules && rules.replacement) || "Anonymous",
+                                  targets, true);
+    const note = r.notes.length ? `DICOM: ${r.notes.join("; ")}`
+                                : `DICOM: ${r.changes} Feld(er) ersetzt`;
+    return { outPath, data: new Blob([bytes]), note,
+             unanonymisable: r.notes.length ? "DICOM" : null };
   }
 
   const kind = await unanonymisableKind(file);
