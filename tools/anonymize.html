@@ -671,7 +671,7 @@
   <p class="muted" style="margin-top:26px" data-i18n="anon.footer"></p>
 </main>
 
-<script type="module" src="../shared/i18n.js?v=8c40d4da70ea"></script>
+<script type="module" src="../shared/i18n.js?v=93087b1bc2af"></script>
 <script>
 /* ===================== DETECTION ==========================================
  * Which lab system produced these files. The same question epcore.core.study
@@ -5075,6 +5075,20 @@ const XML_FLUSH_LIMIT = 32 << 20;
 const XML_FLUSH_KEEP = 1 << 16;
 const OPEN_TAG = "<inlinedbin ";
 
+// Der Patientensatz, den dieses Werkzeug nicht anfassen kann: verschlüsselt mit
+// einem Schlüssel, den der Recorder hat. Hier unlesbar und für jeden mit der
+// Herstellersoftware vollständig lesbar.
+//
+// Auf einem echten Archiv ist das die *einzige* Stelle mit Identität: gemessen
+// am Korpus ändert der Scrubber in einem 2,5-MB-Kopf sechzehn Dinge — elf
+// Zeitstempel und fünf Herstellerfelder — und keine einzige Patientenkennung,
+// weil es keine im Klartext gibt. Ohne diese Meldung sieht so ein Lauf sauber
+// aus, während der Satz mitreist.
+//
+// Zwei davon, nicht einer: <EncryptedPatientInfo> und <EncryptedStudyInfo>
+// stehen nebeneinander.
+const ENCRYPTED_RECORD = /<(Encrypted\w*Info)\b[^>]*>/gi;
+
 async function processArchive(files, opts, onProgress) {
   const rd = makeArchiveReader(files);
   coreLog(`Lese ${rd.parts.length} Datei(en), gesamt ` +
@@ -5097,8 +5111,11 @@ async function processArchive(files, opts, onProgress) {
   const emitRaw = (gStart, len) => {
     for (const s of rd.sliceRange(gStart, len)) outParts[s.part].push(s.blob);
   };
+  const encrypted = new Set();
   const flushXml = (text, gStart) => {
     if (!text.length) return;
+    ENCRYPTED_RECORD.lastIndex = 0;
+    for (let m; (m = ENCRYPTED_RECORD.exec(text)); ) encrypted.add(m[1]);
     emitBytes(latin1ToBytes(
       anonymizeXmlChunk(text, repMap, customPatterns, opts, found)), gStart);
   };
@@ -5176,13 +5193,22 @@ async function processArchive(files, opts, onProgress) {
     );
   }
   coreLog(`  ${countReplacements(found)} Ersetzung(en) durchgeführt.`);
+  // Zuletzt und deutlich: das ist nichts, was ein weiterer Durchlauf beheben
+  // könnte, sondern was dieses Werkzeug überhaupt nicht kann.
+  for (const name of [...encrypted].sort()) {
+    coreLog(`  WARNUNG: Das Archiv enthält <${name}> — einen verschlüsselten ` +
+      `Patientensatz, den dieses Werkzeug nicht lesen und daher nicht ` +
+      `anonymisieren kann. Für jeden mit der Recorder-Software lesbar. ` +
+      `Vor dem Weitergeben entfernen — oder nichts weitergeben.`);
+  }
 
   const blobs = outParts.map(chunks => new Blob(chunks,
     { type: "application/octet-stream" }));
   const outTotal = blobs.reduce((s, b) => s + b.size, 0);
   coreLog(`  Ergebnisgröße: ${(outTotal / (1024 * 1024)).toFixed(2)} MB in ` +
     `${blobs.length} Teil(en) (Differenz: ${outTotal - rd.total} Bytes).`);
-  return { blobs, found, inputNames: rd.parts.map(f => f.name) };
+  return { blobs, found, encrypted: [...encrypted].sort(),
+           inputNames: rd.parts.map(f => f.name) };
 }
 
 // Ein Eintrag in `found` kann für mehrere Vorkommen stehen (eigene Patterns
