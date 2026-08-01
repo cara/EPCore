@@ -1181,6 +1181,463 @@ const PROFILES = {
     }
   }
 };
+const SHARED = {
+  "id": "_shared",
+  "label": "Identifier fields every lab-system profile shares",
+  "note": "Derived from the three browser map scrubbers, which each carried their own copy and had drifted apart. No field had conflicting replacements between them, so merging adds coverage without changing any answer they already agreed on. Keys are normalised — lowercase, separators removed — and both languages normalise the name they encounter before looking it up, so every spelling of a field is covered, including ones nobody wrote down.",
+  "literals": {
+    "anon": "ANON",
+    "blank": "",
+    "ssn": "XXX-XX-XXXX",
+    "postcode": "00000",
+    "study": "AnonStudy",
+    "email": "anon@example.com",
+    "mesh_name": "AnonMesh",
+    "mesh_id": "AnonMeshID"
+  },
+  "field_rules": {
+    "address": {
+      "kind": "anon"
+    },
+    "age": {
+      "kind": "blank"
+    },
+    "attendingphysician": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "author": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "birthdate": {
+      "kind": "dob"
+    },
+    "birthday": {
+      "kind": "dob"
+    },
+    "city": {
+      "kind": "anon"
+    },
+    "clinic": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "clinicname": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "comment": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "comments": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "country": {
+      "kind": "anon"
+    },
+    "dateofbirth": {
+      "kind": "dob"
+    },
+    "department": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "departmentname": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "description": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "dob": {
+      "kind": "dob"
+    },
+    "doctor": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "doctorname": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "email": {
+      "kind": "email"
+    },
+    "facility": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "facilityname": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "familyname": {
+      "kind": "last_name"
+    },
+    "firstname": {
+      "kind": "first_name"
+    },
+    "freetext": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "fullname": {
+      "kind": "full_name"
+    },
+    "gender": {
+      "kind": "blank"
+    },
+    "givenname": {
+      "kind": "first_name"
+    },
+    "hospital": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "hospitalname": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "institution": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "institutionaddress": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "institutionname": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "insurancenumber": {
+      "kind": "anon"
+    },
+    "lastname": {
+      "kind": "last_name"
+    },
+    "manufacturer": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "medicalrecordnumber": {
+      "kind": "anon"
+    },
+    "meshid": {
+      "kind": "mesh_id",
+      "option": "meshname"
+    },
+    "meshname": {
+      "kind": "mesh_name",
+      "option": "meshname"
+    },
+    "middlename": {
+      "kind": "blank"
+    },
+    "mrn": {
+      "kind": "anon"
+    },
+    "namefirst": {
+      "kind": "first_name"
+    },
+    "namelast": {
+      "kind": "last_name"
+    },
+    "namemiddle": {
+      "kind": "blank"
+    },
+    "note": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "notes": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "nurse": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "operator": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "operatorid": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "operatorname": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "patientaddress": {
+      "kind": "anon"
+    },
+    "patientage": {
+      "kind": "blank"
+    },
+    "patientbirthdate": {
+      "kind": "dob"
+    },
+    "patientid": {
+      "kind": "patient_id"
+    },
+    "patientname": {
+      "kind": "full_name"
+    },
+    "patientnumber": {
+      "kind": "patient_id"
+    },
+    "patientsex": {
+      "kind": "blank"
+    },
+    "performer": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "performingphysician": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "phone": {
+      "kind": "anon"
+    },
+    "phonenumber": {
+      "kind": "anon"
+    },
+    "physician": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "physicianname": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "policynumber": {
+      "kind": "anon"
+    },
+    "postalcode": {
+      "kind": "postcode"
+    },
+    "procedurenotes": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "recordingclinician": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "referringphysician": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "remark": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "remarks": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "reviewer": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "sex": {
+      "kind": "blank"
+    },
+    "site": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "sitename": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "socialsecuritynumber": {
+      "kind": "ssn"
+    },
+    "ssn": {
+      "kind": "ssn"
+    },
+    "state": {
+      "kind": "anon"
+    },
+    "stationname": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "street": {
+      "kind": "anon"
+    },
+    "streetaddress": {
+      "kind": "anon"
+    },
+    "studyid": {
+      "kind": "study",
+      "option": "meshname"
+    },
+    "studyname": {
+      "kind": "study",
+      "option": "meshname"
+    },
+    "surgeon": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "technician": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "user": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "username": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "zip": {
+      "kind": "postcode"
+    }
+  },
+  "date_fields": [
+    "studydate",
+    "acquisitiondate",
+    "recordingdate",
+    "date",
+    "timestamp",
+    "datetime",
+    "creationdate",
+    "exportdate",
+    "mapdate",
+    "proceduredate",
+    "starttime",
+    "endtime"
+  ],
+  "fallback_year": "1900"
+};
+// The scrub itself, so the three mapping pages cannot carry three versions of
+// it. They did, and they had drifted: measured over the union of every field
+// any of them knew, CARTO left 7 identifiers in place, EnSite 8, Rhythmia 14 —
+// among them SocialSecurityNumber, PolicyNumber and StreetAddress.
+//
+// Names are normalised rather than matched one regular expression per spelling,
+// so BirthDate, Birth Date and birth_date are one rule, and a spelling nobody
+// wrote down is still found.
+function normaliseFieldName(name) {
+  return String(name).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function sharedReplacementMap(opts) {
+  const byKind = Object.assign({
+    patient_id: opts.patientId,
+    first_name: opts.firstName,
+    last_name: opts.lastName,
+    full_name: `${opts.lastName}, ${opts.firstName}`,
+    dob: opts.dob,
+  }, SHARED.literals);
+  const out = new Map();
+  for (const [field, rule] of Object.entries(SHARED.field_rules)) {
+    if (rule.option && opts[rule.option] === false) continue;
+    out.set(field, byKind[rule.kind]);
+  }
+  return out;
+}
+
+const SHARED_DATE_FIELDS = new Set(SHARED.date_fields);
+
+function sharedEscapeXml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+/** Replace every known identifier in one file's text.
+ *
+ *  `escapeValue` lets a page that works in another encoding convert the
+ *  replacement before it is written; Rhythmia scrubs latin-1 strings.
+ */
+function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
+  const repMap = sharedReplacementMap(opts);
+  const esc = escapeValue || sharedEscapeXml;
+  // `count` matters for custom patterns: one entry can stand for many
+  // occurrences, and countReplacements sums it. Leaving it off made a report
+  // that said "1 replacement" where three strings had gone.
+  const note = (field, original, replacement, count) => {
+    if (found) found.push({ field, original, replacement, file: fileLabel,
+                            ...(count === undefined ? {} : { count }) });
+  };
+
+  // What this field's value should become, or null to leave it alone.
+  const decide = (name, current) => {
+    const key = normaliseFieldName(name);
+    const stripped = String(current).trim();
+    if (opts.dates !== false && SHARED_DATE_FIELDS.has(key)) {
+      const year = String(current).match(/\b(19|20)\d{2}\b/);
+      const next = `${year ? year[0] : SHARED.fallback_year}-01-01`;
+      return stripped === next ? null : next;
+    }
+    if (!repMap.has(key)) return null;
+    const next = repMap.get(key);
+    // An empty value holds no identifier, and one already replaced must not be
+    // reported as work done — otherwise a second run looks like a first one.
+    if (stripped === "" || stripped === next) return null;
+    return next;
+  };
+
+  let out = text;
+
+  // <PatientName>, <ns:PatientName> and <PatientName lang="de"> are the same
+  // element. Matching only the bare form left a namespaced export untouched,
+  // and a namespace prefix is what a vendor adds when their schema grows. The
+  // prefix is outside the backreference: a closing tag may legally carry a
+  // different one.
+  out = out.replace(
+    /(<(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)(?:\s[^<>]*)?>)([^<]*)(<\/(?:[\w.\-]+:)?\2\s*>)/g,
+    (m, open, name, content, close) => {
+      const next = decide(name, content);
+      if (next === null) return m;
+      note(name, content, next);
+      return open + esc(next) + close;
+    });
+
+  // Both quote styles: XML permits either and vendors use both in one file.
+  if (opts.attrs !== false) {
+    out = out.replace(
+      /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)(\s*=\s*)(["'])([^"']*)\3/g,
+      (m, name, sep, quote, content) => {
+        const next = decide(name, content);
+        if (next === null) return m;
+        note(`${name}=…`, content, next);
+        return `${name}${sep}${quote}${esc(next)}${quote}`;
+      });
+  }
+
+  out = out.replace(
+    /^([ \t]*)([^=\r\n;[<]+?)([ \t]*=[ \t]*)([^\r\n;]*?)([ \t]*(?:;[^\r\n]*)?)$/gm,
+    (m, indent, name, sep, content, trailer) => {
+      const next = decide(name.trim(), content);
+      if (next === null) return m;
+      note(name.trim(), String(content).trim(), next);
+      return `${indent}${name}${sep}${next}${trailer}`;
+    });
+
+  for (const raw of (opts.customPatterns || "").split(/\r?\n/)) {
+    const pattern = raw.trim();
+    if (!pattern) continue;
+    const re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    let count = 0;
+    out = out.replace(re, () => { count++; return "[REDACTED]"; });
+    if (count) note("(custom)", pattern, "[REDACTED]", count);
+  }
+
+  return out;
+}
+
 /* PROFILES:END */
 
 // Everything between the SCRUB-CORE markers is free of DOM access and is

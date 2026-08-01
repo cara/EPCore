@@ -982,6 +982,353 @@ export const PROFILES = {
 
 export const PROFILE_IDS = ["abbott","boston","carto","ensite","ge","rhythmia"];
 
+/** Every identifier field, shared by all systems.
+ *
+ *  Each of the three mapping pages used to carry its own copy of this and they
+ *  had drifted: a social security number was removed from a Rhythmia export and
+ *  left standing in a CARTO one. One table means a field learned once is known
+ *  everywhere. */
+export const SHARED = {
+  "id": "_shared",
+  "label": "Identifier fields every lab-system profile shares",
+  "note": "Derived from the three browser map scrubbers, which each carried their own copy and had drifted apart. No field had conflicting replacements between them, so merging adds coverage without changing any answer they already agreed on. Keys are normalised — lowercase, separators removed — and both languages normalise the name they encounter before looking it up, so every spelling of a field is covered, including ones nobody wrote down.",
+  "literals": {
+    "anon": "ANON",
+    "blank": "",
+    "ssn": "XXX-XX-XXXX",
+    "postcode": "00000",
+    "study": "AnonStudy",
+    "email": "anon@example.com",
+    "mesh_name": "AnonMesh",
+    "mesh_id": "AnonMeshID"
+  },
+  "field_rules": {
+    "address": {
+      "kind": "anon"
+    },
+    "age": {
+      "kind": "blank"
+    },
+    "attendingphysician": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "author": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "birthdate": {
+      "kind": "dob"
+    },
+    "birthday": {
+      "kind": "dob"
+    },
+    "city": {
+      "kind": "anon"
+    },
+    "clinic": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "clinicname": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "comment": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "comments": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "country": {
+      "kind": "anon"
+    },
+    "dateofbirth": {
+      "kind": "dob"
+    },
+    "department": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "departmentname": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "description": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "dob": {
+      "kind": "dob"
+    },
+    "doctor": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "doctorname": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "email": {
+      "kind": "email"
+    },
+    "facility": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "facilityname": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "familyname": {
+      "kind": "last_name"
+    },
+    "firstname": {
+      "kind": "first_name"
+    },
+    "freetext": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "fullname": {
+      "kind": "full_name"
+    },
+    "gender": {
+      "kind": "blank"
+    },
+    "givenname": {
+      "kind": "first_name"
+    },
+    "hospital": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "hospitalname": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "institution": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "institutionaddress": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "institutionname": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "insurancenumber": {
+      "kind": "anon"
+    },
+    "lastname": {
+      "kind": "last_name"
+    },
+    "manufacturer": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "medicalrecordnumber": {
+      "kind": "anon"
+    },
+    "meshid": {
+      "kind": "mesh_id",
+      "option": "meshname"
+    },
+    "meshname": {
+      "kind": "mesh_name",
+      "option": "meshname"
+    },
+    "middlename": {
+      "kind": "blank"
+    },
+    "mrn": {
+      "kind": "anon"
+    },
+    "namefirst": {
+      "kind": "first_name"
+    },
+    "namelast": {
+      "kind": "last_name"
+    },
+    "namemiddle": {
+      "kind": "blank"
+    },
+    "note": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "notes": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "nurse": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "operator": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "operatorid": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "operatorname": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "patientaddress": {
+      "kind": "anon"
+    },
+    "patientage": {
+      "kind": "blank"
+    },
+    "patientbirthdate": {
+      "kind": "dob"
+    },
+    "patientid": {
+      "kind": "patient_id"
+    },
+    "patientname": {
+      "kind": "full_name"
+    },
+    "patientnumber": {
+      "kind": "patient_id"
+    },
+    "patientsex": {
+      "kind": "blank"
+    },
+    "performer": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "performingphysician": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "phone": {
+      "kind": "anon"
+    },
+    "phonenumber": {
+      "kind": "anon"
+    },
+    "physician": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "physicianname": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "policynumber": {
+      "kind": "anon"
+    },
+    "postalcode": {
+      "kind": "postcode"
+    },
+    "procedurenotes": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "recordingclinician": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "referringphysician": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "remark": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "remarks": {
+      "kind": "blank",
+      "option": "comments"
+    },
+    "reviewer": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "sex": {
+      "kind": "blank"
+    },
+    "site": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "sitename": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "socialsecuritynumber": {
+      "kind": "ssn"
+    },
+    "ssn": {
+      "kind": "ssn"
+    },
+    "state": {
+      "kind": "anon"
+    },
+    "stationname": {
+      "kind": "anon",
+      "option": "institution"
+    },
+    "street": {
+      "kind": "anon"
+    },
+    "streetaddress": {
+      "kind": "anon"
+    },
+    "studyid": {
+      "kind": "study",
+      "option": "meshname"
+    },
+    "studyname": {
+      "kind": "study",
+      "option": "meshname"
+    },
+    "surgeon": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "technician": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "user": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "username": {
+      "kind": "anon",
+      "option": "physician"
+    },
+    "zip": {
+      "kind": "postcode"
+    }
+  },
+  "date_fields": [
+    "studydate",
+    "acquisitiondate",
+    "recordingdate",
+    "date",
+    "timestamp",
+    "datetime",
+    "creationdate",
+    "exportdate",
+    "mapdate",
+    "proceduredate",
+    "starttime",
+    "endtime"
+  ],
+  "fallback_year": "1900"
+};
+
 /** A profile by id, or undefined. Callers must not guess a fallback: the wrong
  *  profile scrubs the wrong fields and still reports the copy clean. */
 export function profile(id) {
