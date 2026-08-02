@@ -6,7 +6,7 @@
 <title>EPView · 3D Map Viewer</title>
 <link href="../vendor/fonts/fonts.css" rel="stylesheet">
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/i18n.js?v=97a6fb4d2e13"></script>
+<script type="module" src="../shared/i18n.js?v=f8b3ac1777e7"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -771,7 +771,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=97a6fb4d2e13",
+    "three": "../vendor/three/three.module.js?v=f8b3ac1777e7",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -781,10 +781,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import * as EP from './epconv.js?v=97a6fb4d2e13';
-import * as EPM from './epmetrics.js?v=97a6fb4d2e13';
-import * as EPO from './epopenep.js?v=97a6fb4d2e13';
-import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=97a6fb4d2e13';
+import * as EP from './epconv.js?v=f8b3ac1777e7';
+import * as EPM from './epmetrics.js?v=f8b3ac1777e7';
+import * as EPCV from './epconduction.js?v=f8b3ac1777e7';
+import * as EPA from './epablation.js?v=f8b3ac1777e7';
+import * as EPO from './epopenep.js?v=f8b3ac1777e7';
+import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=f8b3ac1777e7';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1526,6 +1528,61 @@ function updateMetrics(data) {
                `${N(a.totalActivationTimeMs, 0)} ms${cover}`]);
   }
 
+  // Öffnungen: Klappenringe, Venenostien, der transseptale Schnitt. Sie werden
+  // gezeigt, auch wenn es keine gibt — Schweigen läse sich als „nicht geprüft",
+  // und jede Flächenangabe darüber misst das Gewebe zwischen ihnen.
+  if (m.openings) {
+    rows.push([T('map.metrics.openings') || 'Öffnungen',
+               m.openings.count
+                 ? `${m.openings.count}`
+                 : `<span class="muted">${T('map.metrics.none') || 'keine'}</span>`]);
+  }
+
+  // Leitungsgeschwindigkeit. Der Median, nicht der Mittelwert: die verworfenen
+  // Ausreißer sind einseitig (fast gleichzeitige Knoten ergeben unplausibel
+  // hohe Werte), und ein Mittelwert darüber wäre nach oben gezogen.
+  if (m.activation && data.scalars && data.scalars.lat) {
+    try {
+      const cv = EPCV.conductionVelocity(data.positions, data.faces, data.scalars.lat);
+      const finite = [];
+      for (const v of cv.speedMmS) if (Number.isFinite(v)) finite.push(v);
+      if (finite.length) {
+        finite.sort((x, y) => x - y);
+        const median = finite[finite.length >> 1];
+        rows.push([T('map.metrics.cv') || 'Leitung (Median)', `${N(median, 0)} mm/s`]);
+        if (cv.implausibleVertices) {
+          // Verworfen, nicht geklemmt — geklemmte Werte häufen sich am Rand des
+          // plausiblen Bereichs und sehen dort wie ein Befund aus.
+          rows.push([T('map.metrics.cv.rejected') || 'davon unplausibel',
+                     `<span class="muted">${N(cv.implausibleVertices, 0)} ${
+                       T('map.metrics.vertices') || 'Knoten'}</span>`]);
+        }
+      }
+    } catch (err) { console.warn('[epview] Leitungsgeschwindigkeit:', err); }
+  }
+
+  // Ablation. Gemessen und nicht verortbar ist ein eigener Zustand: im
+  // Korpus-Export sind alle 22 Stellen messbar und keine zeichenbar, weil
+  // AdjustedPositions.txt leer ist. Ohne diese Zeile sähe der Nutzer keinen
+  // einzigen Marker und schlösse daraus, es habe keine Ablation gegeben.
+  if (data.ablation && data.ablation.length) {
+    const summary = EPA.summarise(data.ablation);
+    rows.push([T('map.metrics.ablation') || 'Ablationsstellen',
+               `${N(summary.sites, 0)}`]);
+    if (summary.totalDeliveryS != null) {
+      rows.push([T('map.metrics.ablation.time') || 'Abgabedauer',
+                 `${N(summary.totalDeliveryS, 0)} s`]);
+    }
+    if (summary.powerW && summary.powerW.mean != null) {
+      rows.push([T('map.metrics.ablation.power') || 'Leistung (Mittel)',
+                 `${N(summary.powerW.mean, 1)} W`]);
+    }
+    if (!summary.placed) {
+      rows.push([T('map.metrics.ablation.unplaced') || 'davon verortet',
+                 `<span class="muted">${T('map.metrics.none') || 'keine'}</span>`]);
+    }
+  }
+
   for (const [label, value] of rows) {
     const el = document.createElement('div');
     el.innerHTML = `<b>${value}</b> <span>${label}</span>`;
@@ -1822,6 +1879,7 @@ function loadParsedMesh(m) {
     // the closure that reads one point's signal on demand — dropping it left
     // every mapping point reporting that it had no electrogram.
     points: m.points || null, readEgm: m.readEgm || null,
+    ablation: m.ablation || null, ablationNote: m.ablationNote || null,
   }, m.name || 'Mesh');
 }
 
@@ -1840,7 +1898,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=97a6fb4d2e13'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=f8b3ac1777e7'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -2104,7 +2162,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=97a6fb4d2e13');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=f8b3ac1777e7');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -2599,7 +2657,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=97a6fb4d2e13');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=f8b3ac1777e7');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -2647,7 +2705,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=97a6fb4d2e13';
+import '../shared/bridge.js?v=f8b3ac1777e7';
 
 window.epcoreNotify = (msg) => { console.warn('[epcore]', msg); alert(msg); };
 

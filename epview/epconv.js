@@ -12,7 +12,8 @@
  *  Parameter injiziert, damit das Modul ohne Bundler testbar bleibt.
  * ===================================================================== */
 
-import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=97a6fb4d2e13';
+import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=f8b3ac1777e7';
+import { readVisitag, summarise as summariseAblation } from './epablation.js?v=f8b3ac1777e7';
 
 const SENTINEL = 1e4;
 
@@ -1051,6 +1052,54 @@ export function cartoEgmReader(files) {
   };
 }
 
+/** Die Ablationsaufzeichnung eines CARTO-Exports als Marker-Gruppe.
+ *
+ * Die drei VisiTag-Dateien werden von `epablation.js` gelesen — derselbe Parser,
+ * den die Python-Seite spiegelt. Was hier dazukommt, ist die Übersetzung in das,
+ * was die Marker-Ebene versteht.
+ *
+ * Läsionen ohne Koordinaten bekommen keinen Marker. Im Korpus-Export ist
+ * `AdjustedPositions.txt` leer, also sind alle 22 Stellen messbar und keine
+ * zeichenbar — und das wird als Notiz zurückgegeben, weil ein leerer Bildschirm
+ * sich als „keine Ablation" liest.
+ */
+export function cartoAblation(files) {
+  const find = (name) => {
+    const key = Object.keys(files).find(
+      n => n.replace(/^.*\//, '').toLowerCase() === name.toLowerCase());
+    return key ? decodeLatin1(files[key]) : '';
+  };
+  const sitesText = find('AblationSites.txt');
+  if (!sitesText) return { group: null, sites: [], note: null };
+
+  const sites = readVisitag({
+    sites: sitesText,
+    data: find('AblationData.txt'),
+    positions: find('AdjustedPositions.txt'),
+  });
+  if (!sites.length) return { group: null, sites: [], note: null };
+
+  const placed = sites.filter(s => s.xyz);
+  const summary = summariseAblation(sites);
+  const note = placed.length
+    ? null
+    : `${sites.length} Ablationsstelle(n) gelesen, keine davon verortet — `
+      + `AdjustedPositions.txt enthält keine Zeilen. `
+      + `${summary.totalDeliveryS != null
+          ? Math.round(summary.totalDeliveryS) + ' s Abgabe' : ''}`;
+
+  const group = placed.length ? {
+    id: 'carto-ablation', label: 'Ablation', category: 'ablation',
+    color: tagCategoryColor('ablation'),
+    points: placed.map(s => ({
+      position: s.xyz,
+      label: `RF ${s.index}`,
+      ablation: s,
+    })),
+  } : null;
+  return { group, sites, note };
+}
+
 // fflate.unzipSync wird injiziert (Browser: per import; Node-Test: nur .mesh direkt)
 export function parseCarto(bytes, unzipSync) {
   if (!unzipSync) throw new Error('ZIP-Entpacker (fflate) nicht verfügbar.');
@@ -1077,9 +1126,16 @@ export function parseCarto(bytes, unzipSync) {
     points: placed.map(p => ({ position: p.xyz, label: `P${p.id}`, egm: p })),
   }] : [];
 
+  const ablation = cartoAblation(files);
+  if (ablation.group) tagGroups.push(ablation.group);
+
   for (const mesh of meshes) {
     mesh.points = points;
     mesh.readEgm = readEgm;
+    mesh.ablation = ablation.sites;
+    // Gemessen und nicht verortbar ist ein eigener Zustand. Ohne diese Notiz
+    // sähe der Nutzer nichts und schlösse daraus, es gebe keine Ablation.
+    if (ablation.note) mesh.ablationNote = ablation.note;
     // An die bestehende Marker-Ebene angehängt statt daneben gebaut: Sichtbar-
     // keit, Größe und Projektion gelten dann für beides gleich.
     mesh.tagGroups = (mesh.tagGroups || []).concat(tagGroups);
