@@ -21,7 +21,7 @@
  *    artefacts onto the edge of the plausible range and makes the histogram
  *    there look like a finding.
  */
-import { triangleAreas } from './epmetrics.js?v=f8b3ac1777e7';
+import { triangleAreas } from './epmetrics.js?v=e5157593436a';
 
 /** Velocities outside this are the annotation's resolution rather than tissue. */
 export const PLAUSIBLE_MM_S = [10.0, 5000.0];

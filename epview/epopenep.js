@@ -27,7 +27,7 @@
  * a gap somebody can see; a fabricated one is not.
  */
 
-import { anatomicalStructures } from './epmetrics.js?v=f8b3ac1777e7';
+import { anatomicalStructures } from './epmetrics.js?v=e5157593436a';
 
 export const WRITER = 'EPCore';
 
