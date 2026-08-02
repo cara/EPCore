@@ -17,6 +17,11 @@ export function inShell() {
       && typeof window.pywebview.api.save_file_dialog === 'function');
 }
 
+/** Ab dieser Größe stückweise. 4 MB je Nachricht ist klein genug für
+ *  jede WebView und groß genug, dass ein 60-MB-Video fünfzehn Runden
+ *  braucht und nicht fünfzehnhundert. */
+const CHUNK_BYTES = 4 << 20;
+
 function base64Of(bytes) {
   let binary = '';
   const chunk = 0x8000;   // in Stücken, sonst sprengt apply() den Stack
@@ -41,7 +46,26 @@ export async function saveBytes(name, data) {
   if (inShell()) {
     const path = await window.pywebview.api.save_file_dialog(name);
     if (!path) return { ok: false, cancelled: true };
-    const result = await window.pywebview.api.write_file(path, base64Of(bytes));
+
+    // Stückweise, wenn die Datei groß ist. Ein Videoexport sind zig Megabyte,
+    // und die Brücke trägt JSON: eine Base64-Zeichenkette dieser Größe ist auf
+    // beiden Seiten eine einzelne Allokation und eine Nachricht, die manche
+    // WebViews fallen lassen. Ein PNG von 200 kB geht weiter in einem Stück —
+    // ein zweiter Weg für kleine Dateien wäre ein zweiter Weg, der schiefgehen
+    // kann.
+    const api = window.pywebview.api;
+    if (bytes.length > CHUNK_BYTES && typeof api.write_chunk === 'function') {
+      for (let at = 0; at < bytes.length; at += CHUNK_BYTES) {
+        const piece = bytes.subarray(at, Math.min(at + CHUNK_BYTES, bytes.length));
+        const step = await api.write_chunk(path, base64Of(piece), at === 0);
+        if (!step || !step.ok) {
+          return { ok: false, error: (step && step.error) || 'unbekannter Fehler' };
+        }
+      }
+      return { ok: true, path };
+    }
+
+    const result = await api.write_file(path, base64Of(bytes));
     return result && result.ok
       ? { ok: true, path: result.path }
       : { ok: false, error: (result && result.error) || 'unbekannter Fehler' };
