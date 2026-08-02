@@ -83,6 +83,129 @@ export function meshClosure(positions, faces) {
   };
 }
 
+/** The centroid of the surface, weighted by triangle area.
+ *
+ * OpenEP's `getCentreOfMass`. Weighted by area and not by vertex: a mesh is
+ * denser where the reconstruction had more to say, and an unweighted mean of
+ * the vertices drifts towards whichever wall was sampled hardest rather than
+ * towards the middle of the chamber.
+ */
+export function centreOfMass(positions, faces) {
+  const areas = triangleAreas(positions, faces);
+  let total = 0;
+  const out = [0, 0, 0];
+  for (let f = 0; f < areas.length; f++) {
+    const a = areas[f];
+    if (!(a > 0)) continue;
+    total += a;
+    for (let k = 0; k < 3; k++) {
+      const v = faces[f * 3 + k] * 3;
+      out[0] += (positions[v] * a) / 3;
+      out[1] += (positions[v + 1] * a) / 3;
+      out[2] += (positions[v + 2] * a) / 3;
+    }
+  }
+  if (!(total > 0)) return [NaN, NaN, NaN];
+  return out.map(x => x / total);
+}
+
+/** Edges belonging to exactly one triangle, as [a, b] pairs. */
+function boundaryEdges(faces) {
+  const seen = new Map();
+  const n = faces.length / 3;
+  for (let f = 0; f < n; f++) {
+    const v = [faces[f * 3], faces[f * 3 + 1], faces[f * 3 + 2]];
+    for (let e = 0; e < 3; e++) {
+      const a = v[e], b = v[(e + 1) % 3];
+      const key = a < b ? `${a},${b}` : `${b},${a}`;
+      seen.set(key, (seen.get(key) || 0) + 1);
+    }
+  }
+  const out = [];
+  for (const [key, count] of seen) {
+    if (count === 1) out.push(key.split(",").map(Number));
+  }
+  return out;
+}
+
+/** Chain boundary edges into closed loops — one per hole in the surface.
+ *
+ * Walked rather than clustered, so two rings that share a vertex come out as
+ * two rings. A reconstruction that pinched produces exactly that.
+ */
+function boundaryRings(edges) {
+  const neighbours = new Map();
+  const unused = new Set();
+  const key = (a, b) => (a < b ? `${a},${b}` : `${b},${a}`);
+  for (const [a, b] of edges) {
+    if (!neighbours.has(a)) neighbours.set(a, []);
+    if (!neighbours.has(b)) neighbours.set(b, []);
+    neighbours.get(a).push(b);
+    neighbours.get(b).push(a);
+    unused.add(key(a, b));
+  }
+  const rings = [];
+  while (unused.size) {
+    const [start, next] = unused.values().next().value.split(",").map(Number);
+    unused.delete(key(start, next));
+    const ring = [start, next];
+    for (;;) {
+      const here = ring[ring.length - 1];
+      const step = (neighbours.get(here) || []).find(n => unused.has(key(here, n)));
+      if (step === undefined) break;
+      unused.delete(key(here, step));
+      if (step === ring[0]) break;
+      ring.push(step);
+    }
+    rings.push(ring);
+  }
+  return rings;
+}
+
+/** The holes in the surface — valve rings, vein ostia, the transseptal cut.
+ *
+ * OpenEP's `getAnatomicalStructures`. A clinical system marks these; a
+ * converted export does not, so they are recovered from the geometry.
+ *
+ * They are deliberately not named. Which ostium is which is a clinical
+ * judgement, and a label invented from a size would be wrong exactly when it
+ * mattered.
+ */
+export function anatomicalStructures(positions, faces) {
+  const edges = boundaryEdges(faces);
+  const atRim = new Uint8Array(positions.length / 3);
+  if (!edges.length) return { count: 0, rings: [], rimVertices: atRim };
+  for (const [a, b] of edges) { atRim[a] = 1; atRim[b] = 1; }
+
+  const at = (i) => [positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]];
+  const rings = boundaryRings(edges).map(loop => {
+    const points = loop.map(at);
+    let circumference = 0;
+    const centre = [0, 0, 0];
+    for (const p of points) { centre[0] += p[0]; centre[1] += p[1]; centre[2] += p[2]; }
+    for (let k = 0; k < 3; k++) centre[k] /= points.length;
+    const fan = [0, 0, 0];
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i], q = points[(i + 1) % points.length];
+      circumference += Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]);
+      const u = [p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]];
+      const v = [q[0] - centre[0], q[1] - centre[1], q[2] - centre[2]];
+      fan[0] += u[1] * v[2] - u[2] * v[1];
+      fan[1] += u[2] * v[0] - u[0] * v[2];
+      fan[2] += u[0] * v[1] - u[1] * v[0];
+    }
+    return {
+      vertices: loop,
+      circumferenceMm: circumference,
+      areaMm2: Math.hypot(fan[0], fan[1], fan[2]) / 2,
+      centre,
+      diameterMm: circumference / Math.PI,
+    };
+  });
+  rings.sort((a, b) => b.circumferenceMm - a.circumferenceMm);
+  return { count: rings.length, rings, rimVertices: atRim };
+}
+
 /** Volume enclosed by the surface in mm³, or null when it encloses none. */
 export function enclosedVolume(positions, faces) {
   if (!meshClosure(positions, faces).closed) return null;

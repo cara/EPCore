@@ -27,6 +27,8 @@
  * a gap somebody can see; a fabricated one is not.
  */
 
+import { anatomicalStructures } from './epmetrics.js?v=6749948cd327';
+
 export const WRITER = 'EPCore';
 
 // MAT-file data types (Level 5).
@@ -94,11 +96,13 @@ function doubleMatrix(name, rows, cols, at) {
   return element(miMATRIX, w.concat());
 }
 
-/** A logical column of false — "we did not detect rims", stated rather than omitted. */
-function logicalColumn(name, rows) {
+/** A logical column, false unless `values` says otherwise. */
+function logicalColumn(name, rows, values = null) {
   const w = new Writer();
   w.bytes(arrayHead(mxUINT8, [rows, 1], name, { logical: true }));
-  w.bytes(element(miUINT8, new Uint8Array(rows)));
+  const out = new Uint8Array(rows);
+  if (values) for (let i = 0; i < rows; i++) out[i] = values[i] ? 1 : 0;
+  w.bytes(element(miUINT8, out));
   return element(miMATRIX, w.concat());
 }
 
@@ -170,6 +174,8 @@ export function buildOpenEP(positions, faces, {
       + 'or ablation records in it, and those fields are empty rather than '
       + 'filled with something invented.');
 
+  const rim = anatomicalStructures(positions, faces).rimVertices;
+
   const triRep = structArray('triRep', [
     ['X', doubleMatrix('X', n, 3, (r, c) => positions[r * 3 + c])],
     // MATLAB counts from 1.
@@ -182,7 +188,11 @@ export function buildOpenEP(positions, faces, {
 
   const surface = structArray('surface', [
     ['triRep', triRep],
-    ['isVertexAtRim', logicalColumn('isVertexAtRim', n)],
+    // The vertices on a free boundary — a valve ring, a vein ostium, the
+    // transseptal cut. Recovered from the geometry, because a converted export
+    // does not mark them and statistics that include them measure the cut edge
+    // of the reconstruction rather than tissue.
+    ['isVertexAtRim', logicalColumn('isVertexAtRim', n, rim)],
     ['act_bip', doubleMatrix('act_bip', n, 2, (r, c) => (c === 0 ? act(r) : bip(r)))],
     ['uni_imp_frc', doubleMatrix('uni_imp_frc', n, 3,
                                  (r, c) => (c === 0 ? uni(r) : c === 1 ? imp(r) : frc(r)))],
