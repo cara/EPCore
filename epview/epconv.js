@@ -12,7 +12,7 @@
  *  Parameter injiziert, damit das Modul ohne Bundler testbar bleibt.
  * ===================================================================== */
 
-import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=6749948cd327';
+import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=97a6fb4d2e13';
 
 const SENTINEL = 1e4;
 

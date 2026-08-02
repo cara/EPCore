@@ -307,6 +307,187 @@ export function activation(positions, lat) {
 }
 
 /** Everything computable from this surface. Absent measurements are null. */
+/** Fill the holes so the surface encloses a volume.
+ *
+ * OpenEP's `getClosedSurface`. Each ring is capped with a fan to a new vertex
+ * at its centre, wound against the triangle already on the ring — wound the
+ * other way the mesh still looks closed and the signed volume is wrong, which
+ * is the nastier failure because nothing looks amiss.
+ *
+ * The added vertices are appended, so everything from the original count on is
+ * filler and a caller measuring over the result can leave it out.
+ */
+export function closeSurface(positions, faces) {
+  const edges = boundaryEdges(faces);
+  if (!edges.length) return { positions, faces };
+
+  const orientation = new Set();
+  for (let f = 0; f < faces.length / 3; f++) {
+    const v = [faces[f * 3], faces[f * 3 + 1], faces[f * 3 + 2]];
+    for (let e = 0; e < 3; e++) orientation.add(`${v[e]},${v[(e + 1) % 3]}`);
+  }
+
+  const out = [...positions];
+  const outFaces = [...faces];
+  for (const loop of boundaryRings(edges)) {
+    const centre = [0, 0, 0];
+    for (const i of loop) {
+      centre[0] += positions[i * 3];
+      centre[1] += positions[i * 3 + 1];
+      centre[2] += positions[i * 3 + 2];
+    }
+    const index = out.length / 3;
+    out.push(centre[0] / loop.length, centre[1] / loop.length, centre[2] / loop.length);
+    for (let i = 0; i < loop.length; i++) {
+      const a = loop[i], b = loop[(i + 1) % loop.length];
+      if (orientation.has(`${a},${b}`)) outFaces.push(b, a, index);
+      else outFaces.push(a, b, index);
+    }
+  }
+  return { positions: out, faces: outFaces };
+}
+
+/** How close to the extreme a vertex has to be to count as part of a site. */
+export const SITE_TOLERANCE_MS = 5.0;
+
+/** The earliest and latest activation *regions*, not the extreme vertices.
+ *
+ * OpenEP's `getEarliestActivationSite` and `getLatestActivationSite`. One
+ * mis-annotated point moves the extreme vertex across the chamber and the
+ * number says nothing about it; a region is what somebody would point at.
+ */
+export function activationSites(positions, faces, lat,
+                                toleranceMs = SITE_TOLERANCE_MS) {
+  const n = positions.length / 3;
+  let lowest = Infinity, highest = -Infinity, known = 0;
+  for (let i = 0; i < n; i++) {
+    const t = lat[i];
+    if (!Number.isFinite(t)) continue;
+    known++;
+    if (t < lowest) lowest = t;
+    if (t > highest) highest = t;
+  }
+  if (!known) return { earliest: null, latest: null, toleranceMs };
+
+  const areas = triangleAreas(positions, faces);
+  const site = (extreme, inside) => {
+    const chosen = [];
+    for (let i = 0; i < n; i++) if (inside(lat[i])) chosen.push(i);
+    const centre = [0, 0, 0];
+    for (const i of chosen) {
+      centre[0] += positions[i * 3];
+      centre[1] += positions[i * 3 + 1];
+      centre[2] += positions[i * 3 + 2];
+    }
+    for (let k = 0; k < 3; k++) centre[k] /= chosen.length || 1;
+    const member = new Uint8Array(n);
+    for (const i of chosen) member[i] = 1;
+    let area = 0;
+    for (let f = 0; f < faces.length / 3; f++) {
+      if (member[faces[f * 3]] && member[faces[f * 3 + 1]] && member[faces[f * 3 + 2]]) {
+        area += areas[f];
+      }
+    }
+    return { latMs: extreme, centre, vertices: chosen.length, areaMm2: area };
+  };
+
+  return {
+    earliest: site(lowest, t => Number.isFinite(t) && t <= lowest + toleranceMs),
+    latest: site(highest, t => Number.isFinite(t) && t >= highest - toleranceMs),
+    toleranceMs,
+  };
+}
+
+/** How long an electrogram is active for, in milliseconds.
+ *
+ * OpenEP's `getElectrogramDuration`. The baseline is the median rather than the
+ * mean: a signal sits on its baseline most of the time and deflects for a
+ * fraction of it, so the mean is dragged into the deflection.
+ */
+export function electrogramDuration(samples, sampleRateHz, fraction = 0.1) {
+  if (!(sampleRateHz > 0)) throw new Error(`sample rate must be positive, got ${sampleRateHz}`);
+  if (!samples || samples.length < 2) {
+    return { durationMs: null, windowMs: null, amplitudeMv: null };
+  }
+  const sorted = [...samples].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  const baseline = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+
+  let largest = 0;
+  for (const s of samples) largest = Math.max(largest, Math.abs(s - baseline));
+  const amplitude = sorted[sorted.length - 1] - sorted[0];
+  if (!(largest > 0)) return { durationMs: 0, windowMs: null, amplitudeMv: 0 };
+
+  const cut = largest * fraction;
+  let start = -1, end = -1;
+  for (let i = 0; i < samples.length; i++) {
+    if (Math.abs(samples[i] - baseline) >= cut) { if (start < 0) start = i; end = i; }
+  }
+  const perSample = 1000 / sampleRateHz;
+  return {
+    durationMs: (end - start) * perSample,
+    windowMs: [start * perSample, end * perSample],
+    amplitudeMv: amplitude,
+    thresholdFraction: fraction,
+  };
+}
+
+/** The conventional border-zone band, in millivolts. */
+export const BORDER_MV = [0.5, 1.5];
+
+/** How much surface lies in each voltage band.
+ *
+ * OpenEP's `voltageHistogramAnalysis`. One threshold hides how much the answer
+ * depends on the threshold, which is the thing the literature argues about.
+ * Each band is cut along its isolines by the same routine the single threshold
+ * uses.
+ */
+export function voltageHistogram(positions, faces, voltage, edges = null) {
+  const cuts = (edges || BORDER_MV).map(Number);
+  for (let i = 1; i < cuts.length; i++) {
+    if (cuts[i] <= cuts[i - 1]) {
+      throw new Error(`histogram edges must increase, got ${cuts}`);
+    }
+  }
+  const below = cuts.map(e => lowVoltageArea(positions, faces, voltage, e));
+  const total = below.length ? below[0].measuredMm2 : 0;
+
+  const bands = [];
+  let previous = 0;
+  cuts.forEach((edge, i) => {
+    bands.push({ fromMv: i === 0 ? null : cuts[i - 1], toMv: edge,
+                 areaMm2: below[i].areaMm2 - previous });
+    previous = below[i].areaMm2;
+  });
+  bands.push({ fromMv: cuts.length ? cuts[cuts.length - 1] : null, toMv: null,
+               areaMm2: total - previous });
+  for (const band of bands) band.fraction = total > 0 ? band.areaMm2 / total : null;
+
+  return { edgesMv: cuts, bands, measuredMm2: total,
+           unmeasuredMm2: below.length ? below[0].unmeasuredMm2 : null };
+}
+
+/** Whether the bipolar and unipolar maps were handed over the wrong way round.
+ *
+ * OpenEP's `fixVoltageAnnotations`. Reports; does not swap. The two are close
+ * over much of a healthy chamber, so only a lopsided result means anything, and
+ * silently exchanging two maps on a heuristic is not something to do.
+ */
+export function voltagesLookSwapped(bipolar, unipolar) {
+  if (bipolar.length !== unipolar.length) {
+    throw new Error(`${bipolar.length} bipolar against ${unipolar.length} unipolar`);
+  }
+  let both = 0, larger = 0;
+  for (let i = 0; i < bipolar.length; i++) {
+    if (!Number.isFinite(bipolar[i]) || !Number.isFinite(unipolar[i])) continue;
+    both++;
+    if (bipolar[i] > unipolar[i]) larger++;
+  }
+  if (!both) return { swapped: null, comparableVertices: 0, bipolarLarger: null };
+  const share = larger / both;
+  return { swapped: share > 0.9, bipolarLarger: share, comparableVertices: both };
+}
+
 export function summarise(positions, faces, { voltage = null, lat = null,
                                               threshold = SCAR_MV } = {}) {
   const closure = meshClosure(positions, faces);
@@ -319,6 +500,19 @@ export function summarise(positions, faces, { voltage = null, lat = null,
     volumeMm3: closure.closed ? enclosedVolume(positions, faces) : null,
     lowVoltage: voltage ? lowVoltageArea(positions, faces, voltage, threshold) : null,
     meanVoltageMv: voltage ? meanVoltage(positions, faces, voltage) : null,
+    voltageHistogram: voltage ? voltageHistogram(positions, faces, voltage) : null,
     activation: lat ? activation(positions, lat) : null,
+    activationSites: lat ? activationSites(positions, faces, lat) : null,
+    centreOfMass: centreOfMass(positions, faces),
+    // Reported whether or not any scalar is: a surface with four openings and
+    // one with none are different objects.
+    openings: (() => {
+      const found = anatomicalStructures(positions, faces);
+      return {
+        count: found.count,
+        rings: found.rings.map(({ vertices: _v, ...rest }) => rest),
+        rimVertices: found.rimVertices.reduce((a, b) => a + b, 0),
+      };
+    })(),
   };
 }
