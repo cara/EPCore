@@ -10,7 +10,7 @@
  * shows up to the person who speaks the language nobody on the team does.
  */
 
-import { CATALOGUES, LANGUAGES, LANGUAGE_NAMES } from './i18n.generated.js?v=adcbe1c7a18b';
+import { CATALOGUES, LANGUAGES, LANGUAGE_NAMES } from './i18n.generated.js?v=3516afd933a4';
 
 const STORAGE_KEY = 'epcore.language';
 const DEFAULT = 'de';

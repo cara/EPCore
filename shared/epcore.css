@@ -41,7 +41,21 @@
 
   --warn: #e0b341;
   --warn-wash: rgba(224, 179, 65, 0.10);
+  --warn-line: #3a3524;
   --bad: #e2564a;
+  --bad-wash: rgba(226, 86, 74, 0.16);
+
+  /* Event categories. These are meaning, not decoration — cryo is not pacing —
+     so they are tokens rather than one-off hex values, and the light theme
+     restates them darker instead of letting the same bright hue land on white
+     at 1.6:1. */
+  --ev-cryo: #4cf;
+  --ev-cryo-dim: #6ae;
+  --ev-pace: #6c6;
+  --ev-burst: #cc6;
+  --ev-dec: #88c;
+  --ev-stim: #ee4;
+  --ev-marker: #aaa;
 
   --ui: "Saira", "Segoe UI", system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -50,6 +64,57 @@
   --gap: 12px;
   /* Nothing may be smaller than this. Below it, a label is decoration. */
   --size-min: 11px;
+}
+
+/* --- the light theme ------------------------------------------------------
+ *
+ * One switch on the root element, not a second set of rules. Before this the
+ * light theme was six inline styles on six elements — body, toolbar, sidebar,
+ * timeline, events panel — and everything else kept the dark tokens: dark grey
+ * buttons and near-black dropdowns on a white page, with #8fa3b0 labels at
+ * 2.3:1 against it. It was not a theme, it was a repainted background.
+ *
+ * The surfaces run the other way (bg-0 is the page, bg-3 the raised control),
+ * so every rule written against the tokens keeps its meaning. Ink and accent
+ * are restated rather than inverted, because the same teal that reads on
+ * near-black is 1.9:1 on white. Measured against --bg-0: --text 14.9:1,
+ * --text-dim 7.4:1, --text-faint 5.4:1, --accent 4.7:1.
+ */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-0: #ffffff;
+  --bg-1: #f4f7f8;
+  --bg-2: #e9eef1;
+  --bg-3: #dde5e9;
+
+  --text: #16232b;
+  --text-dim: #445561;
+  /* Measured against the raised surfaces too, not only against the page: the
+     menu and the dialogs sit on --bg-2 and --bg-3, where a token chosen for
+     white alone falls under 4.5:1. */
+  --text-faint: #4f606b;
+
+  --line: #d3dde2;
+  --line-strong: #b4c2ca;
+
+  --accent: #0d7c8e;
+  --accent-dim: #10697a;
+  --accent-wash: rgba(13, 124, 142, 0.12);
+
+  --warn: #8a6100;
+  --warn-wash: rgba(138, 97, 0, 0.10);
+  --warn-line: #d8c89a;
+  --bad: #b3261e;
+  --bad-wash: rgba(179, 38, 30, 0.12);
+
+  --ev-cryo: #0b6b8f;
+  --ev-cryo-dim: #12608c;
+  --ev-pace: #276b2b;
+  --ev-burst: #6f5a00;
+  --ev-dec: #43439e;
+  --ev-stim: #6a5c00;
+  --ev-marker: #4a5c68;
 }
 
 /* --- base ---------------------------------------------------------------- */

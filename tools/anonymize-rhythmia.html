@@ -1678,6 +1678,18 @@ function sharedReplacementMap(opts) {
 
 const SHARED_DATE_FIELDS = new Set(SHARED.date_fields);
 
+// The encrypted patient/study record Rhythmia embeds — EncryptedPatientInfo and
+// EncryptedStudyInfo. Its payload is the whole identity, encrypted with a key
+// the recorder holds: unreadable here, and fully readable to anyone with the
+// vendor's software. It cannot be pseudonymised, so the payload is wiped and the
+// element left standing with a marker where the ciphertext was. The prefix is
+// outside the backreference so a namespaced close tag still matches, and the
+// payload is base64, which never contains "<". Mirror of maps._ENCRYPTED_ELEMENT
+// / REDACTED_ENCRYPTED; tests/conformance holds the two byte-for-byte identical.
+const SHARED_ENCRYPTED_ELEMENT =
+  /(<(?:[\w.\-]+:)?(Encrypted\w*Info)\b[^>]*>)([^<]*)(<\/(?:[\w.\-]+:)?\2\s*>)/gi;
+const SHARED_REDACTED_ENCRYPTED = "[ENCRYPTED RECORD REMOVED BY EPCORE]";
+
 function sharedEscapeXml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
@@ -1717,6 +1729,21 @@ function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
   };
 
   let out = text;
+
+  // First, before the field passes: the encrypted record is the strongest
+  // identifier there is and the one thing here that cannot be pseudonymised, so
+  // its payload is removed outright rather than looked up in the table. The
+  // marker is fixed ASCII and written raw — escaping it would be a no-op and
+  // must stay byte-identical to the Python side.
+  out = out.replace(SHARED_ENCRYPTED_ELEMENT, (m, open, name, payload, close) => {
+    // Empty holds nothing, and a payload already wiped must not read as work
+    // done — otherwise a second run looks like a first one.
+    if (payload.trim() === "" || payload.trim() === SHARED_REDACTED_ENCRYPTED) {
+      return m;
+    }
+    note(name, payload, SHARED_REDACTED_ENCRYPTED);
+    return open + SHARED_REDACTED_ENCRYPTED + close;
+  });
 
   // <PatientName>, <ns:PatientName> and <PatientName lang="de"> are the same
   // element. Matching only the bare form left a namespaced export untouched,
@@ -1912,19 +1939,17 @@ const XML_FLUSH_LIMIT = 32 << 20;
 const XML_FLUSH_KEEP = 1 << 16;
 const OPEN_TAG = "<inlinedbin ";
 
-// Der Patientensatz, den dieses Werkzeug nicht anfassen kann: verschlüsselt mit
-// einem Schlüssel, den der Recorder hat. Hier unlesbar und für jeden mit der
-// Herstellersoftware vollständig lesbar.
+// Der verschlüsselte Patientensatz — <EncryptedPatientInfo> und
+// <EncryptedStudyInfo> — trägt die ganze Identität, verschlüsselt mit einem
+// Schlüssel, den der Recorder hat. Auf einem echten Archiv ist das die
+// *einzige* Stelle mit Identität: gemessen am Korpus ändert der Scrubber in
+// einem 2,5-MB-Kopf sechzehn Dinge — elf Zeitstempel und fünf Herstellerfelder
+// — und keine einzige Patientenkennung im Klartext.
 //
-// Auf einem echten Archiv ist das die *einzige* Stelle mit Identität: gemessen
-// am Korpus ändert der Scrubber in einem 2,5-MB-Kopf sechzehn Dinge — elf
-// Zeitstempel und fünf Herstellerfelder — und keine einzige Patientenkennung,
-// weil es keine im Klartext gibt. Ohne diese Meldung sieht so ein Lauf sauber
-// aus, während der Satz mitreist.
-//
-// Zwei davon, nicht einer: <EncryptedPatientInfo> und <EncryptedStudyInfo>
-// stehen nebeneinander.
-const ENCRYPTED_RECORD = /<(Encrypted\w*Info)\b[^>]*>/gi;
+// Lesen kann das niemand hier; der Nutzlast wird deshalb entfernt (siehe
+// scrubKnownFields → SHARED_ENCRYPTED_ELEMENT), das Element bleibt mit einem
+// Marker stehen. Was danach noch eine echte Nutzlast trägt, hat die Redaktion
+// nicht erreicht — das ist ein Befund, kein normaler Ausgang.
 
 async function processArchive(files, opts, onProgress) {
   const rd = makeArchiveReader(files);
@@ -1951,10 +1976,18 @@ async function processArchive(files, opts, onProgress) {
   const encrypted = new Set();
   const flushXml = (text, gStart) => {
     if (!text.length) return;
-    ENCRYPTED_RECORD.lastIndex = 0;
-    for (let m; (m = ENCRYPTED_RECORD.exec(text)); ) encrypted.add(m[1]);
-    emitBytes(latin1ToBytes(
-      anonymizeXmlChunk(text, repMap, customPatterns, opts, found)), gStart);
+    const scrubbed = anonymizeXmlChunk(text, repMap, customPatterns, opts, found);
+    // Scanned on the *scrubbed* chunk, not the input: a record whose payload is
+    // still there after the redaction pass is a leftover it did not reach, and
+    // that is the only thing worth warning about now.
+    SHARED_ENCRYPTED_ELEMENT.lastIndex = 0;
+    for (let m; (m = SHARED_ENCRYPTED_ELEMENT.exec(scrubbed)); ) {
+      const payload = m[3].trim();
+      if (payload !== "" && payload !== SHARED_REDACTED_ENCRYPTED) {
+        encrypted.add(m[2]);
+      }
+    }
+    emitBytes(latin1ToBytes(scrubbed), gStart);
   };
 
   const dec = new TextDecoder("latin1");
@@ -2030,13 +2063,13 @@ async function processArchive(files, opts, onProgress) {
     );
   }
   coreLog(`  ${countReplacements(found)} Ersetzung(en) durchgeführt.`);
-  // Zuletzt und deutlich: das ist nichts, was ein weiterer Durchlauf beheben
-  // könnte, sondern was dieses Werkzeug überhaupt nicht kann.
+  // Zuletzt und deutlich: hier steht nach der Redaktion noch eine Nutzlast im
+  // verschlüsselten Satz. Nicht der Normalfall — die Redaktion hat ihn nicht
+  // erreicht, und die Ausgabe darf nicht sauber aussehen.
   for (const name of [...encrypted].sort()) {
-    coreLog(`  WARNUNG: Das Archiv enthält <${name}> — einen verschlüsselten ` +
-      `Patientensatz, den dieses Werkzeug nicht lesen und daher nicht ` +
-      `anonymisieren kann. Für jeden mit der Recorder-Software lesbar. ` +
-      `Vor dem Weitergeben entfernen — oder nichts weitergeben.`);
+    coreLog(`  WARNUNG: <${name}> trägt nach der Anonymisierung immer noch eine ` +
+      `verschlüsselte Nutzlast — die Redaktion hat diesen Satz nicht erreicht. ` +
+      `Vor dem Weitergeben prüfen — oder nichts weitergeben.`);
   }
 
   const blobs = outParts.map(chunks => new Blob(chunks,

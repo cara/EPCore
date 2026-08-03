@@ -10,11 +10,28 @@
  * Also: wenn die Hülle da ist, über ihren Speicherdialog; sonst wie bisher.
  */
 
+/** Die API der Hülle, wo immer sie steckt.
+ *
+ * pywebview spritzt sie nur in den obersten Rahmen. Seit die Module in Rahmen
+ * der Schale laufen, ist `window.pywebview` auf der Seite selbst undefiniert —
+ * das Speichern fiel damit still auf den Browser-Weg zurück, `<a download>` tat
+ * in der WebView nichts, und der Aufrufer meldete trotzdem „gespeichert". Also
+ * dieselbe Suche wie in bridge.js: erst hier, dann im Elternrahmen.
+ */
+function hostApi() {
+  if (typeof window === 'undefined') return null;
+  if (window.pywebview?.api) return window.pywebview.api;
+  try {
+    if (window.parent !== window && window.parent.pywebview?.api) {
+      return window.parent.pywebview.api;
+    }
+  } catch { /* fremder Ursprung — nicht unsere Schale */ }
+  return null;
+}
+
 /** Ob wir in der Desktop-Hülle laufen. */
 export function inShell() {
-  return Boolean(typeof window !== 'undefined'
-      && window.pywebview && window.pywebview.api
-      && typeof window.pywebview.api.save_file_dialog === 'function');
+  return typeof hostApi()?.save_file_dialog === 'function';
 }
 
 /** Ab dieser Größe stückweise. 4 MB je Nachricht ist klein genug für
@@ -43,8 +60,9 @@ export async function saveBytes(name, data) {
   else if (data instanceof Uint8Array) bytes = data;
   else bytes = new TextEncoder().encode(String(data));
 
-  if (inShell()) {
-    const path = await window.pywebview.api.save_file_dialog(name);
+  const api = hostApi();
+  if (api && typeof api.save_file_dialog === 'function') {
+    const path = await api.save_file_dialog(name);
     if (!path) return { ok: false, cancelled: true };
 
     // Stückweise, wenn die Datei groß ist. Ein Videoexport sind zig Megabyte,
@@ -53,7 +71,6 @@ export async function saveBytes(name, data) {
     // WebViews fallen lassen. Ein PNG von 200 kB geht weiter in einem Stück —
     // ein zweiter Weg für kleine Dateien wäre ein zweiter Weg, der schiefgehen
     // kann.
-    const api = window.pywebview.api;
     if (bytes.length > CHUNK_BYTES && typeof api.write_chunk === 'function') {
       for (let at = 0; at < bytes.length; at += CHUNK_BYTES) {
         const piece = bytes.subarray(at, Math.min(at + CHUNK_BYTES, bytes.length));

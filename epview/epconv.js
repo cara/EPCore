@@ -12,8 +12,8 @@
  *  Parameter injiziert, damit das Modul ohne Bundler testbar bleibt.
  * ===================================================================== */
 
-import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=adcbe1c7a18b';
-import { readVisitag, summarise as summariseAblation } from './epablation.js?v=adcbe1c7a18b';
+import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=3516afd933a4';
+import { readVisitag, summarise as summariseAblation } from './epablation.js?v=3516afd933a4';
 
 const SENTINEL = 1e4;
 
@@ -1103,7 +1103,16 @@ export function cartoAblation(files) {
 // fflate.unzipSync wird injiziert (Browser: per import; Node-Test: nur .mesh direkt)
 export function parseCarto(bytes, unzipSync) {
   if (!unzipSync) throw new Error('ZIP-Entpacker (fflate) nicht verfügbar.');
-  const files = unzipSync(bytes);
+  return parseCartoEntries(unzipSync(bytes));
+}
+
+/** Ein CARTO-Export als Name→Bytes, gleich ob aus dem ZIP oder aus einem Ordner.
+ *
+ * Ausgepackt liegt derselbe Export als loser Ordner vor — CARTO 3 schreibt ihn
+ * so, und wer ihn einmal entpackt hat, packt ihn nicht wieder ein. Der Weg
+ * hinein ist derselbe, sobald die Dateien benannt und gelesen sind.
+ */
+export function parseCartoEntries(files) {
   const meshes = [];
   for (const name of Object.keys(files)) {
     if (!name.toLowerCase().endsWith('.mesh')) continue;
@@ -1510,6 +1519,20 @@ export async function loadRawFiles(files, unzipSync, onProgress) {
     return parseRhythmiaFiles(files, onProgress);
   }
   if (zip) return parseCarto(new Uint8Array(await zip.arrayBuffer()), unzipSync);
+  // Ein ausgepackter CARTO-Ordner: dieselben Dateien, nur ohne ZIP darum. Ohne
+  // diesen Zweig meldete der ausgepackte Export "Unbekanntes Rohformat" — und
+  // ausgepackt liegt er auf jedem Stick, den ein Labor weitergibt.
+  if (names.some(n => n.endsWith('.mesh'))) {
+    // Nur, was ein CARTO-Export ausmacht: ein Studienordner trägt auch
+    // Fluoroskopie und Videos, und die gehören nicht in den Speicher, bloß weil
+    // sie danebenliegen.
+    const entries = {};
+    for (const f of files) {
+      if (!/\.(mesh|txt|xml|car)$/i.test(f.name)) continue;
+      entries[f.name] = new Uint8Array(await f.arrayBuffer());
+    }
+    return parseCartoEntries(entries);
+  }
   if (xml) {
     // EnSite trennt Geometrie und Messwerte auf zwei Dateien. Liegt die CSV
     // dabei, kommen die Punkte mit; liegt sie nicht dabei, bleibt es bei der

@@ -1539,6 +1539,18 @@ function sharedReplacementMap(opts) {
 
 const SHARED_DATE_FIELDS = new Set(SHARED.date_fields);
 
+// The encrypted patient/study record Rhythmia embeds — EncryptedPatientInfo and
+// EncryptedStudyInfo. Its payload is the whole identity, encrypted with a key
+// the recorder holds: unreadable here, and fully readable to anyone with the
+// vendor's software. It cannot be pseudonymised, so the payload is wiped and the
+// element left standing with a marker where the ciphertext was. The prefix is
+// outside the backreference so a namespaced close tag still matches, and the
+// payload is base64, which never contains "<". Mirror of maps._ENCRYPTED_ELEMENT
+// / REDACTED_ENCRYPTED; tests/conformance holds the two byte-for-byte identical.
+const SHARED_ENCRYPTED_ELEMENT =
+  /(<(?:[\w.\-]+:)?(Encrypted\w*Info)\b[^>]*>)([^<]*)(<\/(?:[\w.\-]+:)?\2\s*>)/gi;
+const SHARED_REDACTED_ENCRYPTED = "[ENCRYPTED RECORD REMOVED BY EPCORE]";
+
 function sharedEscapeXml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
@@ -1578,6 +1590,21 @@ function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
   };
 
   let out = text;
+
+  // First, before the field passes: the encrypted record is the strongest
+  // identifier there is and the one thing here that cannot be pseudonymised, so
+  // its payload is removed outright rather than looked up in the table. The
+  // marker is fixed ASCII and written raw — escaping it would be a no-op and
+  // must stay byte-identical to the Python side.
+  out = out.replace(SHARED_ENCRYPTED_ELEMENT, (m, open, name, payload, close) => {
+    // Empty holds nothing, and a payload already wiped must not read as work
+    // done — otherwise a second run looks like a first one.
+    if (payload.trim() === "" || payload.trim() === SHARED_REDACTED_ENCRYPTED) {
+      return m;
+    }
+    note(name, payload, SHARED_REDACTED_ENCRYPTED);
+    return open + SHARED_REDACTED_ENCRYPTED + close;
+  });
 
   // <PatientName>, <ns:PatientName> and <PatientName lang="de"> are the same
   // element. Matching only the bare form left a namespaced export untouched,
