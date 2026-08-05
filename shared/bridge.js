@@ -34,8 +34,13 @@ const OWNER = {
   openAnonymizer: '/eptrace',
   // The cross-link: a map point names a moment, the signal view shows it.
   showMoment: '/eptrace',
-  // Maps — the EPView module.
+  // Maps — the EPView module. A map export is a folder; the single-file case
+  // is the exception and has its own action rather than being the default.
   openMap: '/epview/',
+  openMapFile: '/epview/',
+  // A path the shell already decided is a map: EPView reads it through the
+  // backend, because a page cannot open a file off the disk.
+  openMapPath: '/epview/',
   exportMap: '/epview/',
   // Anywhere.
   goHome: null,
@@ -100,6 +105,56 @@ function hasBackend() {
     backendProbe = fetch(HEALTH_URL).then(r => r.ok).catch(() => false);
   }
   return backendProbe;
+}
+
+/** What lies under a path on this machine, or null without a backend.
+ *
+ * A native dialog hands back a path, and a page cannot open a file off the
+ * disk. The application's backend lists and reads it instead; on the public
+ * site there is none, and the answer is null rather than a broken promise —
+ * there is no native dialog there either, so nothing asks.
+ */
+async function localFiles(path) {
+  if (!await hasBackend()) return null;
+  const response = await fetch('/api/local/list?root=' + encodeURIComponent(path));
+  if (!response.ok) throw new Error(`listing ${path} -> ${response.status}`);
+  return response.json();
+}
+
+/** One of those files, shaped like the File objects the readers expect.
+ *
+ * Lazy and ranged: a Rhythmia export is several gigabytes and the reader takes
+ * slices out of it. Fetching the whole thing so it can read two megabytes puts
+ * the file through memory twice for nothing.
+ */
+function localFile(root, entry) {
+  const url = `/api/local/read?root=${encodeURIComponent(root)}`
+            + `&path=${encodeURIComponent(entry.path)}`;
+  const range = async (from, to) => {
+    if (!await hasBackend()) throw new Error('no backend to read through');
+    const headers = from == null ? {} : { Range: `bytes=${from}-${to - 1}` };
+    const response = await fetch(url, { headers });
+    if (!response.ok && response.status !== 206) {
+      throw new Error(`${entry.path} -> ${response.status}`);
+    }
+    return response.arrayBuffer();
+  };
+  return {
+    name: entry.path.slice(entry.path.lastIndexOf('/') + 1),
+    webkitRelativePath: entry.path,
+    size: entry.size,
+    arrayBuffer: () => range(null, null),
+    text: async () => new TextDecoder().decode(await range(null, null)),
+    slice(from, to) {
+      const start = Math.max(0, from | 0);
+      const end = Math.min(entry.size, to == null ? entry.size : to | 0);
+      return {
+        size: Math.max(0, end - start),
+        arrayBuffer: () => range(start, end),
+        text: async () => new TextDecoder().decode(await range(start, end)),
+      };
+    },
+  };
 }
 
 /** Where a map point falls in the recording, or null if nothing is calibrated.
@@ -170,7 +225,16 @@ function navigate(to, action, payload) {
 /* --- the public surface --------------------------------------------------- */
 
 const epcore = {
+  /** Inside the tab shell, or standing alone on the public site.
+   *
+   * The modules carry their own way in — an Open button, a drop zone with
+   * buttons under it — because on epcore.app there is nothing else. Inside the
+   * shell there is one Open in the bar for both modules, and a second one in
+   * each view is a second answer to a question already answered. */
+  inShell: () => shell() !== null,
   locate,
+  localFiles,
+  localFile,
   hasBackend,
   api,
   hasNativeHost,

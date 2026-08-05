@@ -3,46 +3,85 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EPCore</title>
+<title>EPCore — Elektrophysiologische Studiendaten lesen, ansehen, anonymisieren</title>
+<meta name="description" content="EPCore liest Aufnahmen und 3D-Mapping-Exporte der gängigen EP-Labsysteme, zeigt sie an und entfernt Patientendaten. Alles läuft lokal.">
+<link rel="canonical" href="https://epcore.app/">
 <link href="vendor/fonts/fonts.css" rel="stylesheet">
 <link href="shared/epcore.css" rel="stylesheet">
 <style>
-  body { padding: 26px 16px 44px; }
-  main { max-width: 940px; margin: 0 auto; }
-  h1 { color: var(--accent); font-size: 20px; margin: 0 0 4px; }
-  .sub { color: var(--text-dim); margin: 0 0 26px; }
+  body { padding: 0 0 60px; }
+  main, header > .inner { max-width: 900px; margin: 0 auto; padding: 0 20px; }
 
-  /* The download is the first thing on the page and the only thing with a
-     filled button. Everything below it works without installing anything,
-     which is useful — but it is not what most people came for. */
-  .get {
-    display: flex; flex-wrap: wrap; align-items: center; gap: 18px;
-    background: var(--bg-1); border: 1px solid var(--accent-dim);
-    border-radius: var(--radius); padding: 20px 22px; margin-bottom: 8px;
-  }
+  /* Prose in the interface font, technical detail in the monospace one. The
+     whole page used to be monospace, which reads as a terminal dump: correct,
+     and not something you hand a colleague. */
+  p, li { font-family: var(--ui); font-size: 15px; line-height: 1.65; }
+
+  header { border-bottom: 1px solid var(--line); background: var(--bg-1);
+           padding: 26px 0 24px; margin-bottom: 34px; }
+  header h1 { font-family: var(--ui); font-size: 26px; letter-spacing: .04em;
+              margin: 0 0 6px; color: var(--text); font-weight: 500; }
+  header h1 b { color: var(--accent); font-weight: 500; }
+  header .claim { color: var(--text-dim); margin: 0; max-width: 60ch; }
+  header .meta { margin-top: 14px; color: var(--text-faint);
+                 font-family: var(--mono); font-size: var(--size-min); }
+
+  h2.section { font-family: var(--ui); font-size: 17px; font-weight: 500;
+               color: var(--text); margin: 34px 0 12px; }
+
+  .get { display: flex; flex-wrap: wrap; align-items: center; gap: 18px;
+         background: var(--bg-1); border: 1px solid var(--accent-dim);
+         border-radius: var(--radius); padding: 20px 22px; }
   .get .what { flex: 1 1 320px; }
-  .get h2 { margin: 0 0 5px; font-size: 16px; color: var(--text); }
+  .get h2 { margin: 0 0 5px; font-size: 16px; font-family: var(--ui); color: var(--text); }
   .get p { margin: 0; color: var(--text-dim); }
-  .get .cta {
-    display: inline-block; text-decoration: none; white-space: nowrap;
-    background: var(--accent); color: var(--bg-0);
-    border-radius: var(--radius); padding: 11px 22px;
-    font-family: var(--ui); font-size: 15px;
-  }
-  .get .cta:hover { background: var(--text); color: var(--bg-0); }
-  .platforms { color: var(--text-faint); font-size: var(--size-min); margin: 8px 0 26px; }
+  .get .cta { display: inline-block; text-decoration: none; white-space: nowrap;
+              background: var(--accent); color: var(--bg-0);
+              border-radius: var(--radius); padding: 11px 22px;
+              font-family: var(--ui); font-size: 15px; }
+  .get .cta:hover { background: var(--text); }
+  .platforms { color: var(--text-faint); font-family: var(--mono);
+               font-size: var(--size-min); margin: 8px 0 0; }
+
+  .tile .d { font-family: var(--ui); }
+
+  .facts { display: grid; gap: var(--gap);
+           grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .fact { background: var(--bg-1); border: 1px solid var(--line);
+          border-radius: var(--radius); padding: 16px 18px; }
+  .fact h3 { font-family: var(--ui); font-size: 14px; font-weight: 500;
+             margin: 0 0 6px; color: var(--accent); }
+  .fact p { margin: 0; color: var(--text-dim); font-size: 14px; }
+
+  .limits { border: 1px solid var(--warn); border-radius: var(--radius);
+            background: var(--warn-wash); padding: 18px 20px; margin-top: 12px; }
+  .limits h3 { font-family: var(--ui); font-size: 15px; font-weight: 500;
+               margin: 0 0 8px; color: var(--warn); }
+  .limits ul { margin: 0; padding-left: 20px; }
+  .limits li { color: var(--text-dim); font-size: 14px; margin-bottom: 5px; }
+
+  footer { margin-top: 44px; border-top: 1px solid var(--line); padding-top: 18px;
+           color: var(--text-faint); font-family: var(--mono);
+           font-size: var(--size-min); line-height: 1.9; }
+  footer a { color: var(--text-dim); }
 </style>
 </head>
 <body>
-<main>
-  <h1>EPCore</h1>
-  <p class="sub">Elektrophysiologische Studiendaten — Signale und Karten in einem Programm.</p>
+<header>
+  <div class="inner">
+    <h1>EP<b>Core</b></h1>
+    <p class="claim">Aufnahmen und 3D-Mapping-Exporte aus dem EP-Labor lesen, ansehen,
+       vermessen und anonymisieren — in einem Programm, auf dem eigenen Rechner.</p>
+    <p class="meta">Version 1.4.0 · Stand 2026-08-05 · Boston Scientific LabSystem PRO · GE CardioLab · Abbott EP-WorkMate · Rhythmia HDx · CARTO 3 · EnSite</p>
+  </div>
+</header>
 
+<main>
   <div class="get">
     <div class="what">
       <h2>Die Anwendung herunterladen</h2>
       <p>Aufnahmen öffnen, messen und konvertieren, Karten in 3D ansehen,
-         Studien anonymisieren — alles lokal, ohne Upload.</p>
+         Studien anonymisieren. Kostenlos.</p>
     </div>
     <a class="cta" href="https://github.com/cara/EPCore/releases/latest">Download</a>
   </div>
@@ -62,16 +101,56 @@
         Das Labsystem wird selbst erkannt — Boston, GE, Abbott, Rhythmia, CARTO,
         EnSite.</div>
     </a>
+    <a class="tile" href="epview/?demo">
+      <div class="t">Beispiel ansehen</div>
+      <div class="d">Eine echte Voltage- und Aktivierungskarte, ohne eigene Daten.
+        Zum Ausprobieren, bevor eine Studie geöffnet wird.</div>
+    </a>
   </div>
 
-  <div class="warn">
-    <strong>Ergebnisse vor der Weitergabe selbst prüfen.</strong> Für GE, Abbott und
-    Rhythmia liegt kein geprüfter Referenz-Export vor — die Werkzeuge weisen darauf hin.
-    EnSite-<em>Velocity-Studienarchive</em> tragen ihre Patientendaten in SQLite-Datenbanken
-    und DICOM-Dateien; dafür braucht es die Anwendung, nicht diese Seite.
+  <h2 class="section">Wo die Daten bleiben</h2>
+  <div class="facts">
+    <div class="fact">
+      <h3>Auf Ihrem Rechner</h3>
+      <p>Beide Browser-Werkzeuge rechnen ausschließlich im Browser. Es wird nichts
+         hochgeladen — die Seite hat dafür keinen Server.</p>
+    </div>
+    <div class="fact">
+      <h3>Teilen nur, wenn Sie es auslösen</h3>
+      <p>Eine Karte lässt sich als Link teilen. Das passiert nur auf Klick, nur
+         nach dem Anonymisieren, und der Link lässt sich widerrufen.</p>
+    </div>
+    <div class="fact">
+      <h3>Nachvollziehbar</h3>
+      <p>Die macOS-Anwendung ist signiert und notarisiert. Jede Veröffentlichung
+         wird gegen eine Sperrliste geprüft, damit kein Studienmaterial mitreist.</p>
+    </div>
   </div>
 
-  <p class="muted">Der Signal-Viewer braucht den Decoder und läuft nur in der Anwendung.</p>
+  <h2 class="section">Was EPCore nicht ist</h2>
+  <div class="limits">
+    <h3>Kein Medizinprodukt</h3>
+    <ul>
+      <li>Keine CE-Kennzeichnung, keine Zulassung. Nicht für Diagnose,
+          Therapieentscheidung oder Befundung bestimmt.</li>
+      <li>Die Formate der Hersteller sind nicht offengelegt; die Leser sind aus
+          Beispieldaten erschlossen. Für GE, Abbott und Rhythmia liegt kein
+          geprüfter Referenz-Export vor — die Werkzeuge sagen das an Ort und Stelle.</li>
+      <li>Anonymisierte Kopien vor der Weitergabe selbst prüfen. Ein Werkzeug kann
+          nur entfernen, was es kennt.</li>
+      <li>EnSite-<em>Velocity-Studienarchive</em> tragen Patientendaten in
+          SQLite-Datenbanken und DICOM-Dateien. Dafür braucht es die Anwendung,
+          nicht diese Seite.</li>
+      <li>Der Signal-Viewer braucht den Decoder und läuft nur in der Anwendung.</li>
+    </ul>
+  </div>
+
+  <footer>
+    EPCore 1.4.0 · Stand 2026-08-05<br>
+    Erzeugnisse und Fehlermeldungen:
+    <a href="https://github.com/cara/EPCore">github.com/cara/EPCore</a><br>
+    Entwickelt von Dr. med. Severin Fink · <a href="impressum.html">Impressum</a>
+  </footer>
 </main>
 </body>
 </html>

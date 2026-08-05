@@ -15,8 +15,9 @@
   } catch (e) { /* Speicher abgeschaltet */ }
 </script>
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/theme.js?v=3516afd933a4"></script>
-<script type="module" src="../shared/i18n.js?v=3516afd933a4"></script>
+<script type="module" src="../shared/theme.js?v=b7db181807c0"></script>
+<script type="module" src="../shared/settings.js?v=b7db181807c0"></script>
+<script type="module" src="../shared/i18n.js?v=b7db181807c0"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -37,6 +38,8 @@
      Hellen über einer hellen Szene, sonst wäre die Karte hinter der Werkzeug-
      leiste weg. Nur diese vier Werte drehen sich; alles andere kommt aus den
      gemeinsamen Tokens. */
+  :root[data-theme="light"] #controls-scroll { color-scheme: light; }
+
   :root[data-theme="light"] {
     --panel: rgba(255, 255, 255, 0.82);
     --panel-solid: #ffffff;
@@ -49,6 +52,10 @@
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  /* `hidden` heißt versteckt, auch wenn eine Klasse weiter unten ein `display`
+     setzt — die Regel des Browsers dafür ist schwächer als jede Klasse, und
+     ein verstecktes Element blieb dadurch stehen. */
+  [hidden] { display: none !important; }
 
   html, body { height: 100%; overflow: hidden; }
 
@@ -87,6 +94,11 @@
     position: fixed; top: 22px; left: 26px; z-index: 10;
     pointer-events: none;
   }
+  .brand .open-name {
+    margin-top: 6px; font-family: var(--mono); font-size: 11px;
+    color: var(--accent); letter-spacing: 0.04em; max-width: 42ch;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   .brand h1 {
     font-weight: 600; font-size: 20px; letter-spacing: 0.42em;
     text-transform: uppercase; color: var(--text);
@@ -119,7 +131,42 @@
     left: 26px; bottom: 26px; width: 270px;
     padding: 16px 16px 18px;
     max-height: calc(100vh - 130px);
-    overflow-y: auto;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  /* Gescrollt wird hier, nicht die Tafel: der Rahmen steht fest, und der
+     weiche Auslauf am oberen und unteren Rand blendet nur den Inhalt aus —
+     er sagt "hier geht es weiter", ohne einen Balken dafür zu brauchen. */
+  #controls-scroll {
+    overflow-y: auto; overscroll-behavior: contain;
+    /* Auch dem Systembalken sagen, wie hell er sein darf. Beim Wechsel der
+       Ansicht baut die WebView den Rahmen neu auf und zeichnet für einen
+       Moment ihren eigenen, hellen Überlagerungsbalken — die eigenen
+       ::-webkit-Regeln greifen dann noch nicht. */
+    color-scheme: dark;
+    padding-right: 4px; margin-right: -4px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+    /* Der weiche Rand nur dort, wo wirklich etwas weitergeht: bei 0 sind die
+       beiden Farbstopps deckungsgleich und die Maske tut nichts. Fest gesetzt
+       lag der Verlauf sonst auf der ersten Überschrift und der letzten Zeile,
+       auch wenn oben und unten alles zu sehen war. */
+    --fade-top: 0px;
+    --fade-bottom: 0px;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-top),
+                                        #000 calc(100% - var(--fade-bottom)), transparent 100%);
+    mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-top),
+                                #000 calc(100% - var(--fade-bottom)), transparent 100%);
+  }
+  /* Der eigene Balken, weil macOS seinen weißen Überlagerungsbalken sonst
+     quer über die dunkle Tafel zeichnet. */
+  #controls-scroll::-webkit-scrollbar { width: 8px; }
+  #controls-scroll::-webkit-scrollbar-track { background: transparent; }
+  #controls-scroll::-webkit-scrollbar-thumb {
+    background: var(--line-strong); border-radius: 4px;
+    border: 2px solid transparent; background-clip: content-box;
+  }
+  #controls-scroll::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-dim); background-clip: content-box;
   }
 
   .grp { margin-bottom: 12px; }
@@ -216,7 +263,31 @@
     position: absolute; left: 0; right: 0; top: 0; width: 100%; margin: 0;
     background: transparent; height: 22px;
   }
+  /* Die Standard-Bahn des oberen Reglers deckt die ganze Breite ab und wurde
+     über den unteren Griff gezeichnet — der linke Knopf lag damit sichtbar
+     hinter dem Balken und kam nur beim Überfahren nach vorn. */
+  .dual input[type=range]::-webkit-slider-runnable-track { background: transparent; }
   .dual input[type=range]::-moz-range-track { background: transparent; }
+
+  #cbar-ticks .editable { cursor: text; border-bottom: 1px dotted var(--line-strong); }
+  #cbar-ticks .editable:hover { color: var(--accent); border-bottom-color: var(--accent-dim); }
+  .legend-edit {
+    width: 64px; padding: 1px 3px; font-family: var(--mono); font-size: 10px;
+    color: var(--text); background: var(--field); border: 1px solid var(--accent-dim);
+    border-radius: 3px;
+  }
+
+  .dual-scale {
+    position: relative; height: 13px; margin: -2px 0 4px;
+    font-family: var(--mono); font-size: 9px; color: var(--muted);
+  }
+  .dual-scale span {
+    position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap;
+  }
+  .dual-scale span::before {
+    content: ""; position: absolute; left: 50%; top: -4px;
+    width: 1px; height: 3px; background: var(--line-strong);
+  }
 
   .anim-row { display: flex; gap: 8px; margin-top: 8px; }
   .anim-row .chip { flex: 1; text-align: center; }
@@ -323,6 +394,10 @@
     border: 1px solid var(--line); border-radius: 8px;
     padding: 8px 13px; cursor: pointer; transition: all 0.14s;
     backdrop-filter: blur(10px); text-transform: uppercase;
+    /* Zeichen und Wort gehören zusammen: „● REC" und „🔗 Teilen" brachen nach
+       dem Zeichen um, sobald die Leiste eng wurde, und standen dann zweizeilig
+       zwischen einzeiligen Knöpfen. */
+    white-space: nowrap;
   }
   .tool:hover { color: var(--accent); border-color: var(--accent-dim); }
   /* Sichtbar nicht bereit, aber anklickbar: der Klick erklärt, was fehlt. */
@@ -335,7 +410,31 @@
   .tmenu.show { display: flex; }
   .tmenu .tool { width: 100%; text-align: left; background: transparent; border: 0; }
   .tmenu .tool:hover { color: var(--accent); }
-  #rec-dot { cursor: pointer; }
+    /* Immer im Fluss, nur unsichtbar: erschien die Anzeige erst beim Start,
+     wurde die Werkzeugleiste breiter und brach in eine zweite Zeile um —
+     mitten in der Aufnahme, die sie aufzeichnet. */
+  /* Der Knopf sagt seinen Zustand selbst: aus ist er ein Knopf wie jeder
+     andere, an ist er rot und pulst. Ohne das ist "läuft die Aufnahme?" eine
+     Frage, die man erst beim Speichern beantwortet bekommt. */
+  #t-rec.on {
+    color: var(--bad); border-color: var(--bad);
+    animation: rec-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes rec-pulse { 50% { opacity: 0.45; } }
+
+  #rec-dot { cursor: pointer; visibility: hidden; }
+  #rec-dot.on { visibility: visible; }
+  #studypick {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 30; display: none; padding: 16px 18px; min-width: 320px;
+    max-width: min(560px, 92vw); max-height: 80vh; overflow: auto;
+    background: var(--panel-solid); box-shadow: var(--shadow);
+  }
+  #studypick.show { display: block; }
+  #studypick .tool { text-align: left; width: 100%; text-transform: none; }
+  #studypick .sub { display: block; color: var(--muted); font-size: 10px;
+                    letter-spacing: 0.04em; margin-top: 2px; }
+
   #recset {
     position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
     z-index: 12; width: 250px; padding: 14px 16px; display: none;
@@ -445,7 +544,12 @@
   @media (max-width: 720px) {
     /* compact brand */
     .brand { top: 12px; left: 14px; }
-    .brand h1 { font-size: 15px; letter-spacing: 0.32em; }
+    .brand .open-name {
+    margin-top: 6px; font-family: var(--mono); font-size: 11px;
+    color: var(--accent); letter-spacing: 0.04em; max-width: 42ch;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .brand h1 { font-size: 15px; letter-spacing: 0.32em; }
     .brand .sub { display: none; }
 
     /* stats hidden on mobile (rendered as small fps/face row inside controls instead) */
@@ -509,7 +613,12 @@
   @media (max-width: 420px) {
     #toolbar { max-width: calc(100vw - 110px); gap: 5px; }
     .tool { padding: 6px 8px; font-size: 10px; }
-    .brand h1 { font-size: 14px; letter-spacing: 0.28em; }
+    .brand .open-name {
+    margin-top: 6px; font-family: var(--mono); font-size: 11px;
+    color: var(--accent); letter-spacing: 0.04em; max-width: 42ch;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .brand h1 { font-size: 14px; letter-spacing: 0.28em; }
     #legend { display: none; }
     #legend.show.force { display: block; }
   }
@@ -517,7 +626,12 @@
   /* landscape phones: panel from the right instead of the bottom */
   @media (max-width: 900px) and (max-height: 500px) {
     .brand { top: 10px; left: 14px; }
-    .brand h1 { font-size: 14px; letter-spacing: 0.28em; }
+    .brand .open-name {
+    margin-top: 6px; font-family: var(--mono); font-size: 11px;
+    color: var(--accent); letter-spacing: 0.04em; max-width: 42ch;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .brand h1 { font-size: 14px; letter-spacing: 0.28em; }
     .brand .sub { display: none; }
     #stats { display: none; }
     #toolbar {
@@ -566,6 +680,9 @@
 <div class="brand">
   <h1>EP<b>View</b></h1>
   <div class="sub" data-i18n="map.subtitle"></div>
+  <!-- Was gerade offen ist. Wer zwei Studien nacheinander ansieht, hat sonst
+       nur das Bild, um sie auseinanderzuhalten. -->
+  <div class="open-name" id="open-name" hidden></div>
 </div>
 
 <div id="stats">
@@ -629,7 +746,13 @@
      kaputter Knopf. Er bleibt anklickbar und sagt beim Klick, was fehlt —
      anonymisieren oder ein Teilen-Dienst. -->
 <button class="tool blocked" id="t-share" title="Erst anonymisieren — geteilte Karten bekommen eine öffentliche Adresse." data-i18n="map.share"></button>
-  <span class="tool" id="rec-dot" style="display:none; color:var(--warn)">● REC</span>
+  <!-- Freie Aufnahme: nimmt auf, was der Nutzer tut, bis er wieder drückt.
+       Die beiden Einträge im Video-Menü nehmen je einen fertigen Ablauf auf
+       (Kamerafahrt, Aktivierung) und hören von selbst auf — das hier hat kein
+       Ende, das jemand vorher kennt. -->
+  <button class="tool" id="t-rec" data-i18n-keep-label
+          data-i18n-title="map.rec.free.title">● REC</button>
+  <span class="tool" id="rec-dot" style="color:var(--warn)">● REC</span>
 </div>
 
 <div id="controls-legend" data-i18n="map.hint.mouse"></div>
@@ -646,6 +769,16 @@
     <select id="rs-path"><option value="turntable" selected>Turntable</option><option value="tilt">Tilt-Orbit</option><option value="rock">Rock/Sway</option></select></div>
   <div class="row"><label data-i18n="map.ease"></label><input type="checkbox" id="rs-ease" checked></div>
   <div class="row"><label data-i18n="map.format"></label><span class="fmt" id="rs-fmt">—</span></div>
+</div>
+
+<!-- Mehrere Studien im geöffneten Ordner: fragen, nicht die erste nehmen. -->
+<div id="studypick" class="panel">
+  <div class="row" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <b style="letter-spacing:.1em" data-i18n="map.studies.title"></b>
+    <button class="tool" id="studypick-close" style="padding:4px 10px">✕</button>
+  </div>
+  <div class="field" style="margin-bottom:8px"><small style="color:var(--muted)" data-i18n="map.studies.hint"></small></div>
+  <div id="studypick-list" class="tmenu" style="position:static;display:flex;padding:0;min-width:0"></div>
 </div>
 
 <div id="sharebox" class="panel" style="display:none">
@@ -673,6 +806,10 @@
     <span data-i18n="map.controls"></span>
     <span class="chev">▾</span>
   </button>
+  <!-- Der Rahmen bleibt stehen, gescrollt wird der Inhalt. Vorher scrollte die
+       Tafel als Ganzes: bei langer Liste wanderte ihr eigener Rand aus dem
+       Bild, und der Auslauf am Rand hätte den Rahmen mit ausgeblendet. -->
+  <div id="controls-scroll">
   <div class="grp" id="grp-mesh" style="display:none">
     <label data-i18n="map.anatomy"></label>
     <select id="meshsel"></select>
@@ -694,9 +831,12 @@
     <label><span data-i18n="map.window"></span> <span id="range-unit" style="color:var(--accent-dim)"></span>
       <span id="vwin-readout" style="float:right; font-family:var(--mono); font-size:10px; color:var(--text); text-transform:none; letter-spacing:0; opacity:0.9"></span></label>
     <div class="dual" id="vwin">
-      <input type="range" id="vmin-s">
-      <input type="range" id="vmax-s">
+      <input type="range" id="vmin-s" min="0" max="1000" step="1">
+      <input type="range" id="vmax-s" min="0" max="1000" step="1">
     </div>
+    <!-- Beschriftete Marken, weil die Bahn nicht mehr linear ist: ohne sie
+         wüsste niemand, wo auf dem Weg 0,5 mV liegt. -->
+    <div class="dual-scale" id="vwin-scale" aria-hidden="true"></div>
     <details class="advanced">
       <summary data-i18n="map.advanced"></summary>
       <div class="range-row">
@@ -753,12 +893,13 @@
   </div>
   <div class="grp" id="grp-tags" style="display:none">
     <label><span data-i18n="map.tags"></span> <button class="chip" id="tags-all" style="float:right; padding:2px 8px" data-i18n="map.all"></button></label>
-    <div class="field" style="margin-top:6px"><small><span data-i18n="map.pointsize"></span> <span id="tag-size-val" style="color:var(--accent-dim)">1.0×</span></small>
-      <input type="range" id="tag-size" min="0.3" max="4" step="0.05" value="1"></div>
+    <div class="field" style="margin-top:6px"><small><span data-i18n="map.pointsize"></span> <span id="tag-size-val" style="color:var(--accent-dim)">2.50×</span></small>
+      <input type="range" id="tag-size" min="0.3" max="6" step="0.05" value="2.5"></div>
     <div class="toggles" style="margin-top:6px">
       <button class="chip" id="tag-project" data-i18n="map.project"></button>
     </div>
     <div class="toggles" id="tag-list" style="margin-top:6px"></div>
+  </div>
   </div>
 </div>
 
@@ -812,7 +953,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=3516afd933a4",
+    "three": "../vendor/three/three.module.js?v=b7db181807c0",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -822,14 +963,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import epcoreTheme from '../shared/theme.js?v=3516afd933a4';
-import * as EP from './epconv.js?v=3516afd933a4';
-import * as EPM from './epmetrics.js?v=3516afd933a4';
-import * as EPCV from './epconduction.js?v=3516afd933a4';
-import * as EPA from './epablation.js?v=3516afd933a4';
-import * as EPSave from '../shared/save.js?v=3516afd933a4';
-import * as EPO from './epopenep.js?v=3516afd933a4';
-import { LUTS, UNMAPPED, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalar, buildVertexGrid, nearestVertexIndex } from './epmap.js?v=3516afd933a4';
+import epcoreTheme from '../shared/theme.js?v=b7db181807c0';
+import * as EP from './epconv.js?v=b7db181807c0';
+import * as EPM from './epmetrics.js?v=b7db181807c0';
+import * as EPCV from './epconduction.js?v=b7db181807c0';
+import * as EPA from './epablation.js?v=b7db181807c0';
+import * as EPSave from '../shared/save.js?v=b7db181807c0';
+import * as EPO from './epopenep.js?v=b7db181807c0';
+import { LUTS, UNMAPPED, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=b7db181807c0';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1018,6 +1159,10 @@ function setView(name) {
 }
 
 let mesh = null, wire = null, current = null, currentName = null;
+/* Der Ordner, den der Nutzer geöffnet hat — der Name, unter dem er die
+ * Studie kennt. `currentName` ist der des Meshes und wechselt mit der
+ * Anatomie-Auswahl. */
+let studyName = '';
 const group = new THREE.Group();
 scene.add(group);
 
@@ -1053,7 +1198,9 @@ function disposeMesh() {
 }
 
 let tagMeshes = [];   // [{ group, inst, surface }] — one InstancedMesh of spheres per tag group
-const tagOpts = { sizeMul: 1, project: false };
+// 2,5× als Startgröße: bei 1,0 sind die Marker auf einer ganzen Kammer
+// Punkte von wenigen Pixeln, und wonach man sucht, muss man sehen können.
+const tagOpts = { sizeMul: 2.5, project: false };
 
 function disposeTagMarkers() {
   for (const t of tagMeshes) { group.remove(t.inst); t.inst.geometry.dispose(); t.inst.material.dispose(); }
@@ -1066,9 +1213,20 @@ function buildTagMarkers(groups, meshRadius) {
   const radius = tagMarkerRadius(meshRadius || 50);
   for (const g of groups) {
     if (!g.points || !g.points.length) continue;
-    const geo = new THREE.SphereGeometry(radius, 12, 10);
+    // Genug Segmente für eine runde Silhouette; instanziert kostet das kaum.
+    const geo = new THREE.SphereGeometry(radius, 20, 14);
     const col = new THREE.Color().setRGB(g.color[0] / 255, g.color[1] / 255, g.color[2] / 255, THREE.SRGBColorSpace);
-    const mat = new THREE.MeshBasicMaterial({ color: col, toneMapped: false });
+    /* Beleuchtet, nicht selbstleuchtend flach. Mit `MeshBasicMaterial` war jede
+     * Kugel aus jeder Richtung gleichmäßig rot — also eine Scheibe, egal wie
+     * man drehte. Der Eigenanteil bleibt, damit die Farbe eines Markers seine
+     * Bedeutung behält, auch wenn er im Schatten der Kammer liegt. */
+    /* Matt, nicht glänzend: bei 0,35 Rauheit setzt jede Kugel ein Glanzlicht
+     * und ein Feld von Ablationspunkten flimmert. Rund wirkt sie durch den
+     * Helligkeitsverlauf, nicht durch den Reflex. */
+    const mat = new THREE.MeshStandardMaterial({
+      color: col, roughness: 0.78, metalness: 0.0,
+      emissive: col, emissiveIntensity: 0.16,
+    });
     const inst = new THREE.InstancedMesh(geo, mat, g.points.length);
     inst.userData.group = g;
     group.add(inst);
@@ -1149,6 +1307,8 @@ function loadGeometry(data, name) {
   // unscrubbed map inherits permission to be published.
   if (typeof markAnonymised === 'function') markAnonymised(false);
   currentName = name;
+  const shown = document.getElementById('open-name');
+  if (shown) { shown.textContent = studyName || name || ''; shown.hidden = !shown.textContent; }
   // Farbfenster gehören zum Datensatz, nicht zum Feldnamen: ohne Reset gilt
   // nach dem Laden einer zweiten Studie weiter das Fenster der ersten und die
   // feldspezifischen Defaults greifen nie wieder.
@@ -1308,8 +1468,8 @@ function setWindow(vmin, vmax) {
   }
   document.getElementById('vmin').value = round(vmin);
   document.getElementById('vmax').value = round(vmax);
-  document.getElementById('vmin-s').value = vmin;
-  document.getElementById('vmax-s').value = vmax;
+  document.getElementById('vmin-s').value = sliderPosition(vmin);
+  document.getElementById('vmax-s').value = sliderPosition(vmax);
   const ro = document.getElementById('vwin-readout');
   if (ro) ro.textContent = round(vmin) + ' – ' + round(vmax);
   applyColors();
@@ -1317,12 +1477,55 @@ function setWindow(vmin, vmax) {
   recomputeArea();
 }
 
-function syncSliderBounds() {
+/* Die Regler tragen eine Position (0..1000), keinen Messwert.
+ *
+ * Spannung wird am unteren Ende abgelesen — Narbe unter 0,5 mV, gesundes
+ * Gewebe über 1,5 — und die Daten reichen bis 8. Linear lag die ganze
+ * Entscheidung im ersten Fünftel der Bahn, ein Pixel waren 40 µV. Die Kurve
+ * steht in epmap.js, mit den Marken darunter. */
+const SLIDER_STEPS = 1000;
+
+function currentCurve() {
+  const field = state.mode && state.mode.startsWith('scalar:') ? state.mode.slice(7) : '';
+  return windowCurve(field);
+}
+
+function sliderValue(position) {
   const [lo, hi] = state.fieldRange;
-  const step = (hi - lo) / 1000 || 0.001;
+  return positionToValue(position / SLIDER_STEPS, lo, hi, currentCurve());
+}
+
+function sliderPosition(value) {
+  const [lo, hi] = state.fieldRange;
+  return Math.round(valueToPosition(value, lo, hi, currentCurve()) * SLIDER_STEPS);
+}
+
+function syncSliderBounds() {
   const a = document.getElementById('vmin-s'), b = document.getElementById('vmax-s');
-  for (const s of [a, b]) { s.min = lo; s.max = hi; s.step = step; }
-  a.value = state.vmin; b.value = state.vmax;
+  for (const el of [a, b]) { el.min = 0; el.max = SLIDER_STEPS; el.step = 1; }
+  a.value = sliderPosition(state.vmin);
+  b.value = sliderPosition(state.vmax);
+  // Auch hier, nicht nur in setWindow: beim Laden wird das Fenster gesetzt,
+  // ohne dass jemand einen Regler anfasst — die Anzeige blieb bis zum ersten
+  // Ziehen leer.
+  const readout = document.getElementById('vwin-readout');
+  if (readout) readout.textContent = round(state.vmin) + ' – ' + round(state.vmax);
+  drawWindowScale();
+}
+
+/** Die beschrifteten Marken unter der Bahn. */
+function drawWindowScale() {
+  const box = document.getElementById('vwin-scale');
+  if (!box) return;
+  box.textContent = '';
+  const [lo, hi] = state.fieldRange;
+  const curve = currentCurve();
+  for (const value of windowTicks(lo, hi, curve)) {
+    const mark = document.createElement('span');
+    mark.style.left = (valueToPosition(value, lo, hi, curve) * 100).toFixed(2) + '%';
+    mark.textContent = round(value);
+    box.appendChild(mark);
+  }
 }
 
 function buildPresets(field) {
@@ -1402,16 +1605,57 @@ function getAdjacency() {
 // Stufe k. Beim Ziehen des Reglers von 0 auf 10 sind das 10 statt 55 Durchläufe
 // (bitgleiches Ergebnis).
 let _smoothCache = null;
+
+/* Wie verschieden zwei Nachbarn sein müssen, damit die Glättung sie trennt.
+ *
+ * Aus den Daten, nicht aus dem Farbfenster: auf dieser Karte liegt der Median
+ * der Nachbarschaftsunterschiede bei 0,023 mV, ein Fünftel des Fensters aber
+ * bei 0,29 — damit galt jeder Nachbar als gleich und die Glättung war wieder
+ * die gleichmäßige. Genommen wird das 90. Perzentil (hier 0,26 mV): darunter
+ * liegen die Plateaugrenzen der Hersteller-Interpolation, die als Pflasterung
+ * ins Bild schlagen, darüber die echten Übergänge. Das 75. war zu streng — es
+ * hielt die Pflasterkanten fest, und genau die fielen als "kantig" auf.
+ *
+ * Einmal je Netz und Feld; die Verteilung ändert sich beim Glätten kaum. */
+function smoothingEdge(field) {
+  if (_edgeScale && _edgeScale.mesh === current && _edgeScale.field === field) {
+    return _edgeScale.value;
+  }
+  const value = edgeStepScale(current.scalars[field], getAdjacency(), 0.9);
+  _edgeScale = { mesh: current, field, value };
+  return value;
+}
+let _edgeScale = null;
+let _edgeLength = null;
+
+/** Die mittlere Kantenlänge dieses Netzes, gemerkt — der Maßstab für den Radius. */
+function meshEdgeLength() {
+  if (_edgeLength && _edgeLength.mesh === current) return _edgeLength.value;
+  const value = medianEdgeLength(current.positions, getAdjacency()) || 1;
+  _edgeLength = { mesh: current, value };
+  return value;
+}
+
 function displayScalar(field) {
   const raw = current.scalars[field];
   const level = state.smoothLevel;
   if (!level) return raw;
-  const warm = _smoothCache && _smoothCache.mesh === current && _smoothCache.field === field;
-  if (warm && _smoothCache.level === level) return _smoothCache.values;
-  const from = (warm && _smoothCache.level < level) ? _smoothCache.values : raw;
-  const iterations = (from === raw) ? level : level - _smoothCache.level;
-  const values = smoothScalar(from, getAdjacency(), iterations);
-  _smoothCache = { mesh: current, field, level, values };
+  const edge = smoothingEdge(field);
+  /* Ein Zug über eine Strecke statt zehn über Nachbarschaftsringe.
+   *
+   * Wiederholte bilaterale Durchgänge treppen — gemessen auf dieser Karte
+   * wuchs die Zahl der Stufen über 0,5 mV bei zehn Durchgängen von 2.100 auf
+   * 2.820: der Filter erzeugte die Kanten, die er erhalten sollte. Ein
+   * einziger Durchgang über einen Radius kann das nicht, und der Radius ist in
+   * Millimetern gedacht, damit ein feines und ein grobes Netz gleich stark
+   * geglättet werden. */
+  const radius = level * meshEdgeLength() * 0.6;
+  const warm = _smoothCache && _smoothCache.mesh === current
+            && _smoothCache.field === field && _smoothCache.level === level
+            && _smoothCache.edge === edge;
+  if (warm) return _smoothCache.values;
+  const values = smoothScalarSpatial(raw, getAdjacency(), current.positions, radius, edge);
+  _smoothCache = { mesh: current, field, level, edge, values };
   return values;
 }
 // Werte so, wie der Nutzer sie sieht: geglättet, und Vertices, die die
@@ -1499,11 +1743,58 @@ function drawLegend() {
     const val = state.vmin + (state.vmax - state.vmin) * t;
     const sp = document.createElement('span');
     sp.textContent = round(val);
+    // Oben und unten stehen die Fenstergrenzen. Wer sie ändern will, klickt
+    // sie an — der Weg über die Zahlenfelder im Bedienfeld führt an der
+    // Stelle vorbei, an der die Zahl gerade steht.
+    if (i === 0 || i === 4) {
+      sp.className = 'editable';
+      sp.title = T('map.legend.edit');
+      sp.ondblclick = () => editLegendBound(sp, i === 0 ? 'max' : 'min');
+    }
     ticksEl.appendChild(sp);
   }
   const field = state.mode.slice(7);
   const meta = FIELD_META[field.toLowerCase()] || { label: field, unit: state.unit };
   document.getElementById('legend-cap').textContent = (meta.label || field) + (meta.unit ? ' · ' + meta.unit : '');
+}
+
+/** Eine Fenstergrenze an Ort und Stelle ändern.
+ *
+ * Der Wert wird zum Eingabefeld, Enter übernimmt, Escape lässt ihn stehen. Eine
+ * unlesbare Eingabe ändert nichts — stillschweigend auf 0 zu springen wäre eine
+ * Karte, die etwas anderes zeigt, als jemand eingetippt hat.
+ */
+function editLegendBound(span, which) {
+  if (span.querySelector('input')) return;
+  const before = which === 'min' ? state.vmin : state.vmax;
+  const field = document.createElement('input');
+  field.type = 'text';
+  field.value = round(before);
+  field.className = 'legend-edit';
+  span.textContent = '';
+  span.appendChild(field);
+  field.focus();
+  field.select();
+
+  // Genau einmal: Escape nimmt das Feld aus dem Baum, das löst `blur` aus, und
+  // ohne diesen Riegel übernähme der Abbruch anschließend doch den Wert.
+  let settled = false;
+  const finish = (accept) => {
+    if (settled) return;
+    settled = true;
+    const typed = parseFloat(field.value.replace(',', '.'));
+    span.textContent = round(before);
+    if (accept && Number.isFinite(typed)) {
+      _legendKey = null;                    // sonst zeichnet die Legende nicht neu
+      if (which === 'min') setWindow(typed, state.vmax);
+      else setWindow(state.vmin, typed);
+    }
+  };
+  field.onkeydown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  };
+  field.onblur = () => finish(true);
 }
 
 /* ---------- display toggles ---------- */
@@ -1936,6 +2227,88 @@ function loadParsedMesh(m) {
   }, m.name || 'Mesh');
 }
 
+/* Was in einem geöffneten Ordner steckt, und welche Studie daraus wird.
+ *
+ * Wer den Ordner mit allen Exporten öffnet — `3D/` mit `Rhythmia/`, `Carto/`
+ * und `Ensite/` darin — bekam bisher alle Dateien auf einmal an den Leser:
+ * eine einzige `.000` irgendwo machte daraus eine Rhythmia-Studie, zusammen-
+ * gesetzt aus den Teilen dreier Untersuchungen. Also erst gruppieren, dann
+ * fragen, dann lesen.
+ */
+/** Öffnen, was unter diesem Pfad liegt — Ordner oder Datei.
+ *
+ * Der Pfad kommt aus einem nativen Dialog; gelesen wird über die Anwendung
+ * (shared/bridge.js), weil eine Seite keine Datei von der Platte aufmachen
+ * kann. Ohne Backend gibt es hier nichts zu tun — dort gibt es auch keinen
+ * nativen Dialog, also fragt niemand danach.
+ */
+async function openPath(path) {
+  showLoading('Lade…');
+  try {
+    const listing = await window.epcore.localFiles(path);
+    if (!listing || !listing.files || !listing.files.length) {
+      alert(T('map.msg.nostudies'));
+      return;
+    }
+    studyName = String(listing.root || path).replace(/^.*[\\/]/, '');
+    await openFileList(listing.files.map(
+      entry => window.epcore.localFile(listing.root, entry)));
+  } catch (err) {
+    alert(T('map.msg.load.failed') + '\n' + err.message);
+  } finally {
+    hideLoading();
+  }
+}
+
+async function openFileList(fileList) {
+  const files = Array.from(fileList);
+  if (!files.length) return;
+
+  // Einzeln gewählte Dateien tragen keinen Pfad — dann hat der Nutzer die
+  // Auswahl schon getroffen und es gibt nichts zu fragen.
+  const picked = files.some(f => f.webkitRelativePath);
+  if (!picked) {
+    // Einzeln gewählte Dateien: der Name der ersten ist das Beste, was es gibt.
+    studyName = files.length === 1 ? files[0].name : '';
+    await loadFiles(files);
+    return;
+  }
+
+  const studies = EP.groupStudies(files);
+  const readable = studies.filter(s => s.readable);
+
+  if (!studies.length) {
+    alert(T('map.msg.nostudies'));
+    return;
+  }
+  if (!readable.length) {
+    // Gefunden und hier nicht lesbar ist etwas anderes als nicht gefunden.
+    alert(T('map.msg.onlyapp', { name: studies[0].label }));
+    return;
+  }
+  if (readable.length === 1) { studyName = readable[0].label; await loadFiles(readable[0].files); return; }
+  askWhichStudy(readable);
+}
+
+/** Mehrere Studien im Ordner: fragen, nicht raten. */
+function askWhichStudy(studies) {
+  const box = document.getElementById('studypick');
+  const list = document.getElementById('studypick-list');
+  list.textContent = '';
+  for (const study of studies) {
+    const row = document.createElement('button');
+    row.className = 'tool';
+    row.textContent = study.label;
+    const sub = document.createElement('span');
+    sub.className = 'sub';
+    sub.textContent = `${study.kind} · ${study.files.length}`;
+    row.appendChild(sub);
+    row.onclick = () => { box.classList.remove('show'); studyName = study.label; loadFiles(study.files); };
+    list.appendChild(row);
+  }
+  box.classList.add('show');
+}
+
 async function loadFiles(fileList) {
   const files = Array.from(fileList);
   if (!files.length) return;
@@ -1951,7 +2324,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=3516afd933a4'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=b7db181807c0'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -2225,7 +2598,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=3516afd933a4');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=b7db181807c0');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -2272,6 +2645,31 @@ function compositeFrame() {
   recCtx.drawImage(renderer.domElement, 0, 0, W, H);
   if (recOpts.bakeLegend && state.mode && state.mode.startsWith('scalar:')) drawLegendOverlay(recCtx, W, H);
 }
+/** Die Karte allein, für den Schnappschuss.
+ *
+ *  Ohne Orientierungswürfel und ohne eingebrannte Farbskala: beides steht im
+ *  Fenster neben dem Bild und gehört nicht in eine Datei, die in einen Bericht
+ *  wandert. Der Hintergrund ist standardmäßig durchsichtig — so lässt sich das
+ *  Bild auf jede Folie legen; wer einen festen Grund will, stellt ihn in den
+ *  Einstellungen ein.
+ */
+function snapshotBackground() {
+  const setting = window.epcoreSettings && window.epcoreSettings.get('snapshotBackground');
+  if (!setting || setting === 'transparent') return null;
+  if (setting === 'theme') return themeToken('--bg-0') || '#05080b';
+  return setting;                       // eine Farbe, wie eingestellt
+}
+
+function snapshotCanvas() {
+  ensureRecCanvas();
+  const W = recCanvas.width, H = recCanvas.height;
+  recCtx.clearRect(0, 0, W, H);
+  const background = snapshotBackground();
+  if (background) { recCtx.fillStyle = background; recCtx.fillRect(0, 0, W, H); }
+  recCtx.drawImage(renderer.domElement, 0, 0, W, H);
+  return recCanvas;
+}
+
 function drawLegendOverlay(ctx, W, H) {
   const table = lut(state.cmap);
   const barH = Math.round(H * 0.34), barW = Math.max(10, Math.round(W * 0.012));
@@ -2292,7 +2690,19 @@ function drawLegendOverlay(ctx, W, H) {
   ctx.fillText((meta.label || field) + (meta.unit ? ' · ' + meta.unit : ''), x - Math.round(W * 0.02), y + barH + fs * 1.5);
 }
 
-function recIndicator(on) { document.getElementById('rec-dot').style.display = on ? '' : 'none'; }
+function recIndicator(on) {
+  document.getElementById('rec-dot').classList.toggle('on', on);
+  document.getElementById('t-rec').classList.toggle('on', on);
+}
+
+/** Aufnehmen, bis jemand aufhört. */
+function toggleFreeRecording() {
+  if (state.recording) { stopRecording(); return; }
+  if (!mesh) { alert(T('map.msg.load.first')); return; }
+  // Kein `durationMs`, das die Schleife erreichen könnte: diese Aufnahme endet,
+  // wenn der Nutzer sie beendet, nicht nach einer Zahl aus den Einstellungen.
+  startRecording({ mode: 'live', kind: 'free', durationMs: Infinity, label: 'view' });
+}
 function setRecButtonsDisabled(d) {
   for (const id of ['t-orbit', 't-export']) document.getElementById(id).style.opacity = d ? '0.5' : '';
 }
@@ -2419,7 +2829,7 @@ function buildDemo() {
   const RX = 45, RY = 45 * 1.35, RZ = 45;
   const onSurf = (theta, phi) => [RX * Math.sin(phi) * Math.cos(theta), RY * Math.cos(phi), RZ * Math.sin(phi) * Math.sin(theta)];
   const tagGroups = [
-    { id: 'abl', label: 'Ablation', category: 'ablation', color: [230, 40, 40], points: [] },
+    { id: 'abl', label: 'Ablation', category: 'ablation', color: tagCategoryColor('ablation'), points: [] },
     { id: 'cs', label: 'CS', category: 'annotation', color: [255, 0, 255],
       points: [{ position: onSurf(2.4, 1.05), label: 'CS 1' }, { position: onSurf(2.7, 1.25), label: 'CS 2' }] },
   ];
@@ -2443,7 +2853,7 @@ document.getElementById('pick').onclick = () => fileInput.click();
 const T = (key, params) => (window.epcoreI18n ? window.epcoreI18n.t(key, params) : key);
 
 const dirInput = document.getElementById('file-dir');
-dirInput.onchange = () => { if (dirInput.files.length) loadFiles(dirInput.files); };
+dirInput.onchange = () => { if (dirInput.files.length) openFileList(dirInput.files); };
 
 const openMenu = document.getElementById('m-open');
 document.getElementById('t-open').onclick = (e) => {
@@ -2454,13 +2864,14 @@ document.getElementById('t-open-dir').onclick = () => { openMenu.classList.remov
 document.getElementById('t-open-files').onclick = () => { openMenu.classList.remove('open'); fileInput.click(); };
 document.addEventListener('click', () => openMenu.classList.remove('open'));
 document.getElementById('pick-dir').onclick = () => dirInput.click();
+document.getElementById('studypick-close').onclick = () => document.getElementById('studypick').classList.remove('show');
 document.getElementById('demo').onclick = loadDemo;
-fileInput.onchange = () => { if (fileInput.files.length) loadFiles(fileInput.files); };
+fileInput.onchange = () => { if (fileInput.files.length) openFileList(fileInput.files); };
 
 const drop = document.getElementById('drop');
 ['dragenter','dragover'].forEach(ev => window.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('dragging'); }));
 ['dragleave','drop'].forEach(ev => window.addEventListener(ev, e => { e.preventDefault(); if (ev==='drop'||e.clientX===0) drop.classList.remove('dragging'); }));
-window.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('dragging'); if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files); });
+window.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('dragging'); if (e.dataTransfer.files.length) openFileList(e.dataTransfer.files); });
 
 // Mesh-/Anatomie-Auswahl bei Mehrfach-Meshes aus einem Rohexport
 document.getElementById('meshsel').onchange = e => { const m = rawMeshes[+e.target.value]; if (m) loadParsedMesh(m); };
@@ -2476,8 +2887,8 @@ document.getElementById('mode').onchange = e => { selectMode(e.target.value); ap
 document.getElementById('cmap').onchange = e => { state.cmap = e.target.value; applyColors(); };
 document.getElementById('vmin').onchange = () => setWindow(+document.getElementById('vmin').value, state.vmax);
 document.getElementById('vmax').onchange = () => setWindow(state.vmin, +document.getElementById('vmax').value);
-document.getElementById('vmin-s').oninput = e => { let v = +e.target.value; if (v > state.vmax) v = state.vmax; setWindow(v, state.vmax); };
-document.getElementById('vmax-s').oninput = e => { let v = +e.target.value; if (v < state.vmin) v = state.vmin; setWindow(state.vmin, v); };
+document.getElementById('vmin-s').oninput = e => { let v = sliderValue(+e.target.value); if (v > state.vmax) v = state.vmax; setWindow(v, state.vmax); };
+document.getElementById('vmax-s').oninput = e => { let v = sliderValue(+e.target.value); if (v < state.vmin) v = state.vmin; setWindow(state.vmin, v); };
 
 /* Zwei Regler auf einer Bahn: der Zeiger trifft immer den oberen. Wer oben
  * liegt, richtet sich deshalb danach, welcher Griff näher am Zeiger ist —
@@ -2491,8 +2902,7 @@ document.getElementById('vmax-s').oninput = e => { let v = +e.target.value; if (
     const rect = box.getBoundingClientRect();
     if (!rect.width) return;
     const at = (event.clientX - rect.left) / rect.width;
-    const span = (+lo.max - +lo.min) || 1;
-    const where = (el) => (+el.value - +el.min) / span;
+    const where = (el) => (+el.value - +el.min) / ((+el.max - +el.min) || 1);
     const nearer = Math.abs(at - where(lo)) <= Math.abs(at - where(hi)) ? lo : hi;
     lo.style.zIndex = nearer === lo ? '2' : '1';
     hi.style.zIndex = nearer === hi ? '2' : '1';
@@ -2594,17 +3004,21 @@ const rotBtn = document.getElementById('t-rotate');
 rotBtn.onclick = () => { controls.autoRotate = !controls.autoRotate; rotBtn.classList.toggle('on', controls.autoRotate); };
 document.getElementById('t-reset').onclick = () => { if (current) { mesh.geometry.computeBoundingSphere(); frameCamera(mesh.geometry.boundingSphere); } };
 document.getElementById('t-shot').onclick = () => {
-  // vollen Viewport setzen (Gizmo hinterlässt einen kleinen Scissor) und Gizmo
-  // mit ins Bild rendern.
+  // Vollen Viewport, und der Orientierungswürfel bleibt draußen: er ist eine
+  // Bedienhilfe am Bildschirmrand, kein Teil der Karte.
   renderer.setScissorTest(false);
   renderer.setViewport(0, 0, innerWidth, innerHeight);
   renderer.render(scene, camera);
-  renderGizmo();
-  EPSave.saveCanvas('epview-snapshot.png', renderer.domElement);
+  // Über den undurchsichtigen Hintergrund, nicht die GL-Leinwand selbst: die
+  // ist `alpha: true`, damit die Seite hinter ihr durchscheint. Direkt
+  // gespeichert wurde daraus ein PNG mit durchsichtigem Rand — auf hellem
+  // Papier ein grauer Schachbrettrahmen, in Präsentationen ein Loch.
+  EPSave.saveCanvas('epview-snapshot.png', snapshotCanvas());
 };
 document.getElementById('t-orbit').onclick = () => state.recording ? stopRecording() : startOrbit();
 document.getElementById('t-export').onclick = () => state.recording ? stopRecording() : startExport();
 document.getElementById('rec-dot').onclick = () => stopRecording();
+document.getElementById('t-rec').onclick = () => toggleFreeRecording();
 
 const recsetEl = document.getElementById('recset');
 document.getElementById('t-recset').onclick = (e) => {
@@ -2671,6 +3085,23 @@ mqSideDrawer.addEventListener?.('change', onLayoutChange);
 /* Der Umschalter kann in der anderen Ansicht liegen: die Wahl gilt dem ganzen
  * Programm (shared/theme.js), also folgt die Szene ihr auch von dort. Neu
  * gezeichnet wird ohnehin jeden Bildaufbau. */
+/* Wieviel oben und unten noch kommt — daraus wird der weiche Rand. */
+(() => {
+  const box = document.getElementById('controls-scroll');
+  if (!box) return;
+  const update = () => {
+    const above = box.scrollTop > 4;
+    const below = box.scrollHeight - box.clientHeight - box.scrollTop > 4;
+    box.style.setProperty('--fade-top', above ? '12px' : '0px');
+    box.style.setProperty('--fade-bottom', below ? '12px' : '0px');
+  };
+  box.addEventListener('scroll', update, { passive: true });
+  addEventListener('resize', update);
+  // Der Inhalt wächst und schrumpft mit der Karte (Aktivierung, Marker, Fläche).
+  new ResizeObserver(update).observe(box);
+  update();
+})();
+
 epcoreTheme.onChange((name) => {
   lightForTheme(name);
   const button = document.getElementById('t-theme');
@@ -2684,6 +3115,16 @@ addEventListener('resize', () => {
 
 // Q/E roll the view around the camera->target axis (rotate camera.up, then re-derive).
 addEventListener('keydown', (e) => {
+  // R nimmt auf und beendet. Frei, weil Q/E rollen und alles andere in der
+  // Werkzeugleiste einen Knopf hat; mit Modifikator ist es der Neuladen-Befehl
+  // des Browsers und gehört ihm.
+  if (e.key.toLowerCase() === 'r' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    const field = (e.target && e.target.tagName) || '';
+    if (/INPUT|SELECT|TEXTAREA/.test(field)) return;
+    e.preventDefault();
+    toggleFreeRecording();
+    return;
+  }
   const k = e.key.toLowerCase();
   if (k !== 'q' && k !== 'e') return;
   const tag = (e.target && e.target.tagName) || '';
@@ -2754,7 +3195,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=3516afd933a4');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=b7db181807c0');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -2802,12 +3243,41 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=3516afd933a4';
+import '../shared/bridge.js?v=b7db181807c0';
+
+/* Der eigene Weg hinein — nur wo es keinen anderen gibt.
+ *
+ * Auf epcore.app ist dieser Knopf die einzige Möglichkeit, eine Karte zu
+ * öffnen. In der Schale steht "Öffnen" in der Leiste und gilt für beide
+ * Module; derselbe Knopf zweimal ist eine zweite Antwort auf eine schon
+ * beantwortete Frage. Das Ablegen per Maus bleibt in beiden Fällen.
+ *
+ * Hier unten, nicht oben im Hauptskript: `window.epcore` entsteht erst mit
+ * diesem Import, und die Frage "stecke ich in der Schale?" hat vorher keine
+ * Antwort. */
+if (window.epcore.inShell()) {
+  for (const id of ['pick-dir', 'pick']) {
+    const el = document.getElementById(id);
+    if (el) el.hidden = true;
+  }
+  const dropdown = document.getElementById('t-open')?.closest('.tdrop');
+  if (dropdown) dropdown.hidden = true;
+}
 
 window.epcoreNotify = (msg) => { console.warn('[epcore]', msg); alert(msg); };
 
 window.epcore.register({
-  openMap: () => document.getElementById('file')?.click(),
+  // Ein Pfad aus dem nativen Dialog: gelesen wird über den Backend-Weg, weil
+  // eine Seite keine Datei von der Platte aufmachen kann. Eigener Name, weil
+  // `openPath` der Signalansicht gehört — dieselbe Aktion an zwei Module wäre
+  // ein Zufall darüber, wer zuletzt geladen hat.
+  openMapPath: (payload) => { if (payload && payload.path) openPath(payload.path); },
+  // Ordner, nicht Einzeldatei: ein Rhythmia-Export ist ein Verzeichnis aus
+  // .000/.001-Teilen und ein CARTO-Export eines aus Meshes. Die Menü-Aktion
+  // klickte das Datei-Feld — damit ließ sich über die Leiste keiner der beiden
+  // öffnen, nur über den Knopf in dieser Ansicht.
+  openMap: () => document.getElementById('file-dir')?.click(),
+  openMapFile: () => document.getElementById('file')?.click(),
   exportMap: () => document.getElementById('ex-ply')?.click(),
 });
 </script>

@@ -12,8 +12,8 @@
  *  Parameter injiziert, damit das Modul ohne Bundler testbar bleibt.
  * ===================================================================== */
 
-import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=3516afd933a4';
-import { readVisitag, summarise as summariseAblation } from './epablation.js?v=3516afd933a4';
+import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=b7db181807c0';
+import { readVisitag, summarise as summariseAblation } from './epablation.js?v=b7db181807c0';
 
 const SENTINEL = 1e4;
 
@@ -1503,6 +1503,99 @@ function fmtG(v) {
   let s = v.toPrecision(6);
   if (s.indexOf('.') >= 0 && s.indexOf('e') < 0) s = s.replace(/\.?0+$/, '');
   return s;
+}
+
+/* ===================================================================== *
+ *  Studien in einem geöffneten Ordner finden
+ *
+ *  Ein Ordner ist selten genau eine Studie. Wer den Ordner öffnet, in dem
+ *  seine Exporte liegen, hat Hersteller-Ordner mit Studien darin — und alles
+ *  in einen Topf zu werfen ergibt eine Rhythmia-Studie aus den Teilen dreier
+ *  Untersuchungen. Deshalb wird gruppiert, bevor gelesen wird.
+ *
+ *  Grundlage ist `webkitRelativePath`, den der Browser beim Ordner-Öffnen
+ *  setzt. Fehlt er (einzeln gewählte Dateien), gibt es genau eine Gruppe —
+ *  dann hat der Nutzer die Auswahl selbst getroffen.
+ * ===================================================================== */
+
+/** Wo eine Datei liegt, relativ zum geöffneten Ordner. */
+function pathOf(file) {
+  return file.webkitRelativePath || file.name;
+}
+
+function dirOf(file) {
+  const path = pathOf(file);
+  const cut = path.lastIndexOf('/');
+  return cut < 0 ? '' : path.slice(0, cut);
+}
+
+/** Woran ein Verzeichnis als Studie eines Systems zu erkennen ist.
+ *
+ *  Reihenfolge zählt: ein CARTO-Export trägt `*_Points_Export.xml`, und ein
+ *  Muster, das jede XML-Datei als EnSite liest, macht daraus eine zweite,
+ *  leere Studie neben der richtigen.
+ */
+const STUDY_MARKERS = [
+  { kind: 'rhythmia', readable: true, test: (n) => /\.\d{3}$/.test(n) },
+  { kind: 'carto', readable: true, test: (n) => n.endsWith('.mesh') },
+  { kind: 'carto', readable: true, test: (n) => n.endsWith('.zip') },
+  // EnSite/Velocity packt die Studie in ein geteiltes tar-Archiv. Der Leser
+  // dafür steht in epcore.epview (Python) — im Browser ist die Studie zu
+  // erkennen und nicht zu öffnen, und das ist etwas anderes als "nichts da".
+  { kind: 'ensite-velocity', readable: false, test: (n) => /\.tar\.gz[a-z]{2}$/.test(n) },
+  { kind: 'ensite', readable: true, test: (n) => n === 'geometry.bin' },
+  { kind: 'ensite', readable: true,
+    test: (n) => n.endsWith('.xml') && !n.endsWith('_points_export.xml') },
+];
+
+function markerFor(name) {
+  const lower = name.toLowerCase();
+  return STUDY_MARKERS.find(marker => marker.test(lower)) || null;
+}
+
+/**
+ * Die Studien in einer Dateiliste, jede mit ihren eigenen Dateien.
+ *
+ * Eine Studie ist ein Verzeichnis, in dem eine Kennzeichnungsdatei *direkt*
+ * liegt; alles darunter gehört dazu (CARTO legt seine VisiTag-Dateien in einen
+ * Unterordner, Rhythmia seine Bildschirmfotos daneben). Verzeichnisse unter
+ * einer erkannten Studie werden nicht noch einmal gezählt.
+ */
+export function groupStudies(files) {
+  const all = Array.from(files);
+  const kindOfDir = new Map();
+
+  for (const file of all) {
+    const marker = markerFor(file.name);
+    if (!marker) continue;
+    const dir = dirOf(file);
+    const known = kindOfDir.get(dir);
+    // Der erste Treffer entscheidet, und die Liste steht in der Reihenfolge,
+    // in der die Kennzeichen eindeutig sind.
+    if (!known || STUDY_MARKERS.indexOf(marker) < STUDY_MARKERS.indexOf(known)) {
+      kindOfDir.set(dir, marker);
+    }
+  }
+
+  const roots = [...kindOfDir.keys()].sort();
+  const outer = roots.filter(dir => !roots.some(
+    other => other !== dir && other.length < dir.length && dir.startsWith(other + '/')));
+
+  return outer.map(root => {
+    const marker = kindOfDir.get(root);
+    const inside = all.filter(file => {
+      const dir = dirOf(file);
+      return dir === root || (root === '' ? true : dir.startsWith(root + '/'));
+    });
+    return {
+      root,
+      // Der Ordnername ist der Name, unter dem der Nutzer die Studie kennt.
+      label: root ? root.slice(root.lastIndexOf('/') + 1) : (inside[0]?.name ?? 'Export'),
+      kind: marker.kind,
+      readable: marker.readable,
+      files: inside,
+    };
+  });
 }
 
 /* --------------------- Dispatcher nach Dateiendung --------------------- */

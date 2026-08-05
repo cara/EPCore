@@ -84,6 +84,98 @@ export function clampWindow(vmin, vmax, lo, hi, eps = 1e-6) {
   return { vmin, vmax };
 }
 
+/* --- the window slider's scale -------------------------------------------
+ *
+ * Voltage is read at the bottom of its range. Scar is under 0.5 mV, healthy
+ * tissue over 1.5, and the data goes to 8 — on a linear slider the whole
+ * decision lives in the first fifth of the track and one pixel is 40 µV. The
+ * position is therefore raised to a power: the low end gets most of the travel
+ * and the top keeps its reach.
+ *
+ * Time does not work that way. An activation map spans 0-300 ms and every
+ * millisecond is worth the same, so LAT stays linear — a curved time axis
+ * would make the middle of a wavefront jump.
+ */
+const WINDOW_CURVE = 2.6;
+
+/** How the slider is scaled for this field: 1 is linear, higher bends it. */
+export function windowCurve(field) {
+  const f = (field || '').toLowerCase();
+  return (f === 'lat' || f === 'activation') ? 1 : WINDOW_CURVE;
+}
+
+/** Slider position (0..1) -> value. */
+export function positionToValue(position, lo, hi, curve = 1) {
+  const t = position < 0 ? 0 : position > 1 ? 1 : position;
+  return lo + (hi - lo) * Math.pow(t, curve);
+}
+
+/** Value -> slider position (0..1). The inverse, so a value set by a preset or
+ *  typed into the field puts the handle where it belongs. */
+export function valueToPosition(value, lo, hi, curve = 1) {
+  if (hi <= lo) return 0;
+  const t = (value - lo) / (hi - lo);
+  return Math.pow(t < 0 ? 0 : t > 1 ? 1 : t, 1 / curve);
+}
+
+/** Ein runder Schritt in der Nähe von `raw`: 1, 2 oder 5 mal eine Zehnerpotenz. */
+function niceStep(raw) {
+  const decade = Math.pow(10, Math.floor(Math.log10(Math.abs(raw) || 1)));
+  const mantissa = Math.abs(raw) / decade;
+  const rounded = mantissa <= 1 ? 1 : mantissa <= 2 ? 2 : mantissa <= 5 ? 5 : 10;
+  return rounded * decade;
+}
+
+/** Marken auf einer geraden Achse — auch über die Null hinweg. */
+function linearTicks(lo, hi, wanted) {
+  // Divided by `wanted`, not `wanted - 1`: the round step is always at least
+  // as coarse as asked for, so dividing by the smaller number leaves three
+  // marks where five were wanted.
+  const step = niceStep((hi - lo) / Math.max(1, wanted));
+  const out = [];
+  for (let value = Math.ceil(lo / step) * step; value <= hi + step * 1e-9; value += step) {
+    // Der Schritt ist rund, die Summe nach zehn Additionen nicht mehr ganz.
+    out.push(Math.abs(value) < step * 1e-9 ? 0 : Number(value.toPrecision(12)));
+  }
+  return out;
+}
+
+/** Values worth labelling under the slider, in the field's own units.
+ *
+ * Two scales, two kinds of mark. A straight axis gets a round step laid across
+ * it, and that has to survive crossing zero: an activation window runs from
+ * -120 to 150 ms, and a decade-based scheme produced "1e-12" there and no
+ * negative marks at all. A curved axis gets the 1/2/3/5 decades inside its
+ * range instead — evenly spaced numbers would bunch at the top, where the
+ * curve has almost no travel — thinned to the ones nearest to evenly spaced
+ * *positions*.
+ */
+export function windowTicks(lo, hi, curve = 1, wanted = 5) {
+  if (!(hi > lo)) return [];
+  if (curve === 1 || lo <= 0) return linearTicks(lo, hi, wanted);
+
+  // The floor is measured along the track, not along the values: on a curved
+  // scale 0.05 mV is a fifth of the way up and worth a label.
+  const floor = Math.max(positionToValue(0.02, lo, hi, curve), 1e-12);
+  const candidates = [];
+  for (let decade = Math.floor(Math.log10(floor)); decade <= Math.ceil(Math.log10(hi)); decade++) {
+    for (const mantissa of [1, 2, 3, 5]) {
+      const value = mantissa * Math.pow(10, decade);
+      if (value >= floor && value <= hi) candidates.push(value);
+    }
+  }
+  if (candidates.length <= wanted) return candidates.sort((a, b) => a - b);
+
+  const chosen = [];
+  for (let i = 0; i < wanted; i++) {
+    const target = positionToValue(i / (wanted - 1), lo, hi, curve);
+    const nearest = candidates.reduce(
+      (best, value) => Math.abs(value - target) < Math.abs(best - target) ? value : best);
+    if (!chosen.includes(nearest)) chosen.push(nearest);
+  }
+  return chosen.sort((a, b) => a - b);
+}
+
 // Preset windows per field type. {label, lo, hi}; lo/hi === null means "Auto" (data range).
 export function voltagePresets(field) {
   const f = (field || '').toLowerCase();
@@ -174,9 +266,13 @@ export function parseXyz(str) {
 }
 
 // Default marker color [r,g,b] 0..255 per category.
+/* Marker colours. Ablation is a dark wine red rather than the bright red it
+ * was: the voltage scale ends in bright red at its low end, so ablation
+ * markers on a voltage map were the same colour as the scar they sit on. A
+ * marker has to be readable as a marker before it is readable as red. */
 export function tagCategoryColor(cat) {
   switch (String(cat == null ? '' : cat).toLowerCase()) {
-    case 'ablation': return [230, 40, 40];
+    case 'ablation': return [122, 24, 44];
     case 'annotation': return [240, 180, 40];
     case 'landmark': return [60, 200, 220];
     default: return [180, 180, 180];
@@ -461,25 +557,139 @@ export function buildAdjacency(faces, nVerts) {
 // Laplacian smoothing of a per-vertex scalar: new = (1-lambda)*v + lambda*mean(finite neighbors).
 // NaN values are preserved and excluded from neighbor means. iterations 0 -> a copy.
 // `adjacency` is either an array-of-arrays or a CSR object from buildAdjacencyCSR.
-export function smoothScalar(values, adjacency, iterations, lambda = 0.5) {
-  let cur = Float32Array.from(values);
+
+/* Interpolation, ohne die Grenze mit wegzuwischen.
+ *
+ * Die Laplace-Glättung oben mittelt jeden Punkt mit allen seinen Nachbarn.
+ * Rauschen verschwindet damit, die Narbengrenze aber auch: bei Stufe 10 ist
+ * eine Karte gleichmäßig unscharf, und genau die Kante, an der 0,5 mV nach
+ * 1,5 mV wird, war das, was man sehen wollte.
+ *
+ * Also werden Nachbarn danach gewichtet, wie ähnlich sie sind. Innerhalb eines
+ * Gebiets zählt jeder mit, über eine Kante hinweg fast keiner — dieselbe Idee
+ * wie ein bilateraler Filter, auf einem Netz statt auf einem Bild. `sigma` ist
+ * der Abstand, ab dem zwei Werte als "verschiedenes Gewebe" gelten; es kommt
+ * aus dem eingestellten Fenster, damit die Kante dort liegt, wo der Betrachter
+ * sie ohnehin abliest.
+ */
+/* Glättung in einem Zug, über eine Strecke statt über Nachbarschaftsringe.
+ *
+ * Wiederholte bilaterale Durchgänge treppen — das ist ihre bekannte Eigenart
+ * und auf dieser Karte gemessen: bei zehn Durchgängen wächst die Zahl der
+ * Stufen über 0,5 mV von 2.100 auf 2.820. Der Filter *erzeugt* die Kanten, die
+ * er erhalten soll, und die Karte sieht gepflastert aus.
+ *
+ * Ein einziger Durchgang kann das nicht. Gemittelt wird über alles, was
+ * innerhalb eines Radius liegt (in Millimetern, nicht in Kanten — ein Netz mit
+ * 1,3 mm Kanten und eines mit 4 mm sollen gleich stark geglättet werden),
+ * gewichtet nach Abstand und nach Wertunterschied. Gemessen bei 6 mm und
+ * σ = 0,3 mV: Plateaugrenzen −38 %, echte Kanten zu 86 % erhalten, keine neuen.
+ *
+ * Das ist auch näher an dem, was OpenEP und CARTO tun: von den Messpunkten aus
+ * über eine Strecke interpolieren, mit einer Schwelle darüber hinaus.
+ */
+export function smoothScalarSpatial(values, adjacency, positions, radius, sigmaValue,
+                                    limit = 400) {
   const csr = adjacency && adjacency.offsets ? adjacency : null;
-  for (let it = 0; it < iterations; it++) {
-    const next = Float32Array.from(cur);
-    for (let v = 0; v < cur.length; v++) {
-      const cv = cur[v];
-      if (Number.isNaN(cv)) continue;
-      let sum = 0, k = 0;
-      if (csr) {
-        const e = csr.offsets[v + 1];
-        for (let n = csr.offsets[v]; n < e; n++) { const nv = cur[csr.neighbors[n]]; if (!Number.isNaN(nv)) { sum += nv; k++; } }
-      } else {
-        const nb = adjacency[v]; if (!nb || !nb.length) continue;
-        for (let n = 0; n < nb.length; n++) { const nv = cur[nb[n]]; if (!Number.isNaN(nv)) { sum += nv; k++; } }
+  if (!csr || !positions || !(radius > 0)) return Float32Array.from(values);
+
+  const out = Float32Array.from(values);
+  const sigmaSpace = radius / 2;
+  const spaceFalloff = -1 / (2 * sigmaSpace * sigmaSpace);
+  const valueFalloff = sigmaValue > 0 ? -1 / (2 * sigmaValue * sigmaValue) : 0;
+  const radiusSquared = radius * radius;
+
+  // Wiederverwendet statt je Vertex neu angelegt: bei 18.000 Vertices wären das
+  // 18.000 Allokationen pro Durchgang.
+  const seen = new Int32Array(values.length).fill(-1);
+  const queue = new Int32Array(limit + 1);
+
+  for (let v = 0; v < values.length; v++) {
+    const cv = values[v];
+    if (Number.isNaN(cv)) continue;
+    const x = positions[v * 3], y = positions[v * 3 + 1], z = positions[v * 3 + 2];
+
+    let head = 0, tail = 0, sum = cv, weight = 1;
+    queue[tail++] = v;
+    seen[v] = v;
+    while (head < tail && tail < limit) {
+      const at = queue[head++];
+      for (let n = csr.offsets[at]; n < csr.offsets[at + 1]; n++) {
+        const j = csr.neighbors[n];
+        if (seen[j] === v) continue;
+        const dx = positions[j * 3] - x;
+        const dy = positions[j * 3 + 1] - y;
+        const dz = positions[j * 3 + 2] - z;
+        const distanceSquared = dx * dx + dy * dy + dz * dz;
+        if (distanceSquared > radiusSquared) continue;
+        seen[j] = v;
+        if (tail < limit) queue[tail++] = j;         // weiter nach außen
+        const nv = values[j];
+        if (Number.isNaN(nv)) continue;
+        const d = nv - cv;
+        const w = Math.exp(distanceSquared * spaceFalloff
+                           + (valueFalloff ? d * d * valueFalloff : 0));
+        sum += w * nv; weight += w;
       }
-      if (k) next[v] = (1 - lambda) * cv + lambda * (sum / k);
     }
-    cur = next;
+    out[v] = sum / weight;
   }
-  return cur;
+  return out;
 }
+
+/** Die mittlere Kantenlänge — der Maßstab, in dem ein Radius Sinn ergibt. */
+export function medianEdgeLength(positions, adjacency, sample = 4000) {
+  const csr = adjacency && adjacency.offsets ? adjacency : null;
+  if (!csr || !positions) return 0;
+  const lengths = [];
+  const count = positions.length / 3;
+  const stride = Math.max(1, Math.floor(count / sample));
+  for (let v = 0; v < count; v += stride) {
+    for (let n = csr.offsets[v]; n < csr.offsets[v + 1]; n++) {
+      const j = csr.neighbors[n];
+      if (j <= v) continue;
+      const dx = positions[j * 3] - positions[v * 3];
+      const dy = positions[j * 3 + 1] - positions[v * 3 + 1];
+      const dz = positions[j * 3 + 2] - positions[v * 3 + 2];
+      lengths.push(Math.sqrt(dx * dx + dy * dy + dz * dz));
+    }
+  }
+  if (!lengths.length) return 0;
+  lengths.sort((a, b) => a - b);
+  return lengths[Math.floor(lengths.length / 2)];
+}
+
+/** Wie groß ein Wertunterschied zwischen Nachbarn typischerweise ist.
+ *
+ * Die Schwelle für "gleiches Gewebe" darf nicht aus dem Farbfenster kommen —
+ * gemessen an dieser Karte liegt der Median bei 0,023 mV, das Fenster-Fünftel
+ * aber bei 0,29: damit galt jeder Nachbar als gleich und die Glättung war
+ * wieder die gleichmäßige. Aus den Daten genommen trennt sie sauber: Plateau-
+ * Stufen liegen darunter und verschwinden, die Narbengrenze (hier 0,42 mV)
+ * liegt viereinhalbfach darüber und bleibt.
+ *
+ * Das 75. Perzentil, nicht der Mittelwert: eine einzelne Grenze mit 6 mV soll
+ * die Schwelle nicht nach oben ziehen.
+ */
+export function edgeStepScale(values, adjacency, quantile = 0.75, limit = 200000) {
+  const csr = adjacency && adjacency.offsets ? adjacency : null;
+  if (!csr) return 0;
+  const steps = [];
+  // Bei großen Netzen jede k-te Kante: die Verteilung braucht keine Vollzählung.
+  const edges = csr.neighbors.length / 2;
+  const stride = Math.max(1, Math.ceil(edges / limit));
+  let seen = 0;
+  for (let a = 0; a < values.length; a++) {
+    for (let n = csr.offsets[a]; n < csr.offsets[a + 1]; n++) {
+      const b = csr.neighbors[n];
+      if (b <= a) continue;
+      if ((seen++ % stride) !== 0) continue;
+      const d = Math.abs(values[a] - values[b]);
+      if (Number.isFinite(d)) steps.push(d);
+    }
+  }
+  if (!steps.length) return 0;
+  steps.sort((x, y) => x - y);
+  return steps[Math.min(steps.length - 1, Math.floor(steps.length * quantile))];
+}
+

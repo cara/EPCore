@@ -29,6 +29,24 @@ function hostApi() {
   return null;
 }
 
+/** Wohin ohne Rückfrage, wenn die Einstellung das sagt.
+ *
+ * Der Dialog ist ein Klick bei jedem einzelnen Export, und die Antwort ist
+ * jedes Mal dieselbe. Der Wirt sucht im Downloads-Ordner einen freien Namen,
+ * damit nichts ungefragt überschrieben wird; kann er das nicht, wird gefragt —
+ * lieber ein Dialog zu viel als eine Datei, die niemand wiederfindet.
+ */
+async function pathWithoutAsking(api, name) {
+  const settings = window.epcoreSettings;
+  if (settings && settings.get('saveWithoutDialog') === false) return null;
+  if (typeof api.default_save_path !== 'function') return null;
+  try {
+    return await api.default_save_path(name);
+  } catch {
+    return null;
+  }
+}
+
 /** Ob wir in der Desktop-Hülle laufen. */
 export function inShell() {
   return typeof hostApi()?.save_file_dialog === 'function';
@@ -62,7 +80,7 @@ export async function saveBytes(name, data) {
 
   const api = hostApi();
   if (api && typeof api.save_file_dialog === 'function') {
-    const path = await api.save_file_dialog(name);
+    const path = (await pathWithoutAsking(api, name)) || await api.save_file_dialog(name);
     if (!path) return { ok: false, cancelled: true };
 
     // Stückweise, wenn die Datei groß ist. Ein Videoexport sind zig Megabyte,
