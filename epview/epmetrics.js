@@ -306,6 +306,87 @@ export function activation(positions, lat) {
   };
 }
 
+/* Wieviel Fläche wann aktiv ist — die Kurve, die Rhythmia SKYLINE nennt.
+ *
+ * Für jeden Zeitpunkt im Mapping-Fenster: welcher Anteil der Karte hat gerade
+ * dort seine Aktivierungszeit. Bei einem Makroreentry läuft die Welle
+ * gleichmäßig durch und die Kurve ist flach; bricht sie irgendwo ein, aktiviert
+ * dort für eine Weile fast nichts — und genau diese Lücke ist die Stelle, an der
+ * die Isthmus-Frage entschieden wird.
+ *
+ * Gewichtet nach Fläche, nicht nach Vertexzahl: ein feines Netz an der
+ * Vorderwand und ein grobes am Dach würden sonst behaupten, vorne aktiviere
+ * dreimal so viel Gewebe.
+ */
+export function activationHistogram(positions, faces, lat, bins = 60) {
+  const areas = triangleAreas(positions, faces);
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < lat.length; i++) {
+    const v = lat[i];
+    if (!Number.isFinite(v)) continue;
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  if (!(hi > lo)) return { bins: [], lo: null, hi: null, totalAreaMm2: 0 };
+
+  const width = (hi - lo) / bins;
+  const counts = new Float64Array(bins);
+  let total = 0;
+
+  for (let f = 0; f < faces.length; f += 3) {
+    const area = areas[f / 3];
+    if (!(area > 0)) continue;
+    // Ein Dreieck aktiviert nicht in einem Augenblick, sondern über die Spanne
+    // seiner drei Ecken. Es auf einen einzigen Zeitpunkt zu buchen, machte aus
+    // einer durchlaufenden Welle eine Reihe von Zacken.
+    let min = Infinity, max = -Infinity, known = 0;
+    for (let k = 0; k < 3; k++) {
+      const v = lat[faces[f + k]];
+      if (!Number.isFinite(v)) continue;
+      known++;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    if (known < 3) continue;                 // teilweise unbelegt: nicht raten
+    total += area;
+    const from = Math.max(0, Math.min(bins - 1, Math.floor((min - lo) / width)));
+    const to = Math.max(0, Math.min(bins - 1, Math.floor((max - lo) / width)));
+    const share = area / (to - from + 1);
+    for (let b = from; b <= to; b++) counts[b] += share;
+  }
+
+  const out = [];
+  for (let b = 0; b < bins; b++) {
+    out.push({ tMs: lo + (b + 0.5) * width, areaMm2: counts[b],
+               fraction: total > 0 ? counts[b] / total : 0 });
+  }
+  return { bins: out, lo, hi, totalAreaMm2: total };
+}
+
+/** Die stillste Strecke der Kurve — dort, wo am wenigsten Gewebe aktiviert.
+ *
+ * Kein Befund, sondern ein Hinweis, wo man hinsehen sollte: bei einem
+ * vollständig erfassten Kreis liegt hier die langsame Leitung.
+ */
+export function quietestWindow(histogram, spanMs = 20) {
+  const bins = histogram.bins || [];
+  if (bins.length < 2) return null;
+  const width = bins[1].tMs - bins[0].tMs;
+  const count = Math.max(1, Math.round(spanMs / width));
+  if (count > bins.length) return null;
+
+  let best = null, sum = 0;
+  for (let i = 0; i < bins.length; i++) {
+    sum += bins[i].fraction;
+    if (i >= count) sum -= bins[i - count].fraction;
+    if (i >= count - 1 && (best === null || sum < best.fraction)) {
+      best = { fraction: sum, fromMs: bins[i - count + 1].tMs - width / 2,
+               toMs: bins[i].tMs + width / 2 };
+    }
+  }
+  return best;
+}
+
 /** Everything computable from this surface. Absent measurements are null. */
 /** Fill the holes so the surface encloses a volume.
  *

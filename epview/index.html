@@ -15,9 +15,9 @@
   } catch (e) { /* Speicher abgeschaltet */ }
 </script>
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/theme.js?v=b7db181807c0"></script>
-<script type="module" src="../shared/settings.js?v=b7db181807c0"></script>
-<script type="module" src="../shared/i18n.js?v=b7db181807c0"></script>
+<script type="module" src="../shared/theme.js?v=76e45eb3ef80"></script>
+<script type="module" src="../shared/settings.js?v=76e45eb3ef80"></script>
+<script type="module" src="../shared/i18n.js?v=76e45eb3ef80"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -376,6 +376,8 @@
   #readout b { color: var(--accent); font-weight: 500; }
 
   /* stats */
+  .warn-text { color: var(--warn); }
+
   #stats {
     position: fixed; top: 24px; right: 26px; z-index: 10; text-align: right;
     font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em;
@@ -739,6 +741,11 @@
 <button class="tool" id="ex-mat" data-i18n="map.openep"></button>
     </div>
   </div>
+  <!-- Vorher/nachher: die aktuelle Karte merken, dann die nächste laden. -->
+  <button class="tool" id="t-compare" data-i18n="map.compare"
+          data-i18n-title="map.compare.title"></button>
+  <span class="tool" id="compare-name" hidden
+        style="color:var(--muted);text-transform:none;letter-spacing:0;max-width:22ch;overflow:hidden;text-overflow:ellipsis"></span>
   <button class="tool" id="t-theme" data-i18n-keep-label
         data-i18n-title="map.theme.title" aria-label="Hell/Dunkel">☾</button>
   <button class="tool" id="t-anonymise" data-i18n="map.anonymise"></button>
@@ -878,6 +885,15 @@
       <input type="range" id="anim-speed" min="1" max="500" step="1" value="60"></div>
     <div class="field" style="margin-top:6px"><small data-i18n="map.band"></small>
       <input type="range" id="anim-band"></div>
+    <!-- Wieviel Fläche wann aktiviert. Bei einem durchlaufenden Kreis flach;
+         bricht die Welle ein, steht dort eine Delle — und die ist die Frage,
+         um die es bei einem Isthmus geht. -->
+    <div class="field" style="margin-top:10px">
+      <small data-i18n="map.skyline"></small>
+      <span id="skyline-quiet" style="float:right;color:var(--accent-dim);font-size:10px"></span>
+    </div>
+    <canvas id="skyline" width="240" height="54"
+            style="width:100%;height:54px;display:block;margin-top:4px"></canvas>
   </div>
   <div class="grp">
     <label data-i18n="map.opacity"></label>
@@ -953,7 +969,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=b7db181807c0",
+    "three": "../vendor/three/three.module.js?v=76e45eb3ef80",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -963,14 +979,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import epcoreTheme from '../shared/theme.js?v=b7db181807c0';
-import * as EP from './epconv.js?v=b7db181807c0';
-import * as EPM from './epmetrics.js?v=b7db181807c0';
-import * as EPCV from './epconduction.js?v=b7db181807c0';
-import * as EPA from './epablation.js?v=b7db181807c0';
-import * as EPSave from '../shared/save.js?v=b7db181807c0';
-import * as EPO from './epopenep.js?v=b7db181807c0';
-import { LUTS, UNMAPPED, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=b7db181807c0';
+import epcoreTheme from '../shared/theme.js?v=76e45eb3ef80';
+import * as EP from './epconv.js?v=76e45eb3ef80';
+import * as EPM from './epmetrics.js?v=76e45eb3ef80';
+import * as EPCV from './epconduction.js?v=76e45eb3ef80';
+import * as EPA from './epablation.js?v=76e45eb3ef80';
+import * as EPSave from '../shared/save.js?v=76e45eb3ef80';
+import * as EPO from './epopenep.js?v=76e45eb3ef80';
+import { LUTS, UNMAPPED, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=76e45eb3ef80';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1166,6 +1182,16 @@ let studyName = '';
 const group = new THREE.Group();
 scene.add(group);
 
+/* Die gemerkte Karte, daneben gestellt.
+ *
+ * Vorher/nachher ist der häufigste Blick nach einer Prozedur, und bisher warf
+ * das Laden einer Karte die vorige weg. Die gemerkte behält die Farben, die sie
+ * beim Merken hatte — sie ist ein Bild von damals, kein zweiter Datensatz, an
+ * dem Fenster und Glättung mitdrehen. */
+const compareGroup = new THREE.Group();
+scene.add(compareGroup);
+let comparison = null;      // { name, mesh, radius }
+
 const material = new THREE.MeshStandardMaterial({
   vertexColors: true, roughness: 0.52, metalness: 0.0,
   side: THREE.DoubleSide, flatShading: false,
@@ -1298,6 +1324,61 @@ function buildTagUI() {
   });
 }
 
+/** Die aktuelle Karte als Vergleich behalten. */
+function rememberComparison() {
+  if (!mesh) return;
+  clearComparison();
+  // Kopie der Geometrie samt der Farben, die gerade zu sehen sind: die Karte
+  // von vorher soll sich nicht mehr ändern, wenn am Fenster gedreht wird.
+  const geo = mesh.geometry.clone();
+  const held = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+    vertexColors: true, roughness: 0.52, metalness: 0.0,
+  }));
+  geo.computeBoundingSphere();
+  comparison = { name: studyName || currentName || '', mesh: held,
+                 radius: geo.boundingSphere.radius || 50 };
+  compareGroup.add(held);
+  placeSideBySide();
+  refreshCompareUI();
+}
+
+function clearComparison() {
+  if (comparison) {
+    compareGroup.remove(comparison.mesh);
+    comparison.mesh.geometry.dispose();
+    comparison.mesh.material.dispose();
+  }
+  comparison = null;
+  compareGroup.position.set(0, 0, 0);
+  group.position.copy(group.userData.centred || group.position);
+  refreshCompareUI();
+}
+
+/** Die gemerkte Karte links, die aktuelle rechts — mit einer Lücke dazwischen. */
+function placeSideBySide() {
+  if (!comparison || !mesh) return;
+  mesh.geometry.computeBoundingSphere();
+  const here = mesh.geometry.boundingSphere.radius || 50;
+  const gapMm = (here + comparison.radius) * 0.15;
+  const shift = here + comparison.radius + gapMm;
+  const centred = group.userData.centred;
+  if (centred) {
+    group.position.set(centred.x + shift / 2, centred.y, centred.z);
+    const other = comparison.mesh.geometry.boundingSphere.center;
+    compareGroup.position.set(-other.x - shift / 2, -other.y, -other.z);
+  }
+}
+
+function refreshCompareUI() {
+  const button = document.getElementById('t-compare');
+  const label = document.getElementById('compare-name');
+  if (button) button.classList.toggle('on', !!comparison);
+  if (label) {
+    label.textContent = comparison ? comparison.name : '';
+    label.hidden = !comparison;
+  }
+}
+
 function loadGeometry(data, name) {
   disposeMesh();
   // Ein Elektrogramm gehört zu der Karte, aus der es kam.
@@ -1328,13 +1409,19 @@ function loadGeometry(data, name) {
   geo.computeBoundingSphere();
   const bs = geo.boundingSphere;
   group.position.set(-bs.center.x, -bs.center.y, -bs.center.z);
+  // Gemerkt, weil der Vergleich die Karte zur Seite schiebt und sie danach
+  // wieder in die Mitte gehört.
+  group.userData.centred = group.position.clone();
 
   mesh = new THREE.Mesh(geo, material);
   group.add(mesh);
+  if (comparison) placeSideBySide();
 
   buildModeOptions(data);
   applyColors();
-  frameCamera(bs);
+  frameCamera(comparison
+    ? new THREE.Sphere(new THREE.Vector3(0, 0, 0), bs.radius + comparison.radius * 1.3)
+    : bs);
   if (initialView) setView(initialView);
   updateStats(data);
   refreshDisplayToggles();
@@ -1473,7 +1560,11 @@ function setWindow(vmin, vmax) {
   const ro = document.getElementById('vwin-readout');
   if (ro) ro.textContent = round(vmin) + ' – ' + round(vmax);
   applyColors();
-  if (state.mode && state.mode.startsWith('scalar:') && isLatField(state.mode.slice(7))) syncTimelineToWindow();
+  if (state.mode && state.mode.startsWith('scalar:') && isLatField(state.mode.slice(7))) {
+    syncTimelineToWindow();
+    // Die Kurve zeigt die *sichtbaren* Werte; Fenster und Glättung ändern sie.
+    drawSkyline(state.mode.slice(7));
+  }
   recomputeArea();
 }
 
@@ -1545,12 +1636,64 @@ function buildPresets(field) {
 
 function isLatField(field) { const f = (field || '').toLowerCase(); return f === 'lat' || f === 'activation'; }
 
+/* Die Aktivierungskurve zeichnen: Fläche über Zeit.
+ *
+ * Absichtlich klein und ohne Achsen — sie beantwortet eine Ja/Nein-Frage
+ * ("läuft die Welle durch oder bricht sie ein?"), und die Zahlen dazu stehen
+ * als Zeitspanne daneben. */
+function drawSkyline(field) {
+  const canvas = document.getElementById('skyline');
+  const note = document.getElementById('skyline-quiet');
+  if (!canvas || !current) return;
+  const scale = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth || 240, height = 54;
+  if (canvas.width !== Math.round(width * scale)) {
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  const histogram = EPM.activationHistogram(current.positions, current.faces,
+                                            visibleScalar(field));
+  const bins = histogram.bins;
+  if (!bins.length) { note.textContent = ''; return; }
+
+  const peak = Math.max(...bins.map(b => b.fraction)) || 1;
+  const quiet = EPM.quietestWindow(histogram, Math.max(10, (histogram.hi - histogram.lo) / 12));
+
+  // Die stillste Strecke zuerst, damit die Kurve darüber liegt.
+  if (quiet) {
+    const at = (t) => ((t - histogram.lo) / (histogram.hi - histogram.lo)) * width;
+    ctx.fillStyle = themeToken('--accent-wash') || 'rgba(69,198,218,0.12)';
+    ctx.fillRect(at(quiet.fromMs), 0, Math.max(2, at(quiet.toMs) - at(quiet.fromMs)), height);
+    note.textContent = `${round(quiet.fromMs)}–${round(quiet.toMs)} ms`;
+  } else {
+    note.textContent = '';
+  }
+
+  ctx.beginPath();
+  bins.forEach((bin, i) => {
+    const x = (i / (bins.length - 1)) * width;
+    const y = height - 2 - (bin.fraction / peak) * (height - 6);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = themeToken('--accent') || '#45c6da';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.lineTo(width, height); ctx.lineTo(0, height); ctx.closePath();
+  ctx.fillStyle = themeToken('--accent-wash') || 'rgba(69,198,218,0.12)';
+  ctx.fill();
+}
+
 function updateActivationUI(field) {
   const grp = document.getElementById('grp-anim');
   if (!field || !isLatField(field)) { grp.style.display = 'none'; stopAnim(); return; }
   grp.style.display = '';
   state.anim.engaged = false;
   syncTimelineToWindow();
+  drawSkyline(field);
 }
 
 // The Ausschnitt [t0,t1] is the LAT color window (state.vmin/vmax). Keep the
@@ -1924,6 +2067,24 @@ function updateMetrics(data) {
     if (!summary.placed) {
       rows.push([T('map.metrics.ablation.unplaced') || 'davon verortet',
                  `<span class="muted">${T('map.metrics.none') || 'keine'}</span>`]);
+    } else {
+      /* Ob aus den Stellen eine Linie geworden ist. Dauer und Leistung sagen,
+       * wie kräftig abgegeben wurde — eine Kette mit einer Lücke leitet
+       * trotzdem weiter, und das steht in keiner der beiden Zahlen. */
+      if (summary.spacingMm && summary.spacingMm.median != null) {
+        rows.push([T('map.metrics.ablation.spacing') || 'Abstand (Median)',
+                   `${N(summary.spacingMm.median, 1)} mm`]);
+      }
+      if (summary.segments > 1) {
+        rows.push([T('map.metrics.ablation.segments') || 'Ketten',
+                   `<span class="warn-text">${N(summary.segments, 0)}</span>`]);
+        if (summary.largestGapMm != null) {
+          rows.push([T('map.metrics.ablation.gap') || 'größte Lücke',
+                     `<span class="warn-text">${N(summary.largestGapMm, 1)} mm</span>`]);
+        }
+      } else {
+        rows.push([T('map.metrics.ablation.segments') || 'Ketten', '1']);
+      }
     }
   }
 
@@ -2324,7 +2485,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=b7db181807c0'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=76e45eb3ef80'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -2598,7 +2759,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=b7db181807c0');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=76e45eb3ef80');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -2917,6 +3078,9 @@ document.getElementById('smooth-level').oninput = e => {
   state.smoothLevel = +e.target.value;
   document.getElementById('smooth-val').textContent = state.smoothLevel;
   applyColors();
+  if (state.mode && state.mode.startsWith('scalar:') && isLatField(state.mode.slice(7))) {
+    drawSkyline(state.mode.slice(7));
+  }
 };
 
 document.getElementById('anim-play').onclick = () => state.anim.playing ? stopAnim() : startAnim();
@@ -3036,6 +3200,9 @@ document.getElementById('rs-cycles').onchange = e => { recOpts.cycles = Math.max
 document.getElementById('rs-path').onchange = e => { recOpts.path = e.target.value; };
 document.getElementById('rs-ease').onchange = e => { recOpts.ease = e.target.checked; };
 
+document.getElementById('t-compare').onclick = () => {
+  if (comparison) clearComparison(); else rememberComparison();
+};
 document.getElementById('t-theme').onclick = () => epcoreTheme.toggle();
 document.getElementById('t-anonymise').onclick = (e) => {
   e.stopPropagation();
@@ -3195,7 +3362,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=b7db181807c0');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=76e45eb3ef80');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -3243,7 +3410,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=b7db181807c0';
+import '../shared/bridge.js?v=76e45eb3ef80';
 
 /* Der eigene Weg hinein — nur wo es keinen anderen gibt.
  *

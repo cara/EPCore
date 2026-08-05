@@ -12,8 +12,8 @@
  *  Parameter injiziert, damit das Modul ohne Bundler testbar bleibt.
  * ===================================================================== */
 
-import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=b7db181807c0';
-import { readVisitag, summarise as summariseAblation } from './epablation.js?v=b7db181807c0';
+import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=76e45eb3ef80';
+import { readVisitag, summarise as summariseAblation } from './epablation.js?v=76e45eb3ef80';
 
 const SENTINEL = 1e4;
 
@@ -231,10 +231,42 @@ function extractRhythmiaTags(root) {
     const ats = ppr && (elText(childByTag(ppr, 'Timestamp'))
                     || elText(childByTag(ppr, 'StartTime')));
     abl.push({ position: pos, label: seq ? ('Abl ' + seq) : 'Abl',
-               time: ats != null && ats !== '' ? Number(ats) : null });
+               time: ats != null && ats !== '' ? Number(ats) : null,
+               // Was an dieser Stelle gemessen wurde. Bisher wurde nur der Ort
+               // gelesen und der Rest weggeworfen — dabei steht hier alles, was
+               // eine Läsion beschreibt: Dauer, Kraft-Zeit-Integral, Impedanz,
+               // Leistung und Temperatur des Generators.
+               ablation: rhythmiaLesion(ppr, pos, seq) });
   }
   if (abl.length) groups.unshift({ id: 'ablation', label: 'Ablation', category: 'ablation', color: tagCategoryColor('ablation'), points: abl });
   return groups;
+}
+
+/** Eine Rhythmia-Läsion in derselben Form, die die VisiTag-Auswertung erwartet.
+ *
+ * Damit rechnen Abstände, Ketten und Lücken (epablation.js) für Rhythmia
+ * genauso wie für CARTO — es wäre albern, dieselbe Frage zweimal verschieden zu
+ * beantworten, nur weil die Datei anders heißt.
+ *
+ * `FTI` ist Rhythmias Kraft-Zeit-Integral und hat bei CARTO keine Entsprechung;
+ * es reist unter eigenem Namen mit, statt in ein fremdes Feld gezwängt zu werden.
+ */
+function rhythmiaLesion(props, position, sequence) {
+  const num = (name) => {
+    const text = props && elText(childByTag(props, name));
+    const value = text === '' || text == null ? NaN : Number(text);
+    return Number.isFinite(value) ? value : NaN;
+  };
+  const stat = (value) => (Number.isFinite(value) ? { mean: value, min: value, max: value, n: 1 } : {});
+  return {
+    index: sequence ? Number(sequence) : null,
+    xyz: position,
+    durationS: num('Duration'),
+    ftiGs: num('FTI'),
+    powerW: stat(num('GeneratorMedianPower')),
+    impedanceOhm: stat(num('GeneratorImpedanceBase')),
+    temperatureC: stat(num('GeneratorTemperatureMax')),
+  };
 }
 
 // Exported for testing: parse tags directly from an XML string.
@@ -487,7 +519,17 @@ async function buildRhythmiaMeshes(xml, getPayload, getRange) {
   const tagGroups = extractRhythmiaTags(root);
   if (tagGroups.length && meshes.length) {
     const per = assignTagsToMeshes(meshes, tagGroups);
-    for (let i = 0; i < meshes.length; i++) if (per[i].length) meshes[i].tagGroups = per[i];
+    for (let i = 0; i < meshes.length; i++) {
+      if (!per[i].length) continue;
+      meshes[i].tagGroups = per[i];
+      // Die Läsionen dieser Anatomie, in der Form, die die Auswertung erwartet.
+      // Ohne das stünde bei Rhythmia nur "so viele Punkte" und bei CARTO die
+      // ganze Rechnung — dieselbe Frage, zwei Antworten.
+      const lesions = per[i]
+        .filter(g => g.category === 'ablation')
+        .flatMap(g => g.points.map(p => p.ablation).filter(Boolean));
+      if (lesions.length) meshes[i].ablation = lesions;
+    }
   }
   // Ein Punkt zeigt hier keine eigene Aufnahme, sondern das Fenster der
   // laufenden um seinen Zeitstempel — Rhythmia legt Signale je Katheter ab,
