@@ -387,6 +387,63 @@ export function quietestWindow(histogram, spanMs = 20) {
   return best;
 }
 
+/* Was an einer Öffnung hängt — der Stumpf, den man wegschneiden will.
+ *
+ * Eine Lungenvene oder eine Klappenebene endet im Export als Röhre, die vom
+ * Rand der Öffnung aus in die Karte hineinragt. Auf dem Bild verdeckt sie die
+ * Wand dahinter, und in der Flächenzahl steht sie mit drin, obwohl niemand sie
+ * abladiert.
+ *
+ * Gemessen wird der Weg *über die Oberfläche*, nicht der Abstand durch den
+ * Raum: eine Vene, die sich an die Wand anlegt, wäre sonst mitsamt der Wand
+ * markiert, an der sie anliegt.
+ */
+export function vertsWithinOfRing(positions, adjacency, ringVertices, depthMm) {
+  const csr = adjacency && adjacency.offsets ? adjacency : null;
+  const marked = new Set();
+  if (!csr || !ringVertices || !ringVertices.length || !(depthMm > 0)) return marked;
+
+  const count = positions.length / 3;
+  const distance = new Float64Array(count).fill(Infinity);
+  // Eine schlichte Warteschlange statt eines Heaps: die Kanten eines
+  // Mapping-Netzes sind alle ähnlich lang, und der Fehler dadurch liegt unter
+  // einer Kantenlänge — bei 1,3 mm Kanten und 8 mm Tiefe belanglos.
+  const queue = [];
+  for (const v of ringVertices) { distance[v] = 0; queue.push(v); marked.add(v); }
+
+  for (let head = 0; head < queue.length; head++) {
+    const v = queue[head];
+    const base = distance[v];
+    for (let n = csr.offsets[v]; n < csr.offsets[v + 1]; n++) {
+      const j = csr.neighbors[n];
+      const dx = positions[j * 3] - positions[v * 3];
+      const dy = positions[j * 3 + 1] - positions[v * 3 + 1];
+      const dz = positions[j * 3 + 2] - positions[v * 3 + 2];
+      const step = base + Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (step >= distance[j] || step > depthMm) continue;
+      distance[j] = step;
+      marked.add(j);
+      queue.push(j);
+    }
+  }
+  return marked;
+}
+
+/** Die Dreiecke ohne die markierten Vertices — die zugeschnittene Karte.
+ *
+ * Ein Dreieck fällt weg, sobald *eine* seiner Ecken im Schnitt liegt: bliebe es
+ * stehen, ragte am Rand ein Zackensaum aus halb abgeschnittenen Dreiecken.
+ */
+export function facesWithout(faces, removed) {
+  if (!removed || !removed.size) return faces;
+  const kept = [];
+  for (let f = 0; f < faces.length; f += 3) {
+    if (removed.has(faces[f]) || removed.has(faces[f + 1]) || removed.has(faces[f + 2])) continue;
+    kept.push(faces[f], faces[f + 1], faces[f + 2]);
+  }
+  return faces instanceof Uint32Array ? Uint32Array.from(kept) : kept;
+}
+
 /** Everything computable from this surface. Absent measurements are null. */
 /** Fill the holes so the surface encloses a volume.
  *
