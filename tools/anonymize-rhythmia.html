@@ -1249,7 +1249,7 @@ const PROFILES = {
     "id": "rhythmia",
     "label": "Boston Scientific Rhythmia HDx",
     "family": "map",
-    "verified": false,
+    "verified": true,
     "detect": {
       "marker_files": [
         "*.000"
@@ -1305,7 +1305,8 @@ const PROFILES = {
         "physician": "Dr. Demo",
         "host": "ANONHOST"
       }
-    }
+    },
+    "verification": "Gegen einen echten Rhythmia-HDx-Export geprüft (2026-08-06, 7,5 GB, sieben Teile): 4265 Binärblöcke unverändert durchgeschrieben, 1679 Ersetzungen — 1268 Timestamp, 191 StartTime, 198 Comment, je einmal EncryptedPatientInfo und EncryptedStudyInfo. Die Identität liegt bei diesem Hersteller nicht im Klartext: über 4265 Blöcke hinweg gibt es kein Namens-, MRN- oder Geburtsdatumsfeld, sondern zwei verschlüsselte Datensätze — beide werden durch [ENCRYPTED RECORD REMOVED BY EPCORE] ersetzt. Selbstscan sauber. NICHT geprüft: (a) der Export war unvollständig (letztes Teil fehlt) und wurde für den Lauf am letzten intakten Block gekürzt — die letzten 10,9 MB sind ungeprüft; (b) handgetippte Felder bleiben stehen (1046 Label, 864 UneditablePrefix) und werden nur gemeldet, weil ein Label die Bedeutung der Karte trägt; (c) Screenshots und Videos: dieser Export hatte keine, und eingebrannte Patientenzeilen in Bildern kann kein Textscrubber entfernen — sie stehen in der Liste der nicht untersuchten Dateien; (d) ein Haus, eine Softwarefassung."
   }
 };
 const SHARED = {

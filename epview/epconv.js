@@ -12,8 +12,8 @@
  *  Parameter injiziert, damit das Modul ohne Bundler testbar bleibt.
  * ===================================================================== */
 
-import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=b0edc5434904';
-import { readVisitag, summarise as summariseAblation } from './epablation.js?v=b0edc5434904';
+import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=874caa990bd9';
+import { readVisitag, summarise as summariseAblation } from './epablation.js?v=874caa990bd9';
 
 const SENTINEL = 1e4;
 
@@ -242,6 +242,77 @@ function extractRhythmiaTags(root) {
   return groups;
 }
 
+/* Die Messungen, aus denen die Karte gebaut ist.
+ *
+ * Nicht die Annotationspunkte — die hat der Untersucher gesetzt, und in der
+ * vermessenen Studie sind es 191. Die Karte selbst steht auf 19 615 Messungen
+ * allein in Map1: eine Elektrode des Korbs auf einem akzeptierten Schlag.
+ *
+ * `Map<n>/surfelec_<id>_all.dat`, Float64, 28 Spalten je Zeile, **zeilenweise**
+ * gespeichert — anders als die Signalblöcke, und genau da biegt ein Leser
+ * falsch ab. Welche Spalte was trägt, steht in
+ * docs/findings/rhythmia-mapping-points.md; die tragenden Punkte sind dort
+ * jeweils gegen etwas geprüft.
+ */
+const SURFELEC_NAME = /surfelec_[0-9a-f]+_all\.dat$/;
+const SURFELEC_COLS = 28;
+const SURFELEC = { time: 0, xyz: 1, spline: 4, onSpline: 5, electrode: 6,
+                   latBipolar: 7, latUnipolar: 8, mvBipolar: 9, mvUnipolar: 10,
+                   surface: 21, normal: 24, included: 27 };
+
+async function extractRhythmiaMappingPoints(root, getPayload) {
+  const groups = [];
+  for (const el of iterTag(root, 'inlinedbin')) {
+    const fname = el.getAttribute && el.getAttribute('fname');
+    if (!fname || !SURFELEC_NAME.test(fname)) continue;
+    if (el.getAttribute('type') !== 'Float64') continue;
+    const cols = parseInt(el.getAttribute('cols'), 10);
+    const rows = parseInt(el.getAttribute('rows'), 10);
+    // Eine andere Breite ist eine andere Tabelle. Sie trotzdem so zu lesen
+    // ergibt Zahlen, die wie Koordinaten aussehen und keine sind.
+    if (cols !== SURFELEC_COLS || !rows) continue;
+    const idx = parseInt((el.textContent || '').trim(), 10);
+    if (!Number.isFinite(idx)) continue;
+    const bytes = await getPayload(idx);
+    if (!bytes || bytes.length < rows * cols * 8) continue;
+
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const at = (row, col) => view.getFloat64((row * cols + col) * 8, true);
+    const map = fname.indexOf('/') > 0 ? fname.slice(0, fname.indexOf('/')) : 'Map';
+    const points = [];
+    for (let r = 0; r < rows; r++) {
+      // Der auf die Anatomie gezogene Ort, nicht der gemessene: der liegt in
+      // der vermessenen Studie im Median 0,50 mm von der Fläche entfernt, und
+      // Marker daneben sehen aus wie ein Registrierungsfehler.
+      const position = [at(r, SURFELEC.surface), at(r, SURFELEC.surface + 1),
+                        at(r, SURFELEC.surface + 2)];
+      if (!position.every(Number.isFinite)) continue;
+      let lat = at(r, SURFELEC.latBipolar);
+      if (!Number.isFinite(lat)) lat = at(r, SURFELEC.latUnipolar);
+      const electrode = at(r, SURFELEC.electrode);
+      points.push({
+        position,
+        label: `${map} · E${Number.isFinite(electrode) ? electrode : '?'}`,
+        time: at(r, SURFELEC.time),
+        // Der gespeicherte Wert ist ein Abtastindex ins Schlagfenster, keine
+        // Millisekunde — 1…271 bei 272 Werten. Die Umrechnung braucht die Rate
+        // und passiert dort, wo die Zeitachse bekannt ist.
+        latSamples: Number.isFinite(lat) ? lat : null,
+        bipolarMv: at(r, SURFELEC.mvBipolar),
+        unipolarMv: at(r, SURFELEC.mvUnipolar),
+        electrode: Number.isFinite(electrode) ? electrode : null,
+        included: at(r, SURFELEC.included) !== 0,
+      });
+    }
+    if (points.length) {
+      groups.push({ id: `mapping-${map}`, label: `${map} · Messpunkte`,
+                    category: 'measurement', color: tagCategoryColor('measurement'),
+                    points });
+    }
+  }
+  return groups;
+}
+
 /** Eine Rhythmia-Läsion in derselben Form, die die VisiTag-Auswertung erwartet.
  *
  * Damit rechnen Abstände, Ketten und Lücken (epablation.js) für Rhythmia
@@ -266,7 +337,36 @@ function rhythmiaLesion(props, position, sequence) {
     powerW: stat(num('GeneratorMedianPower')),
     impedanceOhm: stat(num('GeneratorImpedanceBase')),
     temperatureC: stat(num('GeneratorTemperatureMax')),
+    impedanceDrop: impedanceDrop(num('DirectSenseImpedanceBase'), num('DirectSenseImpedanceMin'),
+                                 num('GeneratorImpedanceBase'), num('GeneratorImpedanceMin')),
   };
+}
+
+/** Wie weit die Impedanz während der Abgabe gefallen ist.
+ *
+ * Rhythmia legt zwei Paare ab, und sie messen nicht dasselbe:
+ *
+ * * **DirectSense** ist die lokale Impedanz an der Katheterspitze. Sie ist das
+ *   Maß, an dem sich beurteilen lässt, ob an *dieser* Stelle Gewebe erhitzt
+ *   wurde — im gemessenen Punkt 146,5 → 130,6 Ω, also 15,9 Ω oder 10,9 %.
+ * * **Generator** ist die Impedanz des ganzen Stromkreises, Rückenelektrode
+ *   eingerechnet. Sie fällt viel flacher — im selben Punkt 115,8 → 111,9 Ω,
+ *   3,9 Ω oder 3,4 % — und ein Vergleich zwischen beiden Quellen ist deshalb
+ *   sinnlos.
+ *
+ * Welche Quelle es war, steht deshalb dabei. Fehlt DirectSense, ist der
+ * Generatorwert besser als nichts, aber er darf nicht so aussehen wie der
+ * andere.
+ */
+function impedanceDrop(directBase, directMin, genBase, genMin) {
+  const from = (base, min, source) => {
+    if (!Number.isFinite(base) || !Number.isFinite(min) || base <= 0) return null;
+    return { source, baseOhm: base, minOhm: min, ohm: base - min,
+             percent: ((base - min) / base) * 100 };
+  };
+  return from(directBase, directMin, 'directsense')
+      || from(genBase, genMin, 'generator')
+      || null;
 }
 
 // Exported for testing: parse tags directly from an XML string.
@@ -516,7 +616,8 @@ async function buildRhythmiaMeshes(xml, getPayload, getRange) {
   // <Transform> — all three real test studies have identity M, so this aligns. Non-identity
   // transforms remain an unhandled limitation: if markers ever appear misaligned on a study,
   // that study has a non-identity M and the tag <xyz> must be transformed before association.
-  const tagGroups = extractRhythmiaTags(root);
+  const tagGroups = extractRhythmiaTags(root)
+    .concat(await extractRhythmiaMappingPoints(root, getPayload));
   if (tagGroups.length && meshes.length) {
     const per = assignTagsToMeshes(meshes, tagGroups);
     for (let i = 0; i < meshes.length; i++) {

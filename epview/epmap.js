@@ -275,8 +275,38 @@ export function tagCategoryColor(cat) {
     case 'ablation': return [122, 24, 44];
     case 'annotation': return [240, 180, 40];
     case 'landmark': return [60, 200, 220];
+    // Messpunkte sind keine Aussage, sondern das Rohmaterial der Karte: gedeckt,
+    // damit sie die Farbskala darunter nicht überstimmen.
+    case 'measurement': return [150, 160, 175];
     default: return [180, 180, 180];
   }
+}
+
+/** Farbe für einen Impedanzabfall: von „kaum gefallen" nach „deutlich".
+ *
+ * Eine Reihe im selben Farbton statt eines Ampelverlaufs. Ablationsstellen sind
+ * weinrot — das ist ihre Farbe, und wer sie nach dem Abfall einfärbt, will
+ * unterscheiden können, ohne dass die Marker zu etwas anderem werden. Blass
+ * heißt wenig gefallen, das bekannte Weinrot heißt deutlich.
+ *
+ * Grün-Rot wäre außerdem eine Bewertung („gut/schlecht"), und die trifft der
+ * Export nicht: ein kleiner Abfall kann Kontakt oder Gewebe oder Leistung
+ * gewesen sein.
+ *
+ * `full` ist der Abfall, ab dem nicht weiter eingefärbt wird — 15 Ω lokale
+ * Impedanz ist die Größenordnung, die in der gemessenen Studie an einer Stelle
+ * mit Wirkung stand (146,5 → 130,6 Ω). Eine Darstellungsschwelle, kein Urteil
+ * über die Läsion. Ohne Messwert bleibt der Punkt grau, statt eine Null zu
+ * zeigen, die wie ein Befund aussähe.
+ */
+export const DROP_FULL_OHM = 15.0;
+
+export function impedanceDropColor(ohm, full = DROP_FULL_OHM) {
+  if (!Number.isFinite(ohm)) return [150, 150, 150];
+  const t = Math.max(0, Math.min(1, ohm / (full > 0 ? full : 1)));
+  // Blassrot → Weinrot, dieselbe Farbe wie ein gewöhnlicher Ablationsmarker.
+  const pale = [236, 176, 168], wine = tagCategoryColor('ablation');
+  return [0, 1, 2].map(i => Math.round(pale[i] + (wine[i] - pale[i]) * t));
 }
 
 // base64 of a UTF-8 string (works in Node and the browser — both have btoa/atob + TextEncoder).

@@ -15,9 +15,9 @@
   } catch (e) { /* Speicher abgeschaltet */ }
 </script>
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/theme.js?v=b0edc5434904"></script>
-<script type="module" src="../shared/settings.js?v=b0edc5434904"></script>
-<script type="module" src="../shared/i18n.js?v=b0edc5434904"></script>
+<script type="module" src="../shared/theme.js?v=874caa990bd9"></script>
+<script type="module" src="../shared/settings.js?v=874caa990bd9"></script>
+<script type="module" src="../shared/i18n.js?v=874caa990bd9"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -388,7 +388,12 @@
   /* toolbar (top-center actions) */
   #toolbar {
     position: fixed; top: 22px; left: 50%; transform: translateX(-50%);
-    z-index: 10; display: flex; gap: 8px;
+    /* Über den Tafeln, nicht neben ihnen. Beide standen auf 10, und bei
+       gleichem Wert entscheidet die Reihenfolge im Dokument — die Steuertafel
+       kommt später, also lag das aufgeklappte Kameramenü dahinter. Der Wert im
+       Menü selbst half nichts: die Leiste bildet einen eigenen Stapelkontext,
+       in dem er nur gegen Geschwister zählt. */
+    z-index: 16; display: flex; gap: 8px;
   }
   .tool {
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
@@ -407,9 +412,31 @@
   .tool.blocked:hover { color: var(--muted); border-color: var(--line); }
   .tool-sep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 4px; }
   .tdrop { position: relative; display: inline-block; }
+/* Geteilter Knopf: Schneiden links, die seltenere Variante unter dem Karat. */
+.tdrop.split { display: inline-flex; align-items: stretch; }
+.tdrop.split #t-cut { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  /* Angeschaltet heißt angeschaltet: die Leiste zeigt sonst nur einen Hauch
+     Farbunterschied, und wer nicht weiß, dass das Werkzeug scharf ist, klickt
+     in die Karte und wundert sich über den ersten Punkt. */
+  #t-cut.on, .tdrop.split #t-cut.on + #t-cut-more {
+    color: var(--bg-1); background: var(--accent); border-color: var(--accent);
+  }
+.tdrop.split #t-cut-more { border-left: 0; border-top-left-radius: 0;
+                           border-bottom-left-radius: 0; font-size: 10px;
+                           /* WCAG 2.5.8: ein Ziel unter 24 px ist keins. */
+                           min-width: 24px; padding-left: 0; padding-right: 0; }
   .tmenu { position: absolute; top: 116%; left: 0; min-width: 170px; padding: 8px;
     display: none; flex-direction: column; gap: 4px; z-index: 14; }
   .tmenu.show { display: flex; }
+  #compare-tags .ctag {
+    /* Über den Tafeln: eine Beschriftung, die halb hinter der Steuertafel
+       liegt, beantwortet die Frage "welche ist welche" nicht. */
+    position: fixed; transform: translate(-50%, 0); z-index: 11;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
+    color: var(--muted); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 4px 9px; pointer-events: none; white-space: nowrap;
+  }
+  #compare-tags .ctag.live { color: var(--accent); border-color: var(--accent-dim); }
   .tmenu .tool { width: 100%; text-align: left; background: transparent; border: 0; }
   .tmenu .tool:hover { color: var(--accent); }
     /* Immer im Fluss, nur unsichtbar: erschien die Anzeige erst beim Start,
@@ -678,6 +705,23 @@
 <body>
 
 <div id="stage"></div>
+<!-- Der gezeichnete Umriss. Über der Leinwand, damit die Karte darunter
+     unangetastet bleibt; nimmt nur Zeiger an, während geschnitten wird. -->
+<!-- width/height sind die Pixel der Grafikfläche, nicht ihre Größe auf dem
+     Schirm. Ein absolut positioniertes <canvas> mit `width:auto` nimmt seine
+     *intrinsische* Breite — also die Attributbreite in CSS-Pixeln. Bei
+     Pixelverhältnis 2 war die Fläche doppelt so groß wie das Fenster, und jeder
+     gesetzte Punkt erschien doppelt so weit rechts unten. Deshalb die Größe
+     hier ausdrücklich. -->
+<!-- Welche Karte welche ist. Am Objekt, nicht in der Leiste: bei zwei Karten
+     nebeneinander ist "links" und "rechts" die einzige Frage, und eine Antwort
+     am oberen Bildrand beantwortet sie nicht. -->
+<div id="compare-tags" hidden>
+  <span class="ctag" id="ctag-live"></span>
+  <span class="ctag" id="ctag-held"></span>
+</div>
+<canvas id="cut-overlay" style="position:fixed;inset:0;width:100vw;height:100vh;
+        z-index:8;pointer-events:none;display:none"></canvas>
 
 <div class="brand">
   <h1>EP<b>View</b></h1>
@@ -742,8 +786,29 @@
     </div>
   </div>
   <!-- Vorher/nachher: die aktuelle Karte merken, dann die nächste laden. -->
+  <div class="tdrop split">
+    <button class="tool" id="t-cut" data-i18n="map.cut"
+            data-i18n-title="map.cut.title"></button><!--
+    Der Knopf schneidet die zugewandte Wand — der Normalfall, ein Klick. Das
+    Karat daneben führt zum selteneren Schnitt durch beide Wände.
+ --><button class="tool" id="t-cut-more"
+            data-i18n-title="map.cut.through">▾</button>
+    <div class="tmenu panel" id="m-cut">
+      <button class="tool" id="cut-front" data-i18n="map.cut.front"></button>
+      <button class="tool" id="cut-through" data-i18n="map.cut.through"></button>
+      <!-- Der Weg zurück gehört neben das Werkzeug, nicht nur als Chip unten
+           in die Steuertafel, wo ihn niemand sucht. -->
+      <button class="tool" id="cut-reset" data-i18n="map.cut.reset"></button>
+    </div>
+  </div>
   <button class="tool" id="t-compare" data-i18n="map.compare"
           data-i18n-title="map.compare.title"></button>
+  <!-- Zurücklegen. Erscheint erst, wenn etwas offen ist — ein Knopf, der auf
+       eine leere Fläche zeigt, ist einer zu viel. -->
+  <button class="tool" id="t-swap" data-i18n="map.compare.swap"
+          data-i18n-title="map.compare.swap.title" hidden></button>
+  <button class="tool" id="t-close" data-i18n="map.close"
+          data-i18n-title="map.close.title" hidden></button>
   <span class="tool" id="compare-name" hidden
         style="color:var(--muted);text-transform:none;letter-spacing:0;max-width:22ch;overflow:hidden;text-overflow:ellipsis"></span>
   <button class="tool" id="t-theme" data-i18n-keep-label
@@ -858,8 +923,8 @@
     </details>
   </div>
   <div class="grp" id="grp-smooth" style="display:none">
-    <label><span data-i18n="map.interpolation"></span> <span id="smooth-val" style="color:var(--accent-dim)">0</span></label>
-    <input type="range" id="smooth-level" min="0" max="10" step="1" value="0">
+    <label><span data-i18n="map.interpolation"></span> <span id="smooth-val" style="color:var(--accent-dim)">10</span></label>
+    <input type="range" id="smooth-level" min="0" max="10" step="1" value="10">
   </div>
   <div class="grp" id="grp-area" style="display:none">
     <label><span data-i18n="map.area"></span> <span style="color:var(--accent-dim)">· cm²</span></label>
@@ -926,6 +991,16 @@
     <div class="toggles" style="margin-top:6px">
       <button class="chip" id="tag-project" data-i18n="map.project"></button>
     </div>
+    <!-- Wo abgegeben wurde, sagt schon der Marker. Ob die Abgabe etwas
+         bewirkt hat, steht im Impedanzabfall — bei Rhythmia im Export. -->
+    <div class="field" id="abl-color-row" style="margin-top:6px;display:none">
+      <small data-i18n="map.ablation.colour"></small>
+      <select id="abl-color">
+        <option value="category" data-i18n="map.ablation.colour.category"></option>
+        <option value="drop" data-i18n="map.ablation.colour.drop"></option>
+      </select>
+      <span id="abl-color-note" style="color:var(--accent-dim);font-size:10px"></span>
+    </div>
     <div class="toggles" id="tag-list" style="margin-top:6px"></div>
   </div>
   </div>
@@ -936,7 +1011,15 @@
     <canvas id="cbar" width="16" height="280"></canvas>
     <div class="ticks" id="cbar-ticks"></div>
   </div>
+  <!-- Bei einer kreisenden Erregung liegt die späteste Aktivierung neben der
+       frühesten. Ein gerader Balken schneidet den Kreis an einer willkürlichen
+       Stelle auf und lässt genau die Stelle wie einen Sprung aussehen, an der
+       nichts passiert. Deshalb auf Ansage rund. -->
+  <canvas id="cring" width="180" height="180" hidden></canvas>
   <div class="cap" id="legend-cap">Voltage · mV</div>
+  <label class="cap" id="cyclic-row" hidden style="display:flex;gap:6px;align-items:center;margin-top:6px;cursor:pointer">
+    <input type="checkbox" id="cyclic"> <span data-i18n="map.legend.cyclic"></span>
+  </label>
 </div>
 
 <div id="egm" role="dialog" aria-label="Elektrogramm">
@@ -981,7 +1064,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=b0edc5434904",
+    "three": "../vendor/three/three.module.js?v=874caa990bd9",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -991,14 +1074,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import epcoreTheme from '../shared/theme.js?v=b0edc5434904';
-import * as EP from './epconv.js?v=b0edc5434904';
-import * as EPM from './epmetrics.js?v=b0edc5434904';
-import * as EPCV from './epconduction.js?v=b0edc5434904';
-import * as EPA from './epablation.js?v=b0edc5434904';
-import * as EPSave from '../shared/save.js?v=b0edc5434904';
-import * as EPO from './epopenep.js?v=b0edc5434904';
-import { LUTS, UNMAPPED, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=b0edc5434904';
+import epcoreTheme from '../shared/theme.js?v=874caa990bd9';
+import * as EP from './epconv.js?v=874caa990bd9';
+import * as EPM from './epmetrics.js?v=874caa990bd9';
+import * as EPCV from './epconduction.js?v=874caa990bd9';
+import * as EPA from './epablation.js?v=874caa990bd9';
+import * as EPSave from '../shared/save.js?v=874caa990bd9';
+import * as EPO from './epopenep.js?v=874caa990bd9';
+import { LUTS, UNMAPPED, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=874caa990bd9';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1029,17 +1112,37 @@ const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
 // lights — soft clinical studio
-const hemi = new THREE.HemisphereLight(0xbfe6f0, 0x202830, 0.55);
+const hemi = new THREE.HemisphereLight(0xbfe6f0, 0x2c3944, 0.8);
 scene.add(hemi);
 /* Was von unten zurückkommt, hängt davon ab, worauf die Karte steht. Über
  * Weiß ist der dunkle Bodenanteil falsch: die Unterseite der Kammer wird
  * schwarz, während die Seite ringsum hell ist. */
 function lightForTheme(name) {
-  hemi.groundColor.set(name === 'light' ? 0xd6e0e5 : 0x202830);
+  hemi.groundColor.set(name === 'light' ? 0xd6e0e5 : 0x2c3944);
 }
 const key = new THREE.DirectionalLight(0xffffff, 2.1); key.position.set(1, 1.2, 1.4); scene.add(key);
 const fill = new THREE.DirectionalLight(0x9fc7d6, 0.7); fill.position.set(-1.4, 0.2, -0.6); scene.add(fill);
 const rim = new THREE.DirectionalLight(0x6fc9dc, 1.0); rim.position.set(-0.3, 0.6, -1.6); scene.add(rim);
+
+/* Drei Lichter, alle von oben oder waagerecht — und die Unterseite lag im
+ * Dunkeln. Gemessen an der Demokarte: von oben Helligkeitsmedian 109, von
+ * unten 38, und über die Hälfte der Fläche unter 40. Eine Karte, deren Boden
+ * man drehen muss, um überhaupt etwas zu sehen, verschweigt dort ihre Werte.
+ *
+ * Zwei Quellen dagegen, mit verschiedenen Aufgaben:
+ *
+ * * `bounce` kommt von unten und steht fest im Raum — was nach unten zeigt,
+ *   ist nie schwarz, egal wohin gedreht wird.
+ * * `headlight` hängt an der Kamera und leuchtet immer das an, was gerade
+ *   angesehen wird. Schwach genug, dass die Form aus Licht und Schatten
+ *   erhalten bleibt: ein reines Stirnlicht macht die Karte flach. */
+const bounce = new THREE.DirectionalLight(0xdfeaf0, 1.35);
+bounce.position.set(-0.2, -1.3, 0.4);
+scene.add(bounce);
+const headlight = new THREE.DirectionalLight(0xffffff, 0.9);
+headlight.position.set(0, 0, 1);
+camera.add(headlight);
+scene.add(camera);          // sonst wird das Kind der Kamera nie transformiert
 
 let controls;
 function makeControls() {
@@ -1220,9 +1323,15 @@ const state = {
   anim: { playing: false, engaged: false, mode: 'loop', t: 0, speed: 60, band: 0 },
   recording: null,        // active capture session (see startRecording) or null
   isolateScar: false,
-  smoothLevel: 0,         // Laplacian interpolation strength for the scalar field (0 = raw)
+  /* Interpolation ab Werk auf 10. Rohe Vertexwerte sehen aus wie ein Raster
+   * aus Messpunkten, nicht wie Gewebe — und die Glättung ist ein einziger
+   * Durchgang über den Raum, nicht eine wiederholte Mittelung, sodass sie
+   * Kanten nicht erfindet und keine wegnimmt (siehe smoothScalarSpatial).
+   * Auf 0 bleibt jederzeit sichtbar, was gemessen wurde. */
+  smoothLevel: 10,        // Laplacian interpolation strength for the scalar field (0 = raw)
   confMask: false,
   confMaskTh: 0.03,        // Confidence-mask voltage cutoff (mV); vertices <= this go grey
+  cyclic: false,           // die Aktivierung kreist — Legende als Ring, siehe drawLegendRing
 };
 // Video-export options (mutated by the ⚙ settings popover in the UI).
 const recOpts = { fps: 30, bakeLegend: true, hideGizmo: true, orbitSeconds: 8, exportSeconds: null, cycles: 1, path: 'turntable', ease: true };
@@ -1238,7 +1347,7 @@ function disposeMesh() {
 let tagMeshes = [];   // [{ group, inst, surface }] — one InstancedMesh of spheres per tag group
 // 2,5× als Startgröße: bei 1,0 sind die Marker auf einer ganzen Kammer
 // Punkte von wenigen Pixeln, und wonach man sucht, muss man sehen können.
-const tagOpts = { sizeMul: 2.5, project: false };
+const tagOpts = { sizeMul: 2.5, project: false, ablationColor: 'category' };
 
 function disposeTagMarkers() {
   for (const t of tagMeshes) { group.remove(t.inst); t.inst.geometry.dispose(); t.inst.material.dispose(); }
@@ -1251,8 +1360,16 @@ function buildTagMarkers(groups, meshRadius) {
   const radius = tagMarkerRadius(meshRadius || 50);
   for (const g of groups) {
     if (!g.points || !g.points.length) continue;
+    /* Messpunkte sind das Rohmaterial der Karte, nicht ihre Aussage: in der
+     * vermessenen Rhythmia-Studie 19 615 Stück in einem Datensatz. Sie sind
+     * deshalb kleiner, gröber tesselliert (20 × 14 Segmente wären fünf
+     * Millionen Dreiecke) und zunächst ausgeschaltet — angeschaltet decken sie
+     * die Karte zu, die sie erklären sollen. */
+    const many = g.category === 'measurement';
+    const r = many ? radius * 0.42 : radius;
     // Genug Segmente für eine runde Silhouette; instanziert kostet das kaum.
-    const geo = new THREE.SphereGeometry(radius, 20, 14);
+    const geo = many ? new THREE.SphereGeometry(r, 8, 6)
+                     : new THREE.SphereGeometry(r, 20, 14);
     const col = new THREE.Color().setRGB(g.color[0] / 255, g.color[1] / 255, g.color[2] / 255, THREE.SRGBColorSpace);
     /* Beleuchtet, nicht selbstleuchtend flach. Mit `MeshBasicMaterial` war jede
      * Kugel aus jeder Richtung gleichmäßig rot — also eine Scheibe, egal wie
@@ -1266,12 +1383,36 @@ function buildTagMarkers(groups, meshRadius) {
       emissive: col, emissiveIntensity: 0.16,
     });
     const inst = new THREE.InstancedMesh(geo, mat, g.points.length);
+    inst.visible = !many;
     inst.userData.group = g;
     group.add(inst);
     tagMeshes.push({ group: g, inst, surface: null });
   }
   applyTagMarkerSettings();
   buildTagUI();
+  buildAblationColorUI();
+}
+
+/** Der Schalter erscheint nur, wenn es etwas zu färben gibt.
+ *
+ * CARTOs VisiTag legt Impedanz über die Zeit ab, aber keinen Ausgangswert je
+ * Stelle; Rhythmia legt beides ab. Den Schalter überall anzubieten hieße, ihn
+ * dort anzubieten, wo er nichts tut. */
+function buildAblationColorUI() {
+  const row = document.getElementById('abl-color-row');
+  const note = document.getElementById('abl-color-note');
+  if (!row) return;
+  const drops = (current && current.ablation || [])
+    .map(a => a.impedanceDrop).filter(d => d && Number.isFinite(d.ohm));
+  row.style.display = drops.length ? '' : 'none';
+  if (!drops.length) return;
+  const local = drops.filter(d => d.source === 'directsense').length;
+  // Woher der Wert kommt, gehört dazu: lokale und Generatorimpedanz fallen um
+  // ganz verschiedene Beträge, und dieselbe Farbe hieße sonst zweierlei.
+  note.textContent = tagOpts.ablationColor === 'drop'
+    ? `0–${DROP_FULL_OHM} Ω · ${local === drops.length
+        ? T('map.ablation.local') || 'lokal' : T('map.ablation.generator') || 'Generator'}`
+    : '';
 }
 
 // Per-point nearest-vertex on the loaded mesh; computed on first use of
@@ -1315,7 +1456,47 @@ function applyTagMarkerSettings() {
       t.inst.setMatrixAt(i, _tagM);
     }
     t.inst.instanceMatrix.needsUpdate = true;
+    applyAblationColors(t);
   }
+}
+
+/* Ablationsmarker nach dem Impedanzabfall einfärben.
+ *
+ * Ein Feld gleich roter Kugeln sagt, *wo* abgegeben wurde. Es sagt nicht, wo
+ * die Abgabe etwas bewirkt hat — und genau das steht bei Rhythmia im Export:
+ * die lokale Impedanz vor und während der Abgabe. Fehlt der Wert, bleibt der
+ * Punkt grau; eine Null wäre eine Aussage, die die Daten nicht machen. */
+function applyAblationColors(entry) {
+  const byDrop = tagOpts.ablationColor === 'drop' && entry.group.category === 'ablation';
+  const material = entry.inst.material;
+  if (!byDrop) {
+    if (entry.inst.instanceColor) {
+      entry.inst.instanceColor = null;      // zurück auf die Gruppenfarbe
+      const [r, g, b] = entry.group.color;
+      material.color.setRGB(r / 255, g / 255, b / 255, THREE.SRGBColorSpace);
+      material.emissive.copy(material.color);
+      material.emissiveIntensity = 0.16;
+      material.needsUpdate = true;
+    }
+    return;
+  }
+  /* Die Instanzfarbe wird mit der Materialfarbe *multipliziert*. Bliebe die auf
+   * dem Weinrot der Gruppe, käme aus jedem Grün ein dunkles Braun — gemessen:
+   * alle fünf Marker sahen gleich dunkelrot aus. Also Weiß darunter, und kein
+   * Eigenleuchten, das eine Farbe überstimmt, die hier etwas bedeutet. */
+  material.color.setRGB(1, 1, 1);
+  material.emissive.setRGB(0, 0, 0);
+  material.emissiveIntensity = 0;
+  material.needsUpdate = true;
+  const points = entry.group.points;
+  const colour = new THREE.Color();
+  for (let i = 0; i < points.length; i++) {
+    const drop = points[i].ablation && points[i].ablation.impedanceDrop;
+    const [r, g, b] = impedanceDropColor(drop ? drop.ohm : NaN);
+    colour.setRGB(r / 255, g / 255, b / 255, THREE.SRGBColorSpace);
+    entry.inst.setColorAt(i, colour);
+  }
+  if (entry.inst.instanceColor) entry.inst.instanceColor.needsUpdate = true;
 }
 
 function buildTagUI() {
@@ -1326,7 +1507,7 @@ function buildTagUI() {
   grp.style.display = '';
   tagMeshes.forEach(({ group: g, inst }) => {
     const chip = document.createElement('button');
-    chip.className = 'chip on';
+    chip.className = 'chip' + (inst.visible ? ' on' : '');
     const sw = document.createElement('span');
     sw.style.cssText = `display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:middle;background:rgb(${g.color[0]},${g.color[1]},${g.color[2]})`;
     chip.appendChild(sw);
@@ -1336,9 +1517,53 @@ function buildTagUI() {
   });
 }
 
-/** Die aktuelle Karte als Vergleich behalten. */
+/** Die Karte zurücklegen und zur Ablagefläche zurück.
+ *
+ * Bis hierher gab es nur den Weg hinein. Eine Karte blieb, bis eine andere kam
+ * — und wer eine Studie zugeklappt haben wollte, weil jemand mitliest, konnte
+ * nur das Fenster schließen.
+ */
+function closeMap() {
+  if (!current) return;
+  clearComparison();
+  disposeMesh();
+  current = null;
+  currentName = '';
+  studyName = '';
+  if (typeof hideEgm === 'function') hideEgm();
+  if (typeof markAnonymised === 'function') markAnonymised(false);
+  cutState.shapes = [];
+  cutState.removed.clear();
+  trimState.chosen.clear();
+  buildTagMarkers([], 50);
+  const shown = document.getElementById('open-name');
+  if (shown) { shown.textContent = ''; shown.hidden = true; }
+  for (const id of ['legend', 'controls', 'stats']) {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('show');
+  }
+  const drop = document.getElementById('drop');
+  if (drop) drop.hidden = false;
+  updateStats({ positions: new Float32Array(), faces: new Uint32Array() });
+  refreshCloseButton();
+}
+
+function refreshCloseButton() {
+  const button = document.getElementById('t-close');
+  if (button) button.hidden = !current;
+}
+
+/** Die aktuelle Karte als Vergleich behalten.
+ *
+ * Gehalten wird nicht nur ihr Bild, sondern ihre Daten. Zwei Karten
+ * nebeneinander nützen wenig, wenn nur an einer gedreht werden kann: „welche
+ * ist die von vorher, und warum kann ich an ihr nichts einstellen" war die
+ * erste Frage, die das Werkzeug bekam. Mit den Daten daneben lässt sich die
+ * gehaltene jederzeit nach vorn holen (Tauschen) und dann so behandeln wie
+ * jede andere Karte.
+ */
 function rememberComparison() {
-  if (!mesh) return;
+  if (!mesh || !current) return;
   clearComparison();
   // Kopie der Geometrie samt der Farben, die gerade zu sehen sind: die Karte
   // von vorher soll sich nicht mehr ändern, wenn am Fenster gedreht wird.
@@ -1347,9 +1572,36 @@ function rememberComparison() {
     vertexColors: true, roughness: 0.52, metalness: 0.0,
   }));
   geo.computeBoundingSphere();
-  comparison = { name: studyName || currentName || '', mesh: held,
-                 radius: geo.boundingSphere.radius || 50 };
+  const mine = studyName || currentName || '';
+  comparison = { name: mine, mesh: held,
+                 radius: geo.boundingSphere.radius || 50,
+                 data: current, state: { ...state, __name: mine } };
   compareGroup.add(held);
+  placeSideBySide();
+  refreshCompareUI();
+}
+
+/** Die gehaltene Karte nach vorn holen und die jetzige an ihre Stelle.
+ *
+ * Damit ist „getrennt einstellbar" erfüllt, ohne zwei Sätze Bedienelemente:
+ * eingestellt wird immer an der vorderen, und welche das ist, steht an ihr
+ * dran. Jede Seite bringt ihre eigene Fenster- und Farbeinstellung mit — sonst
+ * verglichen zwei Karten nach dem Tausch mit zweierlei Maß.
+ */
+function swapComparison() {
+  if (!comparison || !current) return;
+  const heldData = comparison.data;
+  const heldName = comparison.name;
+  const heldState = comparison.state;
+  const mineState = { ...state };
+  if (!heldData) return;              // eine alte Ansicht ohne Daten dahinter
+
+  rememberComparison();               // die vordere Karte wandert nach hinten
+  Object.assign(state, heldState);
+  loadGeometry(heldData, heldName);
+  studyName = heldName;
+  comparison.state = mineState;
+  comparison.name = mineState.__name || comparison.name;
   placeSideBySide();
   refreshCompareUI();
 }
@@ -1384,11 +1636,61 @@ function placeSideBySide() {
 function refreshCompareUI() {
   const button = document.getElementById('t-compare');
   const label = document.getElementById('compare-name');
+  const swap = document.getElementById('t-swap');
   if (button) button.classList.toggle('on', !!comparison);
   if (label) {
     label.textContent = comparison ? comparison.name : '';
     label.hidden = !comparison;
   }
+  if (swap) swap.hidden = !comparison;
+  const tags = document.getElementById('compare-tags');
+  if (tags) tags.hidden = !comparison;
+  if (comparison) {
+    const live = document.getElementById('ctag-live');
+    const held = document.getElementById('ctag-held');
+    const active = T('map.compare.active') || 'aktiv';
+    if (live) live.textContent = `${studyName || currentName || '—'} · ${active}`;
+    if (held) held.textContent = comparison.name || '—';
+  }
+  placeCompareTags();
+}
+
+/* Die Beschriftungen sitzen unter der jeweiligen Karte, also dort, wo sie
+ * hingehören — dafür müssen die Mittelpunkte beider Gruppen in Bildkoordinaten
+ * umgerechnet werden. Einmal je Bild, zwei Projektionen; das kostet nichts. */
+const _tagPoint = new THREE.Vector3();
+function placeCompareTags() {
+  const tags = document.getElementById('compare-tags');
+  if (!tags || tags.hidden || !mesh) return;
+  const half = { x: innerWidth / 2, y: innerHeight / 2 };
+  const put = (element, object, sphere) => {
+    if (!element || !object || !sphere) return;
+    _tagPoint.copy(sphere.center);
+    object.localToWorld(_tagPoint);
+    _tagPoint.project(camera);
+    const x = (_tagPoint.x + 1) * half.x;
+    const y = (1 - _tagPoint.y) * half.y;
+    /* Wie hoch die Karte auf dem Schirm ist, gerechnet statt geschätzt: der
+     * Mittelpunkt einmal um den Radius nach oben versetzt und ebenfalls
+     * projiziert. Ein fester Abstand sitzt bei jeder Zoomstufe woanders — mal
+     * mitten auf der Karte, mal weit darunter. */
+    _tagPoint.copy(sphere.center);
+    _tagPoint.y += sphere.radius;
+    object.localToWorld(_tagPoint);
+    _tagPoint.project(camera);
+    const top = (1 - _tagPoint.y) * half.y;
+    const onScreenRadius = Math.abs(y - top);
+    element.style.left = `${Math.round(x)}px`;
+    element.style.top = `${Math.round(Math.min(innerHeight - 44, y + onScreenRadius + 12))}px`;
+  };
+  mesh.geometry.computeBoundingSphere();
+  put(document.getElementById('ctag-live'), group, mesh.geometry.boundingSphere);
+  if (comparison) {
+    put(document.getElementById('ctag-held'), compareGroup,
+        comparison.mesh.geometry.boundingSphere);
+  }
+  const live = document.getElementById('ctag-live');
+  if (live) live.classList.add('live');
 }
 
 function loadGeometry(data, name) {
@@ -1400,6 +1702,7 @@ function loadGeometry(data, name) {
   // unscrubbed map inherits permission to be published.
   if (typeof markAnonymised === 'function') markAnonymised(false);
   currentName = name;
+  refreshCloseButton();
   const shown = document.getElementById('open-name');
   if (shown) { shown.textContent = studyName || name || ''; shown.hidden = !shown.textContent; }
   // Farbfenster gehören zum Datensatz, nicht zum Feldnamen: ohne Reset gilt
@@ -1432,6 +1735,7 @@ function loadGeometry(data, name) {
   // Die ungeschnittene Fassung bleibt liegen: der Schnitt ist eine Ansicht.
   data.facesOriginal = data.facesOriginal || data.faces;
   trimState.chosen.clear();
+  cutState.removed.clear();
   buildTrimUI();
 
   buildModeOptions(data);
@@ -1658,6 +1962,21 @@ function isLatField(field) { const f = (field || '').toLowerCase(); return f ===
  * Absichtlich klein und ohne Achsen — sie beantwortet eine Ja/Nein-Frage
  * ("läuft die Welle durch oder bricht sie ein?"), und die Zahlen dazu stehen
  * als Zeitspanne daneben. */
+//: Woraufhin die Kurve zuletzt gezeichnet wurde — damit ein Zeigerdruck darauf
+//: in eine Zeit umgerechnet werden kann.
+let _skyline = null;
+
+/** Die Kurve neu zeichnen, wenn sie eine hat.
+ *
+ * Der Zeiger darauf bewegt sich mit dem Abspielen und mit jedem Ziehen; ohne
+ * diesen Aufruf stünde die Marke still, während die Karte sich ändert — also
+ * genau die Auskunft falsch, für die sie da ist. */
+function refreshSkyline() {
+  if (state.mode && state.mode.startsWith('scalar:') && isLatField(state.mode.slice(7))) {
+    drawSkyline(state.mode.slice(7));
+  }
+}
+
 function drawSkyline(field) {
   const canvas = document.getElementById('skyline');
   const note = document.getElementById('skyline-quiet');
@@ -1680,9 +1999,37 @@ function drawSkyline(field) {
   const peak = Math.max(...bins.map(b => b.fraction)) || 1;
   const quiet = EPM.quietestWindow(histogram, Math.max(10, (histogram.hi - histogram.lo) / 12));
 
-  // Die stillste Strecke zuerst, damit die Kurve darüber liegt.
-  if (quiet) {
-    const at = (t) => ((t - histogram.lo) / (histogram.hi - histogram.lo)) * width;
+  const at = (t) => ((t - histogram.lo) / (histogram.hi - histogram.lo)) * width;
+  const timeAt = (x) => histogram.lo + (x / width) * (histogram.hi - histogram.lo);
+  _skyline = { lo: histogram.lo, hi: histogram.hi, width, timeAt };
+
+  /* Was gerade auf der Karte zu sehen ist, als Band über der Kurve.
+   *
+   * Ohne das beantwortet das Histogramm eine Frage neben der Sache: es zeigt,
+   * wann Fläche aktiviert, sagt aber nicht, wo im Ablauf der Betrachter steht.
+   * Die Marke lässt sich ziehen — die Zeit auszuwählen ist der eigentliche
+   * Zweck, und ein Schieberegler daneben trifft sie schlechter als der Zeiger
+   * auf der Kurve selbst. */
+  if (state.anim.engaged || state.anim.playing) {
+    const half = (state.anim.band || 0) / 2;
+    const from = at(state.anim.t - half), to = at(state.anim.t + half);
+    ctx.fillStyle = themeToken('--accent-dim') || 'rgba(69,198,218,0.35)';
+    ctx.globalAlpha = 0.35;
+    ctx.fillRect(from, 0, Math.max(2, to - from), height);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = themeToken('--accent') || '#45c6da';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(at(state.anim.t), 0); ctx.lineTo(at(state.anim.t), height);
+    ctx.stroke();
+  }
+
+  /* Die stillste Strecke zuerst, damit die Kurve darüber liegt — aber nur,
+   * wenn sie schmal genug ist, um eine Aussage zu sein. Bei einer Karte ohne
+   * ruhige Phase deckt sie sonst den halben Hintergrund ein und sieht aus wie
+   * eine Markierung, die niemand gesetzt hat. */
+  const quietSpan = quiet ? (quiet.toMs - quiet.fromMs) : 0;
+  if (quiet && quietSpan <= (histogram.hi - histogram.lo) * 0.35) {
     ctx.fillStyle = themeToken('--accent-wash') || 'rgba(69,198,218,0.12)';
     ctx.fillRect(at(quiet.fromMs), 0, Math.max(2, at(quiet.toMs) - at(quiet.fromMs)), height);
     note.textContent = `${round(quiet.fromMs)}–${round(quiet.toMs)} ms`;
@@ -1751,6 +2098,7 @@ function stepAnim(now) {
   document.getElementById('anim-cursor').value = state.anim.t;
   updateAnimReadout();
   applyColors();
+  refreshSkyline();
 }
 
 function round(v) { const a = Math.abs(v); return a >= 100 ? v.toFixed(0) : a >= 1 ? v.toFixed(2) : v.toFixed(3); }
@@ -1883,9 +2231,11 @@ function applyColors() {
 let _legendKey = null;
 function drawLegend() {
   if (!state.mode || !state.mode.startsWith('scalar:')) { _legendKey = null; return; }
-  const key = state.mode + '|' + state.cmap + '|' + state.vmin + '|' + state.vmax + '|' + state.unit;
+  const key = state.mode + '|' + state.cmap + '|' + state.vmin + '|' + state.vmax + '|'
+            + state.unit + '|' + (state.cyclic ? 'ring' : 'bar');
   if (key === _legendKey) return;
   _legendKey = key;
+  layoutLegend();
   const cv = document.getElementById('cbar');
   const ctx = cv.getContext('2d');
   const table = lut(state.cmap);
@@ -1916,6 +2266,85 @@ function drawLegend() {
   const field = state.mode.slice(7);
   const meta = FIELD_META[field.toLowerCase()] || { label: field, unit: state.unit };
   document.getElementById('legend-cap').textContent = (meta.label || field) + (meta.unit ? ' · ' + meta.unit : '');
+  if (state.cyclic) drawLegendRing();
+}
+
+/** Die Skala als Ring, mit der Naht oben.
+ *
+ * Die Beschriftung läuft im Uhrzeigersinn mit; oben stehen beide Enden
+ * nebeneinander, denn dort treffen sie sich wirklich. Der Ring ersetzt den
+ * Balken, statt neben ihm zu stehen: zwei Legenden für eine Skala sind eine
+ * Frage zu viel.
+ */
+function drawLegendRing() {
+  const canvas = document.getElementById('cring');
+  if (!canvas) return;
+  const scale = window.devicePixelRatio || 1;
+  const size = 180;
+  if (canvas.width !== Math.round(size * scale)) {
+    canvas.width = canvas.height = Math.round(size * scale);
+    canvas.style.width = canvas.style.height = size + 'px';
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.clearRect(0, 0, size, size);
+  const table = lut(state.cmap);
+  /* Der Ring muss samt Beschriftung in die Fläche passen: bei 0,40 lagen die
+   * Zahlen links und rechts halb außerhalb und wurden vom Rand der Tafel
+   * abgeschnitten. */
+  const cx = size / 2, cy = size / 2, outer = size * 0.33, inner = size * 0.21;
+
+  // In feinen Keilen, damit kein Farbverlauf über den Rundungsfehler stolpert.
+  const steps = 360;
+  for (let i = 0; i < steps; i++) {
+    const from = -Math.PI / 2 + (i / steps) * Math.PI * 2;
+    const to = -Math.PI / 2 + ((i + 1.4) / steps) * Math.PI * 2;
+    const idx = Math.min(255, Math.round((i / steps) * 255));
+    ctx.beginPath();
+    ctx.arc(cx, cy, outer, from, to);
+    ctx.arc(cx, cy, inner, to, from, true);
+    ctx.closePath();
+    ctx.fillStyle = `rgb(${table[idx*3]},${table[idx*3+1]},${table[idx*3+2]})`;
+    ctx.fill();
+  }
+
+  ctx.fillStyle = themeToken('--muted') || '#9bb';
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i < 4; i++) {
+    const t = i / 4;
+    const angle = -Math.PI / 2 + t * Math.PI * 2;
+    const value = state.vmin + (state.vmax - state.vmin) * t;
+    ctx.fillText(round(value), cx + Math.cos(angle) * (outer + 16),
+                 cy + Math.sin(angle) * (outer + 16));
+  }
+}
+
+/** Balken oder Ring — und die Kennzahlen bleiben frei.
+ *
+ * Die Legende stand fest auf halber Höhe. Trägt die Karte viele Kennzahlen,
+ * reichen die bis in sie hinein, und beide sind dort unlesbar. Sie weicht
+ * jetzt nach unten aus, so weit die Kennzahlen reichen. */
+function layoutLegend() {
+  const legend = document.getElementById('legend');
+  const bar = document.querySelector('#legend .legend-inner');
+  const ring = document.getElementById('cring');
+  const row = document.getElementById('cyclic-row');
+  if (!legend) return;
+  const cyclic = !!state.cyclic;
+  if (bar) bar.hidden = cyclic;
+  if (ring) ring.hidden = !cyclic;
+  const isLat = state.mode && state.mode.startsWith('scalar:')
+             && isLatField(state.mode.slice(7));
+  if (row) row.hidden = !isLat;            // ein Ring über Spannung sagt nichts
+
+  const stats = document.getElementById('stats');
+  const bottom = stats ? stats.getBoundingClientRect().bottom : 0;
+  const height = legend.getBoundingClientRect().height || 320;
+  const middle = Math.max(0, (innerHeight - height) / 2);
+  legend.style.top = `${Math.round(Math.max(middle, bottom + 14))}px`;
+  legend.style.transform = 'none';
 }
 
 /** Eine Fenstergrenze an Ort und Stelle ändern.
@@ -1994,7 +2423,13 @@ function buildTrimUI() {
     ? EPM.anatomicalStructures(current.positions, current.facesOriginal)
     : { rings: [] };
   trimState.rings = found.rings || [];
-  if (!trimState.rings.length) { group.style.display = 'none'; return; }
+  // Auch ohne Öffnungen sichtbar, sobald von Hand geschnitten wurde: sonst
+  // gäbe es keinen Weg zurück. Rhythmia deckelt seine Stümpfe, da gibt es nie
+  // einen Ring — das Werkzeug in der Leiste ist dort der einzige Weg.
+  if (!trimState.rings.length && !cutState.removed.size) {
+    group.style.display = 'none';
+    return;
+  }
   group.style.display = '';
 
   trimState.rings.forEach((ring, index) => {
@@ -2010,15 +2445,21 @@ function buildTrimUI() {
     };
     list.appendChild(chip);
   });
+  if (cutState.removed.size || trimState.chosen.size) {
+    const reset = document.createElement('button');
+    reset.className = 'chip';
+    reset.textContent = T('map.trim.reset');
+    reset.onclick = () => resetCuts();
+    list.appendChild(reset);
+  }
   updateTrimNote();
 }
 
 function updateTrimNote() {
   const note = document.getElementById('trim-note');
   if (!note) return;
-  note.textContent = trimState.chosen.size
-    ? T('map.trim.active', { count: trimState.chosen.size })
-    : '';
+  const cuts = trimState.chosen.size + (cutState.removed.size ? 1 : 0);
+  note.textContent = cuts ? T('map.trim.active', { count: cuts }) : '';
 }
 
 function applyTrim() {
@@ -2031,16 +2472,21 @@ function applyTrim() {
     current._adjacencyOriginal = buildAdjacencyCSR(current.facesOriginal,
                                                    current.positions.length / 3);
   }
-  const removed = new Set();
+  /* Zwei Auswahlen, zwei Regeln. Der Kranz um eine Öffnung ist vollständig —
+   * dort fällt ein Dreieck schon bei einer Ecke, sonst bleibt eine Säge stehen.
+   * Der gezeichnete Umriss läuft quer durch die Vernetzung, und dort fällt ein
+   * Dreieck erst bei zweien, sonst franst der Rand aus. */
+  const trimmed = new Set();
   for (const index of trimState.chosen) {
     const ring = trimState.rings[index];
     if (!ring) continue;
     for (const v of EPM.vertsWithinOfRing(current.positions, current._adjacencyOriginal,
                                           ring.vertices, trimState.depthMm)) {
-      removed.add(v);
+      trimmed.add(v);
     }
   }
-  current.faces = EPM.facesWithout(current.facesOriginal, removed);
+  current.faces = EPM.facesWithout(
+    EPM.facesWithout(current.facesOriginal, trimmed), cutState.removed, 2);
   if (mesh) {
     mesh.geometry.setIndex(new THREE.BufferAttribute(current.faces, 1));
     mesh.geometry.computeVertexNormals();
@@ -2052,6 +2498,37 @@ function applyTrim() {
   applyColors();
   updateStats(current);
   updateTrimNote();
+}
+
+/* Die Bänder als Balken: unter 200 mm/s ist langsam, ab 800 schnell. Die
+ * Schwellen sind OpenEPs, damit dieselbe Karte hier und in der Auswertung
+ * dieselben Anteile ergibt. */
+const BAND_COLORS = ['#c0392b', '#d98032', '#5aa9c9', '#4b7fd4'];
+
+function bandLabel(histogram) {
+  const slow = histogram.bands[0];
+  const share = slow && slow.fraction != null ? Math.round(slow.fraction * 100) : null;
+  const edge = histogram.edgesMmS[0];
+  return share == null
+    ? (T('map.metrics.cv.bands') || 'Leitung nach Bändern')
+    : `${T('map.metrics.cv.slow') || 'davon langsam'} (< ${edge} mm/s)`;
+}
+
+function bandBar(histogram) {
+  const parts = [];
+  histogram.bands.forEach((band, i) => {
+    const fraction = band.fraction || 0;
+    if (fraction <= 0) return;
+    const from = band.fromMmS == null ? 0 : band.fromMmS;
+    const to = band.toMmS == null ? '∞' : band.toMmS;
+    parts.push(`<i style="display:inline-block;height:8px;width:${(fraction * 100).toFixed(1)}%;`
+      + `background:${BAND_COLORS[Math.min(i, BAND_COLORS.length - 1)]}" `
+      + `title="${from}–${to} mm/s: ${(fraction * 100).toFixed(0)} %"></i>`);
+  });
+  const slow = histogram.bands[0];
+  const share = slow && slow.fraction != null ? `${Math.round(slow.fraction * 100)} %` : '—';
+  return `${share}<span id="cv-bands" style="display:block;width:100%;line-height:0;`
+    + `margin-top:3px;border-radius:2px;overflow:hidden">${parts.join('')}</span>`;
 }
 
 function updateStats(data) {
@@ -2131,6 +2608,18 @@ function updateMetrics(data) {
         finite.sort((x, y) => x - y);
         const median = finite[finite.length >> 1];
         rows.push([T('map.metrics.cv') || 'Leitung (Median)', `${N(median, 0)} mm/s`]);
+        /* Ein Median über eine ganze Kammer sagt wenig: eine Karte mit einem
+         * langsamen Isthmus und schnellem Rest hat denselben Median wie eine
+         * gleichmäßig mittelschnelle. Die Bänder sagen, wieviel *Fläche*
+         * langsam leitet — flächengewichtet, weil die Knotendichte eine
+         * Eigenschaft der Rekonstruktion ist und nicht des Gewebes.
+         *
+         * Regionen im anatomischen Sinn stehen bewusst nicht dabei: ohne
+         * Beschriftung durch den Nutzer wären sie geraten. Wer eine Region
+         * meint, schneidet sie frei — die Zahlen hier gelten für die gezeigte
+         * Fläche. */
+        const banded = EPCV.velocityHistogram(data.positions, data.faces, cv.speedMmS);
+        if (banded.measuredMm2 > 0) rows.push([bandLabel(banded), bandBar(banded)]);
         if (cv.implausibleVertices) {
           // Verworfen, nicht geklemmt — geklemmte Werte häufen sich am Rand des
           // plausiblen Bereichs und sehen dort wie ein Befund aus.
@@ -2153,6 +2642,20 @@ function updateMetrics(data) {
     if (summary.totalDeliveryS != null) {
       rows.push([T('map.metrics.ablation.time') || 'Abgabedauer',
                  `${N(summary.totalDeliveryS, 0)} s`]);
+    }
+    /* Wo abgegeben wurde, sagt die Zahl der Stellen. Ob es gewirkt hat, sagt
+     * keine davon — der Impedanzabfall kommt dem am nächsten, was ein Export
+     * darüber hergibt. */
+    if (summary.impedanceDrop) {
+      const drop = summary.impedanceDrop;
+      const where = drop.source === 'directsense'
+        ? (T('map.ablation.local') || 'lokal') : (T('map.ablation.generator') || 'Generator');
+      rows.push([`${T('map.metrics.ablation.drop') || 'Impedanzabfall (Median)'} · ${where}`,
+                 `${N(drop.ohm.median, 1)} Ω`]);
+      if (drop.weak) {
+        rows.push([`${T('map.metrics.ablation.weak') || 'davon schwach'} (< ${drop.weakOhm} Ω)`,
+                   `<span class="warn-text">${N(drop.weak, 0)}</span>`]);
+      }
     }
     if (summary.powerW && summary.powerW.mean != null) {
       rows.push([T('map.metrics.ablation.power') || 'Leistung (Mittel)',
@@ -2579,7 +3082,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=b0edc5434904'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=874caa990bd9'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -2853,7 +3356,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=b0edc5434904');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=874caa990bd9');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -3184,8 +3687,53 @@ document.querySelectorAll('#anim-mode button').forEach(b => b.onclick = () => {
   if (!state.anim.playing) applyColors();
 });
 document.getElementById('anim-speed').oninput = e => { state.anim.speed = +e.target.value; };
-document.getElementById('anim-band').oninput = e => { state.anim.band = +e.target.value; if (!state.anim.playing) applyColors(); };
-document.getElementById('anim-cursor').oninput = e => { stopAnim(); state.anim.engaged = true; state.anim.t = +e.target.value; updateAnimReadout(); applyColors(); };
+/* Ziehen auf der Kurve wählt den Zeitpunkt.
+ *
+ * Der Regler daneben kann dasselbe, trifft aber schlechter: die interessante
+ * Stelle ist die Delle in der Kurve, und die sieht man hier und nicht dort.
+ * Mit gedrückter Umschalttaste wird die Breite des Bandes gezogen statt seiner
+ * Mitte. */
+(() => {
+  const canvas = document.getElementById('skyline');
+  if (!canvas) return;
+  canvas.style.cursor = 'ew-resize';
+  let dragging = false;
+
+  const pick = (event) => {
+    if (!_skyline || !current) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
+    const t = _skyline.timeAt((x / rect.width) * _skyline.width);
+    if (event.shiftKey) {
+      // Breite: der Abstand vom Mittelpunkt, verdoppelt.
+      state.anim.band = Math.max((state.vmax - state.vmin) / 200,
+                                 Math.abs(t - state.anim.t) * 2);
+      const band = document.getElementById('anim-band');
+      if (band) band.value = state.anim.band;
+    } else {
+      stopAnim();
+      state.anim.engaged = true;
+      state.anim.t = Math.max(state.vmin, Math.min(state.vmax, t));
+      const cursor = document.getElementById('anim-cursor');
+      if (cursor) cursor.value = state.anim.t;
+    }
+    updateAnimReadout();
+    applyColors();
+    refreshSkyline();
+  };
+
+  canvas.addEventListener('pointerdown', (event) => {
+    dragging = true;
+    canvas.setPointerCapture(event.pointerId);
+    pick(event);
+  });
+  canvas.addEventListener('pointermove', (event) => { if (dragging) pick(event); });
+  canvas.addEventListener('pointerup', () => { dragging = false; });
+  canvas.addEventListener('pointercancel', () => { dragging = false; });
+})();
+
+document.getElementById('anim-band').oninput = e => { state.anim.band = +e.target.value; if (!state.anim.playing) applyColors(); refreshSkyline(); };
+document.getElementById('anim-cursor').oninput = e => { stopAnim(); state.anim.engaged = true; state.anim.t = +e.target.value; updateAnimReadout(); applyColors(); refreshSkyline(); };
 
 const toggle = (id, key) => {
   const el = document.getElementById(id);
@@ -3248,7 +3796,7 @@ function setupDrop(btnId, menuId) {
   };
   menu.querySelectorAll('.tool').forEach(it => it.addEventListener('click', () => menu.classList.remove('show')));
 }
-setupDrop('t-cam', 'm-cam'); setupDrop('t-vid', 'm-vid'); setupDrop('t-save', 'm-save');
+setupDrop('t-cut-more', 'm-cut'); setupDrop('t-cam', 'm-cam'); setupDrop('t-vid', 'm-vid'); setupDrop('t-save', 'm-save');
 addEventListener('click', (e) => {
   document.querySelectorAll('.tmenu.show').forEach(m => m.classList.remove('show'));
   const rs = document.getElementById('recset'); if (rs && rs.classList.contains('show') && !rs.contains(e.target)) rs.classList.remove('show');
@@ -3260,7 +3808,21 @@ function applyState() {
 
 const rotBtn = document.getElementById('t-rotate');
 rotBtn.onclick = () => { controls.autoRotate = !controls.autoRotate; rotBtn.classList.toggle('on', controls.autoRotate); };
-document.getElementById('t-reset').onclick = () => { if (current) { mesh.geometry.computeBoundingSphere(); frameCamera(mesh.geometry.boundingSphere); } };
+document.getElementById('t-reset').onclick = () => centreAnatomy();
+
+/** Die Anatomie wieder in die Mitte, auf ihren eigenen Ursprung.
+ *
+ * Nach einem Vergleich steht sie versetzt, nach dem Drehen und Ziehen irgendwo
+ * — und der Weg zurück war bisher, die Karte neu zu laden. */
+function centreAnatomy() {
+  if (!current || !mesh) return;
+  if (!comparison) {
+    const centred = group.userData.centred;
+    if (centred) group.position.copy(centred);
+  }
+  mesh.geometry.computeBoundingSphere();
+  frameCamera(mesh.geometry.boundingSphere);
+}
 document.getElementById('t-shot').onclick = () => {
   // Vollen Viewport, und der Orientierungswürfel bleibt draußen: er ist eine
   // Bedienhilfe am Bildschirmrand, kein Teil der Karte.
@@ -3294,6 +3856,406 @@ document.getElementById('rs-cycles').onchange = e => { recOpts.cycles = Math.max
 document.getElementById('rs-path').onchange = e => { recOpts.path = e.target.value; };
 document.getElementById('rs-ease').onchange = e => { recOpts.ease = e.target.checked; };
 
+/* Von Hand schneiden: einen Umriss auf den Bildschirm zeichnen, und die
+ * zugewandte Wand darin fällt weg. Die gegenüberliegende bleibt stehen — sonst
+ * sähe man durch die Kammer hindurch statt in sie hinein, und genau das ist am
+ * Mitralklappenring der Zweck. Wer wirklich durch beide Wände will, sagt es im
+ * Menü neben dem Knopf.
+ *
+ * Nötig, weil die andere Art zu schneiden einen offenen Rand braucht und
+ * Rhythmia seine Venenstümpfe deckelt: die gemessene Anatomie hat 36.258
+ * Dreiecke und keine einzige Randkante. Dann bleibt nur das Werkzeug, bei dem
+ * der Untersucher sagt, was weg soll.
+ *
+ * Der Schnitt ist eine Ansicht wie der andere auch: die Rohdaten bleiben, und
+ * „zurücksetzen" stellt alles wieder her. */
+//: Scherenzeiger, inline. Der Griffpunkt sitzt an der Spitze der Klingen.
+const SCISSORS_CURSOR =
+  "url('data:image/svg+xml;utf8," +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" ' +
+    'fill="none" stroke="black" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">' +
+    '<g stroke="white" stroke-width="4.6"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>' +
+    '<line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/>' +
+    '<line x1="8.12" y1="8.12" x2="12" y2="12"/></g>' +
+    '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/>' +
+    '<line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/>' +
+    '<line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>') +
+  "') 10 10, crosshair";
+
+const cutState = {
+  drawing: false, points: [], side: 'front',
+  shapes: [],           // was geschnitten wurde: Umriss und Seite, je Schnitt
+  editing: -1,          // welcher Umriss gerade Griffe trägt
+  drag: -1,
+  removed: new Set(),
+};
+
+function cutOverlay() { return document.getElementById('cut-overlay'); }
+
+function drawOutline(ctx, points, { dashed, handles }) {
+  if (points.length < 1) return;
+  ctx.beginPath();
+  points.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  if (points.length > 2) ctx.closePath();
+  ctx.strokeStyle = themeToken('--accent') || '#45c6da';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash(dashed ? [5, 4] : []);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  if (points.length > 2 && dashed) {
+    ctx.fillStyle = themeToken('--accent-wash') || 'rgba(69,198,218,0.12)';
+    ctx.fill();
+  }
+  if (!handles) return;
+  for (const [x, y] of points) {
+    ctx.beginPath();
+    ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+    ctx.fillStyle = themeToken('--bg-1') || '#0b1116';
+    ctx.fill();
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+}
+
+function drawCutOutline() {
+  const canvas = cutOverlay();
+  const scale = window.devicePixelRatio || 1;
+  if (canvas.width !== Math.round(innerWidth * scale)) {
+    canvas.width = Math.round(innerWidth * scale);
+    canvas.height = Math.round(innerHeight * scale);
+    // Und die Größe auf dem Schirm dazu, in CSS-Pixeln: ohne sie zeichnet die
+    // Fläche in ihrer eigenen, doppelt so großen Welt.
+    canvas.style.width = innerWidth + 'px';
+    canvas.style.height = innerHeight + 'px';
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.clearRect(0, 0, innerWidth, innerHeight);
+  if (cutState.drawing) drawOutline(ctx, cutState.points, { dashed: true, handles: true });
+  const edited = cutState.shapes[cutState.editing];
+  if (edited) drawOutline(ctx, edited.points, { dashed: false, handles: true });
+}
+
+function startCutting() {
+  if (!current) { alert(T('map.msg.load.first')); return; }
+  endEditing();
+  cutState.drawing = true;
+  cutState.points = [];
+  controls.enabled = false;                 // sonst dreht das Zeichnen die Karte
+  const canvas = cutOverlay();
+  canvas.style.display = '';
+  canvas.style.pointerEvents = 'auto';
+  // Eine Schere, damit die Hand weiß, was der Klick tut. Als Data-URI, weil
+  // der Static-Baum ohne Netz auskommen muss.
+  canvas.style.cursor = SCISSORS_CURSOR;
+  document.getElementById('t-cut').classList.add('on');
+  const note = document.getElementById('trim-note');
+  if (note) note.textContent = T(cutState.side === 'through' ? 'map.cut.through' : 'map.cut.front');
+  drawCutOutline();
+}
+
+function stopCutting() {
+  const hadPreview = cutState.shapes.some(s => s.preview);
+  cutState.shapes = cutState.shapes.filter(s => !s.preview);
+  if (hadPreview) unionRemoved();
+  cutState.drawing = false;
+  cutState.drag = -1;
+  cutState.points = [];
+  controls.enabled = true;
+  document.getElementById('t-cut').classList.remove('on');
+  if (cutState.editing < 0) {
+    const canvas = cutOverlay();
+    canvas.style.display = 'none';
+    canvas.style.pointerEvents = 'none';
+  }
+  drawCutOutline();
+}
+
+/* Der Umriss bleibt nach dem Schnitt liegen und trägt Griffe: ein Schnitt sitzt
+ * selten beim ersten Mal, und den ganzen Umriss neu zu zeichnen, um eine Kante
+ * um zwei Millimeter zu verschieben, wäre Arbeit ohne Not.
+ *
+ * Die Griffe hängen an Bildschirmkoordinaten, also an *diesem* Blickwinkel.
+ * Dreht die Kamera, verschwinden sie — der Schnitt bleibt. Sie danach weiter
+ * anzubieten hieße, aus einer anderen Richtung neu zu schneiden und es wie eine
+ * Korrektur aussehen zu lassen. */
+function startEditing(index) {
+  if (!cutState.shapes[index]) return;
+  cutState.editing = index;
+  const canvas = cutOverlay();
+  canvas.style.display = '';
+  canvas.style.pointerEvents = 'none';      // Drehen bleibt möglich
+  drawCutOutline();
+}
+
+function endEditing() {
+  if (cutState.editing < 0) return;
+  cutState.editing = -1;
+  cutState.drag = -1;
+  if (!cutState.drawing) {
+    const canvas = cutOverlay();
+    canvas.style.display = 'none';
+    canvas.style.pointerEvents = 'none';
+  }
+  drawCutOutline();
+  buildTrimUI();
+}
+
+/** Jeden Vertex auf den Bildschirm rechnen, dazu wohin er schaut. */
+function projectVertices() {
+  const count = current.positions.length / 3;
+  const projected = new Float32Array(count * 2);
+  /* Negativ heißt zugewandt. Damit fällt am Mitralklappenring nur die vordere
+   * Wand weg und man sieht in die Kammer statt durch sie hindurch. */
+  const facing = new Float32Array(count);
+  const point = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  const view = new THREE.Vector3();
+  /* Aus den Originalflächen, nicht aus der gezeichneten Geometrie: die hat
+   * nach dem ersten Schnitt Löcher, und dort stünde die Normale auf null. */
+  if (!current._vertexNormals && current.facesOriginal) {
+    current._vertexNormals = EPM.vertexNormals(current.positions, current.facesOriginal);
+  }
+  const normals = current._vertexNormals;
+  const normalMatrix = new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
+  const half = { x: innerWidth / 2, y: innerHeight / 2 };
+
+  mesh.updateMatrixWorld();
+  for (let v = 0; v < count; v++) {
+    point.set(current.positions[v * 3], current.positions[v * 3 + 1],
+              current.positions[v * 3 + 2]);
+    // Über die Gruppe, weil die Karte darin verschoben liegt (Vergleich!).
+    mesh.localToWorld(point);
+    view.subVectors(point, camera.position).normalize();
+    if (normals) {
+      normal.set(normals[v * 3], normals[v * 3 + 1], normals[v * 3 + 2])
+            .applyMatrix3(normalMatrix).normalize();
+      facing[v] = normal.dot(view);
+    }
+    point.project(camera);
+    projected[v * 2] = (point.x + 1) * half.x;
+    projected[v * 2 + 1] = (1 - point.y) * half.y;
+  }
+  return { projected, facing: normals ? facing : null };
+}
+
+/* Jeder Schnitt merkt sich, was *er* weggenommen hat.
+ *
+ * Ein Umriss gilt in dem Blickwinkel, in dem er gezeichnet wurde. Würde man
+ * beim Nachziehen eines Griffs alle Umrisse mit der jetzigen Kamera neu
+ * rechnen, änderten sich stillschweigend auch die vorigen Schnitte — an einer
+ * Stelle ziehen, an einer anderen fällt etwas weg. */
+function cutShape(shape) {
+  const { projected, facing } = projectVertices();
+  shape.removed = EPM.vertsInsidePolygon(projected, shape.points,
+                                         { facing, side: shape.side });
+}
+
+function unionRemoved() {
+  cutState.removed.clear();
+  for (const shape of cutState.shapes) {
+    for (const v of shape.removed) cutState.removed.add(v);
+  }
+  applyTrim();
+}
+
+/** Zeigen, was der Umriss gerade wegnehmen würde.
+ *
+ * Erst beim Schließen zu sehen, was fällt, heißt raten, während man zeichnet —
+ * und ein zu großzügiger Schnitt fällt dann erst auf, wenn er schon passiert
+ * ist. Der Vorschau-Schnitt liegt neben den endgültigen und wird bei jeder
+ * Änderung ersetzt, nicht dazugelegt.
+ */
+function previewCut() {
+  if (!cutState.drawing || cutState.points.length < 3 || !current) return;
+  const shape = { points: cutState.points.map(p => [p[0], p[1]]),
+                  side: cutState.side, removed: new Set(), preview: true };
+  cutShape(shape);
+  cutState.shapes = cutState.shapes.filter(s => !s.preview);
+  cutState.shapes.push(shape);
+  unionRemoved();
+}
+
+/** Den gezeichneten Umriss anwenden: was darin liegt, fällt weg. */
+function applyCut() {
+  if (cutState.points.length < 3) { stopCutting(); return; }
+  // Griffe in regelmäßigem Abstand, nicht nur an den geklickten Ecken: sonst
+  // ließe sich eine lange gerade Kante nur als Ganzes verschieben.
+  cutState.shapes = cutState.shapes.filter(s => !s.preview);
+  const shape = { points: EPM.resamplePolygon(cutState.points, 55),
+                  side: cutState.side, removed: new Set() };
+  cutShape(shape);
+  cutState.shapes.push(shape);
+  cutState.drawing = false;
+  cutState.points = [];
+  controls.enabled = true;
+  document.getElementById('t-cut').classList.remove('on');
+  unionRemoved();
+  // Erst jetzt: die Gruppe erscheint bei einer geschlossenen Karte überhaupt
+  // erst durch den Schnitt, und ohne sie gäbe es keinen Weg zurück.
+  buildTrimUI();
+  startEditing(cutState.shapes.length - 1);
+}
+
+function resetCuts() {
+  cutState.shapes = [];
+  cutState.removed.clear();
+  trimState.chosen.clear();
+  endEditing();
+  buildTrimUI();
+  applyTrim();
+}
+
+cutOverlay().addEventListener('pointerdown', (event) => {
+  if (!cutState.drawing) return;
+  if (event.button === 2) return;             // die rechte Taste beendet, siehe unten
+  event.preventDefault();
+  /* Auf einen gesetzten Punkt geklickt heißt: den verschieben, nicht einen
+   * neuen daneben setzen. Ohne das musste ein verrutschter Umriss von vorn
+   * gezeichnet werden. */
+  const grabbed = EPM.handleAt(cutState.points, event.clientX, event.clientY, 11);
+  if (grabbed >= 0) {
+    cutState.drag = grabbed;
+    cutOverlay().setPointerCapture(event.pointerId);
+    return;
+  }
+  cutState.points.push([event.clientX, event.clientY]);
+  drawCutOutline();
+  previewCut();
+});
+
+cutOverlay().addEventListener('pointermove', (event) => {
+  if (!cutState.drawing || cutState.drag < 0) return;
+  event.preventDefault();
+  cutState.points[cutState.drag] = [event.clientX, event.clientY];
+  drawCutOutline();
+});
+
+cutOverlay().addEventListener('pointerup', (event) => {
+  if (!cutState.drawing || cutState.drag < 0) return;
+  cutState.drag = -1;
+  previewCut();
+});
+
+/* Die rechte Taste legt das Werkzeug weg. Ein Werkzeug, das nur über denselben
+ * Knopf oben wieder auszuschalten ist, hält die Hand am oberen Bildrand fest,
+ * während die Arbeit in der Mitte stattfindet. */
+cutOverlay().addEventListener('contextmenu', (event) => {
+  if (!cutState.drawing) return;
+  event.preventDefault();
+  /* Weglegen heißt fertig, nicht verwerfen. Wer drei Punkte gesetzt und den
+   * Schnitt vor sich sieht, will ihn behalten — Escape ist der Weg, ihn
+   * zurückzunehmen. */
+  if (cutState.points.length >= 3) applyCut(); else stopCutting();
+});
+cutOverlay().addEventListener('dblclick', (event) => {
+  if (!cutState.drawing) return;
+  event.preventDefault();
+  // Der Doppelklick setzt zwei Punkte auf dieselbe Stelle; einer davon ist
+  // Absicht, der andere das Schließen.
+  cutState.points.pop();
+  applyCut();
+});
+addEventListener('keydown', (event) => {
+  if (cutState.drawing) {
+    if (event.key === 'Enter') { event.preventDefault(); applyCut(); }
+    else if (event.key === 'Escape') { event.preventDefault(); stopCutting(); }
+  } else if (cutState.editing >= 0 && (event.key === 'Enter' || event.key === 'Escape')) {
+    event.preventDefault();
+    endEditing();
+  }
+});
+
+/* Die Griffe liegen über der Karte, fangen die Maus aber nicht ab: ein Zug
+ * neben einem Griff soll drehen wie sonst auch. Deshalb hört der Zug hier am
+ * WebGL-Element in der Capture-Phase mit und nimmt sich das Ereignis nur, wenn
+ * er wirklich einen Griff getroffen hat. */
+renderer.domElement.addEventListener('pointerdown', (event) => {
+  const shape = cutState.shapes[cutState.editing];
+  if (!shape) return;
+  const index = EPM.handleAt(shape.points, event.clientX, event.clientY, 11);
+  if (index < 0) return;
+  event.preventDefault();
+  event.stopPropagation();                  // OrbitControls darf nicht mitdrehen
+  cutState.drag = index;
+  renderer.domElement.setPointerCapture(event.pointerId);
+}, true);
+
+renderer.domElement.addEventListener('pointermove', (event) => {
+  if (cutState.drag < 0) return;
+  const shape = cutState.shapes[cutState.editing];
+  if (!shape) return;
+  event.preventDefault();
+  event.stopPropagation();
+  shape.points[cutState.drag] = [event.clientX, event.clientY];
+  drawCutOutline();                         // beim Ziehen nur der Umriss …
+}, true);
+
+renderer.domElement.addEventListener('pointerup', (event) => {
+  if (cutState.drag < 0) return;
+  cutState.drag = -1;
+  event.stopPropagation();
+  const shape = cutState.shapes[cutState.editing];
+  if (shape) { cutShape(shape); unionRemoved(); }   // … beim Loslassen die Karte
+}, true);
+
+// Dreht die Kamera, passt der Umriss nicht mehr zur Ansicht, in der er gesetzt
+// wurde. Dann verschwinden die Griffe, damit niemand aus einer neuen Richtung
+// weiterzieht und glaubt, er korrigiere den alten Schnitt.
+controls.addEventListener('start', () => { if (cutState.drag < 0) endEditing(); });
+
+/* Nur zum Nachsehen von außen: wo die Griffe liegen und aus welcher Richtung
+ * geschaut wird. Die Oberflächentests fassen den Umriss so an, wie die Hand es
+ * täte — sie müssen dafür wissen, wohin. Nichts hiervon wird geschrieben. */
+/* Ebenfalls nur zum Nachsehen: welche Markergruppen es gibt und welche Farbe
+ * jede Kugel wirklich trägt. Die Farben liegen sonst nur auf der Grafikkarte,
+ * und ein Test, der stattdessen die Eingabewerte prüft, prüft seine eigene
+ * Rechnung. */
+/* Damit ein Test die Kamera irgendwohin stellen kann. Sie ist sonst nur über
+ * Ziehen erreichbar, und "wie dunkel ist die Unterseite" lässt sich per Maus
+ * nicht wiederholbar fragen. */
+window.epcoreLookFrom = (x, y, z) => {
+  camera.position.set(x, y, z);
+  camera.lookAt(controls.target);
+  controls.update();
+};
+
+window.epcoreTagView = () => ({
+  groups: tagMeshes.map(t => ({ category: t.group.category, label: t.group.label,
+                                points: t.group.points.length, visible: t.inst.visible })),
+  ablationColors: (() => {
+    const entry = tagMeshes.find(t => t.group.category === 'ablation');
+    if (!entry || !entry.inst.instanceColor) return null;
+    return Array.from(entry.inst.instanceColor.array);
+  })(),
+  ablationSites: (current && current.ablation || []).length,
+});
+
+window.epcoreCutView = () => ({
+  editing: cutState.editing,
+  drawing: cutState.drawing,
+  handles: (cutState.shapes[cutState.editing] || { points: [] }).points,
+  cuts: cutState.shapes.length,
+  camera: camera.position.toArray(),
+});
+
+document.getElementById('t-cut').onclick = () => {
+  if (cutState.drawing) { stopCutting(); return; }
+  cutState.side = 'front';
+  startCutting();
+};
+document.getElementById('cut-front').onclick = () => { cutState.side = 'front'; startCutting(); };
+document.getElementById('cut-through').onclick = () => { cutState.side = 'through'; startCutting(); };
+document.getElementById('cut-reset').onclick = () => { stopCutting(); resetCuts(); };
+
+const ablColor = document.getElementById('abl-color');
+if (ablColor) ablColor.onchange = () => {
+  tagOpts.ablationColor = ablColor.value;
+  applyTagMarkerSettings();
+  buildAblationColorUI();
+};
+
 const trimDepth = document.getElementById('trim-depth');
 trimDepth.oninput = () => {
   trimState.depthMm = +trimDepth.value;
@@ -3301,6 +4263,33 @@ trimDepth.oninput = () => {
   if (trimState.chosen.size) applyTrim();
 };
 
+/* Was die Schale an diese Ansicht schicken darf. Hier oben, wo die Funktionen
+ * stehen: der Registrierungsblock am Dateiende hat einen eigenen Modulkopf und
+ * sieht nichts von hier. */
+window.epviewActions = {
+  // Ein Pfad aus dem nativen Dialog: gelesen wird über den Backend-Weg, weil
+  // eine Seite keine Datei von der Platte aufmachen kann. Eigener Name, weil
+  // `openPath` der Signalansicht gehört — dieselbe Aktion an zwei Module wäre
+  // ein Zufall darüber, wer zuletzt geladen hat.
+  openMapPath: (payload) => { if (payload && payload.path) openPath(payload.path); },
+  // Ordner, nicht Einzeldatei: ein Rhythmia-Export ist ein Verzeichnis aus
+  // .000/.001-Teilen und ein CARTO-Export eines aus Meshes.
+  openMap: () => document.getElementById('file-dir')?.click(),
+  openMapFile: () => document.getElementById('file')?.click(),
+  exportMap: () => document.getElementById('ex-ply')?.click(),
+  closeStudy: () => closeMap(),
+};
+
+const cyclicBox = document.getElementById('cyclic');
+if (cyclicBox) cyclicBox.onchange = () => {
+  state.cyclic = cyclicBox.checked;
+  _legendKey = null;
+  drawLegend();
+};
+addEventListener('resize', () => { if (state.mode) layoutLegend(); });
+
+document.getElementById('t-swap').onclick = () => swapComparison();
+document.getElementById('t-close').onclick = () => closeMap();
 document.getElementById('t-compare').onclick = () => {
   if (comparison) clearComparison(); else rememberComparison();
 };
@@ -3394,6 +4383,14 @@ addEventListener('keydown', (e) => {
     return;
   }
   const k = e.key.toLowerCase();
+  // C wie „center": zurück in die Mitte, ohne die Karte neu zu laden.
+  if (k === 'c' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    const field = (e.target && e.target.tagName) || '';
+    if (/INPUT|SELECT|TEXTAREA/.test(field)) return;
+    e.preventDefault();
+    centreAnatomy();
+    return;
+  }
   if (k !== 'q' && k !== 'e') return;
   const tag = (e.target && e.target.tagName) || '';
   if (/INPUT|SELECT|TEXTAREA/.test(tag)) return;   // don't hijack form fields
@@ -3426,6 +4423,7 @@ function animate(now) {
   stepAnim(t);
   controls.update();
   if (_readoutDirty) { _readoutDirty = false; updateReadout(); }
+  if (comparison) placeCompareTags();
   renderer.setScissorTest(false);
   renderer.setViewport(0, 0, innerWidth, innerHeight);
   renderer.render(scene, camera);
@@ -3463,7 +4461,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=b0edc5434904');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=874caa990bd9');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -3511,43 +4509,29 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=b0edc5434904';
+import '../shared/bridge.js?v=874caa990bd9';
 
-/* Der eigene Weg hinein — nur wo es keinen anderen gibt.
- *
- * Auf epcore.app ist dieser Knopf die einzige Möglichkeit, eine Karte zu
- * öffnen. In der Schale steht "Öffnen" in der Leiste und gilt für beide
- * Module; derselbe Knopf zweimal ist eine zweite Antwort auf eine schon
- * beantwortete Frage. Das Ablegen per Maus bleibt in beiden Fällen.
+/* In der Schale steht "Öffnen" auch oben in der Leiste, für beide Module. Das
+ * Menü hier daneben wäre eine zweite Antwort auf dieselbe Frage — die Knöpfe
+ * über der Ablagefläche sind es nicht: dort ist gerade nichts, und wer hier
+ * ankommt, sucht den Weg hinein an dieser Stelle und nicht am oberen Rand.
  *
  * Hier unten, nicht oben im Hauptskript: `window.epcore` entsteht erst mit
  * diesem Import, und die Frage "stecke ich in der Schale?" hat vorher keine
  * Antwort. */
 if (window.epcore.inShell()) {
-  for (const id of ['pick-dir', 'pick']) {
-    const el = document.getElementById(id);
-    if (el) el.hidden = true;
-  }
   const dropdown = document.getElementById('t-open')?.closest('.tdrop');
   if (dropdown) dropdown.hidden = true;
 }
 
 window.epcoreNotify = (msg) => { console.warn('[epcore]', msg); alert(msg); };
 
-window.epcore.register({
-  // Ein Pfad aus dem nativen Dialog: gelesen wird über den Backend-Weg, weil
-  // eine Seite keine Datei von der Platte aufmachen kann. Eigener Name, weil
-  // `openPath` der Signalansicht gehört — dieselbe Aktion an zwei Module wäre
-  // ein Zufall darüber, wer zuletzt geladen hat.
-  openMapPath: (payload) => { if (payload && payload.path) openPath(payload.path); },
-  // Ordner, nicht Einzeldatei: ein Rhythmia-Export ist ein Verzeichnis aus
-  // .000/.001-Teilen und ein CARTO-Export eines aus Meshes. Die Menü-Aktion
-  // klickte das Datei-Feld — damit ließ sich über die Leiste keiner der beiden
-  // öffnen, nur über den Knopf in dieser Ansicht.
-  openMap: () => document.getElementById('file-dir')?.click(),
-  openMapFile: () => document.getElementById('file')?.click(),
-  exportMap: () => document.getElementById('ex-ply')?.click(),
-});
+/* Die Aktionen selbst stehen im Hauptskript — hier ist ein anderer Modulkopf,
+ * und `openPath` ist von hier aus schlicht nicht sichtbar. Genau daran ist das
+ * Öffnen aus der Schale gescheitert: die Nachricht kam an, der Aufruf warf
+ * `openPath is not defined`, und weil das in einem Ereignis-Zuhörer passiert,
+ * sah niemand etwas — die Karte blieb leer und es gab keine Meldung. */
+window.epcore.register(window.epviewActions || {});
 </script>
 </body>
 </html>

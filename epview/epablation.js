@@ -187,6 +187,37 @@ export function gaps(sites, maxGapMm = DEFAULT_GAP_MM) {
 }
 
 /** The numbers a report quotes. `placed` is the first thing to look at. */
+/** Wieviel die Impedanz je Stelle gefallen ist, und wie oft kaum.
+ *
+ * Ein Abfall unter der Schwelle heißt nicht „keine Läsion" — er heißt, dass die
+ * Abgabe an dieser Stelle nichts gezeigt hat, was auf eine hinweist. Deshalb
+ * steht die Zahl der schwachen Stellen dabei und nicht ein Urteil.
+ *
+ * Nur aus einer Quelle: lokale Impedanz (DirectSense) und Generatorimpedanz
+ * fallen um verschiedene Beträge, und ein Median über beide wäre eine Zahl über
+ * nichts.
+ */
+export const WEAK_DROP_OHM = 5.0;
+
+export function dropSummary(sites, weakOhm = WEAK_DROP_OHM) {
+  const drops = (sites || []).map(s => s.impedanceDrop).filter(d => d && Number.isFinite(d.ohm));
+  if (!drops.length) return null;
+  const sources = new Set(drops.map(d => d.source));
+  const source = sources.size === 1 ? [...sources][0] : 'mixed';
+  const use = source === 'mixed'
+    ? drops.filter(d => d.source === 'directsense')     // die lokale gewinnt
+    : drops;
+  return {
+    source: source === 'mixed' ? 'directsense' : source,
+    mixed: sources.size > 1,
+    measured: use.length,
+    ohm: statistics(use.map(d => d.ohm)),
+    percent: statistics(use.map(d => d.percent)),
+    weak: use.filter(d => d.ohm < weakOhm).length,
+    weakOhm,
+  };
+}
+
 export function summarise(sites) {
   if (!sites || !sites.length) return { sites: 0, placed: 0, totalDeliveryS: null };
   const durations = sites.map(s => s.durationS).filter(Number.isFinite);
@@ -197,6 +228,7 @@ export function summarise(sites) {
     durationS: statistics(durations),
     powerW: statistics(sites.map(s => s.powerW.mean).filter(Number.isFinite)),
     impedanceOhm: statistics(sites.map(s => s.impedanceOhm.mean).filter(Number.isFinite)),
+    impedanceDrop: dropSummary(sites),
     // Ob daraus eine Linie geworden ist — siehe segments()/gaps().
     spacingMm: statistics(neighbourDistances(sites)),
     segments: sites.some(s => s.xyz) ? segments(sites).length : 0,
