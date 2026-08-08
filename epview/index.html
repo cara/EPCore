@@ -15,9 +15,9 @@
   } catch (e) { /* Speicher abgeschaltet */ }
 </script>
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/theme.js?v=08b445dcaa90"></script>
-<script type="module" src="../shared/settings.js?v=08b445dcaa90"></script>
-<script type="module" src="../shared/i18n.js?v=08b445dcaa90"></script>
+<script type="module" src="../shared/theme.js?v=4ea77b9f51d2"></script>
+<script type="module" src="../shared/settings.js?v=4ea77b9f51d2"></script>
+<script type="module" src="../shared/i18n.js?v=4ea77b9f51d2"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -169,6 +169,23 @@
     background: var(--accent-dim); background-clip: content-box;
   }
 
+  /* Aufklappbare Abschnitte statt einer langen Rolle.
+     Immer sichtbar bleibt, was zu jeder Karte gehört: welche Größe gezeigt
+     wird und in welchem Fenster. Alles andere ist eine Tätigkeit — messen,
+     schneiden, abspielen — und liegt unter ihrem Namen. Nur einer ist offen:
+     zwei offene Abschnitte sind wieder eine Rolle. */
+  .sec { border-top: 1px solid var(--line); }
+  .sec > summary {
+    list-style: none; cursor: pointer; padding: 9px 0 8px;
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .sec > summary::-webkit-details-marker { display: none; }
+  .sec > summary::after { content: '›'; float: right; transition: transform 0.15s; }
+  .sec[open] > summary { color: var(--accent); }
+  .sec[open] > summary::after { transform: rotate(90deg); }
+  .sec > summary:hover { color: var(--text); }
+  .sec[hidden] { display: none; }
   .grp { margin-bottom: 12px; }
   .grp:last-child { margin-bottom: 0; }
   .grp > label {
@@ -756,17 +773,6 @@
     </div>
   </div>
   <div class="tdrop">
-    <button class="tool" id="t-cam" data-i18n="map.camera"></button>
-    <div class="tmenu panel" id="m-cam">
-      <button class="tool" data-view="AP">AP</button>
-      <button class="tool" data-view="PA">PA</button>
-      <button class="tool" data-view="LAO">LAO</button>
-      <button class="tool" data-view="RAO">RAO</button>
-      <button class="tool" id="t-reset" data-i18n="map.reset"></button>
-      <button class="tool" id="t-rotate" data-i18n="map.autorotate"></button>
-    </div>
-  </div>
-  <div class="tdrop">
     <button class="tool" id="t-vid" data-i18n="map.video"></button>
     <div class="tmenu panel" id="m-vid">
       <button class="tool" id="t-orbit" data-i18n="map.rec.orbit"></button>
@@ -798,6 +804,10 @@
       <button class="tool" id="cut-through" data-i18n="map.cut.through"></button>
       <!-- Der Weg zurück gehört neben das Werkzeug, nicht nur als Chip unten
            in die Steuertafel, wo ihn niemand sucht. -->
+      <!-- Eine Ebene statt eines Umrisses: die Linie auf dem Schirm ist der
+           Schnitt, die Ebene steht senkrecht darauf, und alles dahinter fällt
+           weg — durch die ganze Tiefe, denn das ist, was eine Ebene tut. -->
+      <button class="tool" id="cut-plane" data-i18n="map.cut.plane"></button>
       <button class="tool" id="cut-reset" data-i18n="map.cut.reset"></button>
     </div>
   </div>
@@ -807,8 +817,6 @@
        eine leere Fläche zeigt, ist einer zu viel. -->
   <button class="tool" id="t-swap" data-i18n="map.compare.swap"
           data-i18n-title="map.compare.swap.title" hidden></button>
-  <button class="tool" id="t-close" data-i18n="map.close"
-          data-i18n-title="map.close.title" hidden></button>
   <span class="tool" id="compare-name" hidden
         style="color:var(--muted);text-transform:none;letter-spacing:0;max-width:22ch;overflow:hidden;text-overflow:ellipsis"></span>
   <button class="tool" id="t-theme" data-i18n-keep-label
@@ -818,6 +826,17 @@
      kaputter Knopf. Er bleibt anklickbar und sagt beim Klick, was fehlt —
      anonymisieren oder ein Teilen-Dienst. -->
 <button class="tool blocked" id="t-share" title="Erst anonymisieren — geteilte Karten bekommen eine öffentliche Adresse." data-i18n="map.share"></button>
+  <div class="tdrop">
+    <button class="tool" id="t-cam" data-i18n="map.camera"></button>
+    <div class="tmenu panel" id="m-cam">
+      <button class="tool" data-view="AP">AP</button>
+      <button class="tool" data-view="PA">PA</button>
+      <button class="tool" data-view="LAO">LAO</button>
+      <button class="tool" data-view="RAO">RAO</button>
+      <button class="tool" id="t-reset" data-i18n="map.reset"></button>
+      <button class="tool" id="t-rotate" data-i18n="map.autorotate"></button>
+    </div>
+  </div>
   <!-- Freie Aufnahme: nimmt auf, was der Nutzer tut, bis er wieder drückt.
        Die beiden Einträge im Video-Menü nehmen je einen fertigen Ablauf auf
        (Kamerafahrt, Aktivierung) und hören von selbst auf — das hier hat kein
@@ -825,6 +844,13 @@
   <button class="tool" id="t-rec" data-i18n-keep-label
           data-i18n-title="map.rec.free.title">● REC</button>
   <span class="tool" id="rec-dot" style="color:var(--warn)">● REC</span>
+  <!-- Ganz rechts und nur ein Kreuz: Schließen ist die einzige Aktion hier, die
+       etwas wegnimmt, und sie steht dort, wo man sie erwartet — nicht zwischen
+       den Werkzeugen, wo sie sich anklicken lässt, während man etwas anderes
+       will. Deshalb auch die Rückfrage. -->
+  <button class="tool" id="t-close" data-i18n-keep-label
+          data-i18n-title="map.close.title" aria-label="Schließen" hidden
+          style="margin-left:6px;font-size:14px;line-height:1;padding:5px 9px">✕</button>
 </div>
 
 <div id="controls-legend" data-i18n="map.hint.mouse"></div>
@@ -874,6 +900,19 @@
 </div>
 
 <div id="controls" class="panel">
+  <!-- Die Farbskala steht nicht mehr zur Wahl, wo gearbeitet wird: sie folgt
+       aus dem, was gezeigt wird — Spannung, Aktivierung oder Anatomie —, und
+       wer sie anders will, stellt das einmal in den Einstellungen ein. Das
+       Feld bleibt (versteckt) bestehen, weil alles andere es liest. -->
+  <div hidden>  <div class="grp" id="grp-cmap">
+    <label data-i18n="map.colorscale"></label>
+    <select id="cmap">
+      <option value="rhythmia_voltage">Rhythmia · Voltage</option>
+      <option value="rhythmia_lat">Rhythmia · LAT</option>
+      <option value="jet">Jet</option>
+      <option value="turbo">Turbo</option>
+    </select>
+  </div></div>
   <button type="button" id="ctrl-toggle" aria-label="Bedienfeld ein-/ausklappen">
     <span data-i18n="map.controls"></span>
     <span class="chev">▾</span>
@@ -889,15 +928,6 @@
   <div class="grp">
     <label data-i18n="map.source"></label>
     <select id="mode"></select>
-  </div>
-  <div class="grp" id="grp-cmap">
-    <label data-i18n="map.colorscale"></label>
-    <select id="cmap">
-      <option value="rhythmia_voltage">Rhythmia · Voltage</option>
-      <option value="rhythmia_lat">Rhythmia · LAT</option>
-      <option value="jet">Jet</option>
-      <option value="turbo">Turbo</option>
-    </select>
   </div>
   <div class="grp" id="grp-range">
     <label><span data-i18n="map.window"></span> <span id="range-unit" style="color:var(--accent-dim)"></span>
@@ -922,87 +952,107 @@
       </div>
     </details>
   </div>
-  <div class="grp" id="grp-smooth" style="display:none">
-    <label><span data-i18n="map.interpolation"></span> <span id="smooth-val" style="color:var(--accent-dim)">10</span></label>
-    <input type="range" id="smooth-level" min="0" max="10" step="1" value="10">
-  </div>
-  <div class="grp" id="grp-area" style="display:none">
-    <label><span data-i18n="map.area"></span> <span style="color:var(--accent-dim)">· cm²</span></label>
-    <div id="area-summary"><b id="area-total">—</b><span id="area-mid" style="color:var(--muted)">—</span></div>
-    <details class="advanced">
-      <summary data-i18n="map.breakdown"></summary>
-      <div id="area-readout"></div>
-      <button class="chip" id="area-isolate" style="margin-top:8px; width:100%" data-i18n="map.isolate"></button>
-    </details>
-  </div>
+  <details class="sec" id="sec-anim" data-sec="anim">
+    <summary data-i18n="map.sec.activation"></summary>
   <div class="grp" id="grp-anim" style="display:none">
-    <label><span data-i18n="map.activation"></span> <span id="anim-t" style="color:var(--accent-dim)"></span></label>
-    <div class="seg" id="anim-mode">
-      <button data-mode="loop" class="on" data-i18n="map.loop.reentry"></button>
-      <button data-mode="linear" data-i18n="map.linear"></button>
+      <label><span data-i18n="map.activation"></span> <span id="anim-t" style="color:var(--accent-dim)"></span></label>
+      <div class="seg" id="anim-mode">
+        <button data-mode="loop" class="on" data-i18n="map.loop.reentry"></button>
+        <button data-mode="linear" data-i18n="map.linear"></button>
+      </div>
+      <div class="anim-row">
+        <button class="chip" id="anim-play" data-i18n="map.play"></button>
+        <!-- Nicht Pause: Pause hält den Zeitpunkt fest und lässt die Karte auf
+             diesem Ausschnitt stehen. Hier geht es zurück auf die ganze
+             Skala — sonst führt kein Weg aus der Animation heraus. -->
+        <button class="chip" id="anim-stop" data-i18n="map.stop"
+                data-i18n-title="map.stop.title"></button>
+      </div>
+      <div class="field" style="margin-top:8px"><small data-i18n="map.cursor.ms"></small>
+        <input type="range" id="anim-cursor"></div>
+      <div class="field" style="margin-top:6px"><small data-i18n="map.speed"></small>
+        <input type="range" id="anim-speed" min="1" max="500" step="1" value="60"></div>
+      <div class="field" style="margin-top:6px"><small data-i18n="map.band"></small>
+        <input type="range" id="anim-band"></div>
+      <!-- Wieviel Fläche wann aktiviert. Bei einem durchlaufenden Kreis flach;
+           bricht die Welle ein, steht dort eine Delle — und die ist die Frage,
+           um die es bei einem Isthmus geht. -->
+      <div class="field" style="margin-top:10px">
+        <small data-i18n="map.skyline"></small>
+        <span id="skyline-quiet" style="float:right;color:var(--accent-dim);font-size:10px"></span>
+      </div>
+      <canvas id="skyline" width="240" height="54"
+              style="width:100%;height:54px;display:block;margin-top:4px"></canvas>
     </div>
-    <div class="anim-row">
-      <button class="chip" id="anim-play" data-i18n="map.play"></button>
-    </div>
-    <div class="field" style="margin-top:8px"><small data-i18n="map.cursor.ms"></small>
-      <input type="range" id="anim-cursor"></div>
-    <div class="field" style="margin-top:6px"><small data-i18n="map.speed"></small>
-      <input type="range" id="anim-speed" min="1" max="500" step="1" value="60"></div>
-    <div class="field" style="margin-top:6px"><small data-i18n="map.band"></small>
-      <input type="range" id="anim-band"></div>
-    <!-- Wieviel Fläche wann aktiviert. Bei einem durchlaufenden Kreis flach;
-         bricht die Welle ein, steht dort eine Delle — und die ist die Frage,
-         um die es bei einem Isthmus geht. -->
-    <div class="field" style="margin-top:10px">
-      <small data-i18n="map.skyline"></small>
-      <span id="skyline-quiet" style="float:right;color:var(--accent-dim);font-size:10px"></span>
-    </div>
-    <canvas id="skyline" width="240" height="54"
-            style="width:100%;height:54px;display:block;margin-top:4px"></canvas>
-  </div>
+  </details>
+  <details class="sec" id="sec-view" data-sec="view">
+    <summary data-i18n="map.sec.display"></summary>
   <div class="grp">
-    <label data-i18n="map.opacity"></label>
-    <input type="range" id="opacity" min="0.15" max="1" step="0.01" value="1">
-  </div>
-  <div class="grp">
-    <label data-i18n="map.display"></label>
-    <div class="toggles">
-      <button class="chip on" id="c-axes" data-i18n="map.orientation"></button>
-      <button class="chip" id="c-wire" data-i18n="map.wireframe"></button>
-      <button class="chip" id="c-smooth" data-i18n="map.smooth"></button>
+      <label data-i18n="map.opacity"></label>
+      <input type="range" id="opacity" min="0.15" max="1" step="0.01" value="1">
     </div>
-  </div>
+    <div class="grp">
+      <label data-i18n="map.display"></label>
+      <div class="toggles">
+        <button class="chip on" id="c-axes" data-i18n="map.orientation"></button>
+        <button class="chip" id="c-wire" data-i18n="map.wireframe"></button>
+        <button class="chip" id="c-smooth" data-i18n="map.smooth"></button>
+      </div>
+    </div>
+    <div class="grp" id="grp-smooth" style="display:none">
+      <label><span data-i18n="map.interpolation"></span> <span id="smooth-val" style="color:var(--accent-dim)">10</span></label>
+      <input type="range" id="smooth-level" min="0" max="10" step="1" value="10">
+    </div>
+  </details>
+  <details class="sec" id="sec-area" data-sec="area">
+    <summary data-i18n="map.sec.area"></summary>
+  <div class="grp" id="grp-area" style="display:none">
+      <label><span data-i18n="map.area"></span> <span style="color:var(--accent-dim)">· cm²</span></label>
+      <div id="area-summary"><b id="area-total">—</b><span id="area-mid" style="color:var(--muted)">—</span></div>
+      <details class="advanced">
+        <summary data-i18n="map.breakdown"></summary>
+        <div id="area-readout"></div>
+        <button class="chip" id="area-isolate" style="margin-top:8px; width:100%" data-i18n="map.isolate"></button>
+      </details>
+    </div>
+  </details>
+  <details class="sec" id="sec-trim" data-sec="trim">
+    <summary data-i18n="map.sec.cut"></summary>
+  <div class="grp" id="grp-trim" style="display:none">
+      <label><span data-i18n="map.trim"></span>
+        <span id="trim-note" style="float:right;color:var(--accent-dim);font-size:10px"></span></label>
+      <div class="field"><small data-i18n="map.trim.depth"></small>
+        <span id="trim-depth-val" style="color:var(--accent-dim)">8 mm</span>
+        <input type="range" id="trim-depth" min="1" max="30" step="1" value="8"></div>
+      <div class="toggles" id="trim-list" style="margin-top:6px"></div>
+    </div>
+  </details>
+  <details class="sec" id="sec-tags" data-sec="tags">
+    <summary data-i18n="map.sec.points"></summary>
+  <div class="grp" id="grp-tags" style="display:none">
+      <label><span data-i18n="map.tags"></span> <button class="chip" id="tags-all" style="float:right; padding:2px 8px" data-i18n="map.all"></button></label>
+      <div class="field" style="margin-top:6px"><small><span data-i18n="map.pointsize"></span> <span id="tag-size-val" style="color:var(--accent-dim)">2.50×</span></small>
+        <input type="range" id="tag-size" min="0.3" max="6" step="0.05" value="2.5"></div>
+      <div class="toggles" style="margin-top:6px">
+        <button class="chip" id="tag-project" data-i18n="map.project"></button>
+      </div>
+      <!-- Wo abgegeben wurde, sagt schon der Marker. Ob die Abgabe etwas
+           bewirkt hat, steht im Impedanzabfall — bei Rhythmia im Export. -->
+      <div class="field" id="abl-color-row" style="margin-top:6px;display:none">
+        <small data-i18n="map.ablation.colour"></small>
+        <select id="abl-color">
+          <option value="category" data-i18n="map.ablation.colour.category"></option>
+          <option value="drop" data-i18n="map.ablation.colour.drop"></option>
+        </select>
+        <span id="abl-color-note" style="color:var(--accent-dim);font-size:10px"></span>
+      </div>
+      <div class="toggles" id="tag-list" style="margin-top:6px"></div>
+    </div>
+  </details>
   <!-- Venenstümpfe und Klappenebenen wegschneiden. Sie verdecken auf dem Bild
        die Wand dahinter und stehen in der Flächenzahl, obwohl sie niemand
        abladiert. -->
-  <div class="grp" id="grp-trim" style="display:none">
-    <label><span data-i18n="map.trim"></span>
-      <span id="trim-note" style="float:right;color:var(--accent-dim);font-size:10px"></span></label>
-    <div class="field"><small data-i18n="map.trim.depth"></small>
-      <span id="trim-depth-val" style="color:var(--accent-dim)">8 mm</span>
-      <input type="range" id="trim-depth" min="1" max="30" step="1" value="8"></div>
-    <div class="toggles" id="trim-list" style="margin-top:6px"></div>
-  </div>
 
-  <div class="grp" id="grp-tags" style="display:none">
-    <label><span data-i18n="map.tags"></span> <button class="chip" id="tags-all" style="float:right; padding:2px 8px" data-i18n="map.all"></button></label>
-    <div class="field" style="margin-top:6px"><small><span data-i18n="map.pointsize"></span> <span id="tag-size-val" style="color:var(--accent-dim)">2.50×</span></small>
-      <input type="range" id="tag-size" min="0.3" max="6" step="0.05" value="2.5"></div>
-    <div class="toggles" style="margin-top:6px">
-      <button class="chip" id="tag-project" data-i18n="map.project"></button>
-    </div>
-    <!-- Wo abgegeben wurde, sagt schon der Marker. Ob die Abgabe etwas
-         bewirkt hat, steht im Impedanzabfall — bei Rhythmia im Export. -->
-    <div class="field" id="abl-color-row" style="margin-top:6px;display:none">
-      <small data-i18n="map.ablation.colour"></small>
-      <select id="abl-color">
-        <option value="category" data-i18n="map.ablation.colour.category"></option>
-        <option value="drop" data-i18n="map.ablation.colour.drop"></option>
-      </select>
-      <span id="abl-color-note" style="color:var(--accent-dim);font-size:10px"></span>
-    </div>
-    <div class="toggles" id="tag-list" style="margin-top:6px"></div>
-  </div>
   </div>
 </div>
 
@@ -1017,9 +1067,6 @@
        nichts passiert. Deshalb auf Ansage rund. -->
   <canvas id="cring" width="180" height="180" hidden></canvas>
   <div class="cap" id="legend-cap">Voltage · mV</div>
-  <label class="cap" id="cyclic-row" hidden style="display:flex;gap:6px;align-items:center;margin-top:6px;cursor:pointer">
-    <input type="checkbox" id="cyclic"> <span data-i18n="map.legend.cyclic"></span>
-  </label>
 </div>
 
 <div id="egm" role="dialog" aria-label="Elektrogramm">
@@ -1064,7 +1111,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=08b445dcaa90",
+    "three": "../vendor/three/three.module.js?v=4ea77b9f51d2",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -1074,14 +1121,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import epcoreTheme from '../shared/theme.js?v=08b445dcaa90';
-import * as EP from './epconv.js?v=08b445dcaa90';
-import * as EPM from './epmetrics.js?v=08b445dcaa90';
-import * as EPCV from './epconduction.js?v=08b445dcaa90';
-import * as EPA from './epablation.js?v=08b445dcaa90';
-import * as EPSave from '../shared/save.js?v=08b445dcaa90';
-import * as EPO from './epopenep.js?v=08b445dcaa90';
-import { LUTS, UNMAPPED, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=08b445dcaa90';
+import epcoreTheme from '../shared/theme.js?v=4ea77b9f51d2';
+import * as EP from './epconv.js?v=4ea77b9f51d2';
+import * as EPM from './epmetrics.js?v=4ea77b9f51d2';
+import * as EPCV from './epconduction.js?v=4ea77b9f51d2';
+import * as EPA from './epablation.js?v=4ea77b9f51d2';
+import * as EPSave from '../shared/save.js?v=4ea77b9f51d2';
+import * as EPO from './epopenep.js?v=4ea77b9f51d2';
+import { LUTS, UNMAPPED, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=4ea77b9f51d2';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1313,6 +1360,25 @@ const material = new THREE.MeshStandardMaterial({
   envMapIntensity: 0.6, transparent: false,
 });
 
+/* Die Innenseite dunkler, damit ein Schnitt zu sehen ist.
+ *
+ * Beide Seiten werden gezeichnet — sonst sähe man durch die weggeschnittene
+ * Wand hindurch ins Nichts. Beide gleich hell heißt aber: der Blick in die
+ * Kammer sieht genauso aus wie der Blick auf sie, und der Schnitt ist
+ * unsichtbar. Gemessen an der Demokarte, nachdem die Beleuchtung von unten
+ * dazukam: die Innenseite war ebenso hell wie die Außenseite, und ein Nutzer
+ * hielt den Schnitt für wirkungslos.
+ *
+ * Kein zweites Material, keine zweite Zeichnung: eine Zeile im Fragment-Shader,
+ * die auf `gl_FrontFacing` schaut. Die Farbe bleibt die der Karte — sie wird
+ * nur abgedunkelt, damit die Werte innen weiter ablesbar sind. */
+material.onBeforeCompile = (shader) => {
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <dithering_fragment>',
+    '#include <dithering_fragment>\n'
+    + '  if (!gl_FrontFacing) gl_FragColor.rgb *= 0.42;');
+};
+
 /* ---------- state ---------- */
 const state = {
   mode: null, cmap: 'rhythmia_voltage',
@@ -1331,7 +1397,7 @@ const state = {
   smoothLevel: 10,        // Laplacian interpolation strength for the scalar field (0 = raw)
   confMask: false,
   confMaskTh: 0.03,        // Confidence-mask voltage cutoff (mV); vertices <= this go grey
-  cyclic: false,           // die Aktivierung kreist — Legende als Ring, siehe drawLegendRing
+  cyclic: true,            // folgt der Umschaltung Schleife/Linear, siehe drawLegendRing
 };
 // Video-export options (mutated by the ⚙ settings popover in the UI).
 const recOpts = { fps: 30, bakeLegend: true, hideGizmo: true, orbitSeconds: 8, exportSeconds: null, cycles: 1, path: 'turntable', ease: true };
@@ -1391,6 +1457,7 @@ function buildTagMarkers(groups, meshRadius) {
   applyTagMarkerSettings();
   buildTagUI();
   buildAblationColorUI();
+  if (typeof refreshSections === 'function') refreshSections();
 }
 
 /** Der Schalter erscheint nur, wenn es etwas zu färben gibt.
@@ -1533,7 +1600,6 @@ function closeMap() {
   if (typeof hideEgm === 'function') hideEgm();
   if (typeof markAnonymised === 'function') markAnonymised(false);
   cutState.shapes = [];
-  cutState.removed.clear();
   trimState.chosen.clear();
   buildTagMarkers([], 50);
   const shown = document.getElementById('open-name');
@@ -1734,8 +1800,13 @@ function loadGeometry(data, name) {
 
   // Die ungeschnittene Fassung bleibt liegen: der Schnitt ist eine Ansicht.
   data.facesOriginal = data.facesOriginal || data.faces;
+  // Geschnitten wird immer aus dem Original heraus, nie aus dem Ergebnis des
+  // letzten Schnitts: sonst sammelt sich Rundung, und ein zurückgenommener
+  // Schnitt kommt nicht sauber zurück.
+  data.positionsOriginal = data.positionsOriginal || data.positions;
+  data.scalarsOriginal = data.scalarsOriginal || data.scalars;
   trimState.chosen.clear();
-  cutState.removed.clear();
+  cutState.shapes = [];
   buildTrimUI();
 
   buildModeOptions(data);
@@ -1747,6 +1818,7 @@ function loadGeometry(data, name) {
   updateStats(data);
   refreshDisplayToggles();
   buildTagMarkers(data.tagGroups, bs.radius);
+  refreshSections();
   _readoutDirty = true;      // neuer Datensatz -> Hover-Wert einmal nachziehen
 
   document.getElementById('drop').classList.add('hide');
@@ -1800,7 +1872,10 @@ function selectMode(mode, data = current) {
   if (mode.startsWith('scalar:')) {
     const field = mode.slice(7);
     const meta = FIELD_META[field.toLowerCase()] || { unit: '', cmap: 'rhythmia_voltage', range: null };
-    state.cmap = meta.cmap; state.unit = meta.unit;
+    // Was in den Einstellungen steht, sonst die Skala, die zur Größe gehört.
+    const chosen = (window.epcoreSettings && window.epcoreSettings.get('mapColourScale')) || 'auto';
+    state.cmap = (chosen && chosen !== 'auto') ? chosen : meta.cmap;
+    state.unit = meta.unit;
     state.fieldRange = dataRange(data.scalars[field]);
     if (!state.windows[field]) {
       let range = meta.range || state.fieldRange;
@@ -1808,12 +1883,16 @@ function selectMode(mode, data = current) {
       state.windows[field] = { vmin: range[0], vmax: range[1] };
     }
     const isVolt = (field === 'voltage' || field === 'unipolar');
+    // Auch über der Aktivierung anzubieten — dort blendet sie die Punkte aus,
+    // deren Zeit auf einem Signal steht, das keines ist.
+    const hasVoltage = !!(data.scalars && data.scalars.voltage);
+    const maskable = isVolt || (isLatField(field) && hasVoltage);
     state.confMask = isVolt && current && current.source === 'rhythmia';
     const cmRow = document.getElementById('conf-mask-row');
     const cmChip = document.getElementById('conf-mask');
     const cmIn = document.getElementById('conf-mask-th');
     const cmLbl = document.getElementById('conf-mask-th-lbl');
-    if (cmRow) cmRow.style.display = isVolt ? 'flex' : 'none';
+    if (cmRow) cmRow.style.display = maskable ? 'flex' : 'none';
     if (cmChip) cmChip.classList.toggle('on', state.confMask);
     if (cmIn) cmIn.value = round(state.confMaskTh);
     if (cmLbl) cmLbl.textContent = round(state.confMaskTh);
@@ -1826,6 +1905,7 @@ function selectMode(mode, data = current) {
     document.getElementById('grp-cmap').style.display = '';
     document.getElementById('grp-range').style.display = '';
     document.getElementById('grp-smooth').style.display = '';
+  if (typeof refreshSections === 'function') refreshSections();
     legend.classList.add('show');
     buildPresets(field);
     syncSliderBounds();
@@ -1844,8 +1924,13 @@ function selectMode(mode, data = current) {
 function recomputeArea() {
   const grp = document.getElementById('grp-area');
   const field = state.mode && state.mode.startsWith('scalar:') ? state.mode.slice(7) : null;
-  if (!current || !field || !current.scalars[field]) { grp.style.display = 'none'; return; }
+  if (!current || !field || !current.scalars[field]) {
+    grp.style.display = 'none';
+    if (typeof refreshSections === 'function') refreshSections();
+    return;
+  }
   grp.style.display = '';
+  if (typeof refreshSections === 'function') refreshSections();
   // Dieselbe Quelle wie das Rendering (geglättet + Conf-Maske), sonst gehören
   // die cm²-Zahlen sichtbar nicht zu dem, was auf dem Schirm steht.
   const r = areaByThreshold(current.positions, current.faces, visibleScalar(field), state.vmin, state.vmax);
@@ -2053,11 +2138,16 @@ function drawSkyline(field) {
 
 function updateActivationUI(field) {
   const grp = document.getElementById('grp-anim');
-  if (!field || !isLatField(field)) { grp.style.display = 'none'; stopAnim(); return; }
-  grp.style.display = '';
+  const wanted = !!field && isLatField(field);
+  grp.style.display = wanted ? '' : 'none';
+  if (typeof refreshSections === 'function') refreshSections();
+  if (!wanted) { stopAnim(); return; }
   state.anim.engaged = false;
   syncTimelineToWindow();
   drawSkyline(field);
+  /* Wer auf Aktivierungszeit umschaltet, will die Aktivierung bedienen —
+   * dann steht der Abschnitt offen und nicht der von vorher. */
+  if (typeof openSection === 'function') openSection('anim');
 }
 
 // The Ausschnitt [t0,t1] is the LAT color window (state.vmin/vmax). Keep the
@@ -2170,8 +2260,18 @@ function displayScalar(field) {
 // Conf-Maske ausblendet, als NaN (= unmapped). Rendering, Flächenstatistik und
 // Export teilen sich diese Quelle, damit die cm²-Zahlen und die exportierten
 // Farben zum Bild auf dem Schirm gehören.
+/** Ob die Konfidenzmaske für dieses Feld gilt.
+ *
+ * Auch über der Aktivierungszeit — und dort beurteilt sie nicht die Zeit,
+ * sondern die Spannung an derselben Stelle: eine Annotation auf einem 0,03-mV-
+ * Ausschlag ist keine frühe Aktivierung, sondern Rauschen mit einer Uhrzeit.
+ * Genau diese Punkte färben eine Karte durch und lassen eine Welle dort
+ * entstehen, wo nichts gemessen wurde.
+ */
 function confMaskActive(field) {
-  return !!state.confMask && (field === 'voltage' || field === 'unipolar');
+  if (!state.confMask) return false;
+  if (field === 'voltage' || field === 'unipolar') return true;
+  return isLatField(field) && !!(current && current.scalars && current.scalars.voltage);
 }
 let _visibleCache = null;
 function visibleScalar(field) {
@@ -2180,10 +2280,76 @@ function visibleScalar(field) {
   const key = { mesh: current, field, level: state.smoothLevel, th: state.confMaskTh };
   if (_visibleCache && _visibleCache.mesh === key.mesh && _visibleCache.field === key.field
       && _visibleCache.level === key.level && _visibleCache.th === key.th) return _visibleCache.values;
+  /* Womit gemessen wird: bei Spannung das Feld selbst, bei der Aktivierung die
+   * Spannung daneben. Die Zeit sagt nichts darüber, ob dort etwas war. */
+  const judge = (field === 'voltage' || field === 'unipolar')
+    ? s : (current.scalars.voltage || s);
   const out = new Float32Array(s.length);
-  for (let i = 0; i < s.length; i++) out[i] = s[i] <= state.confMaskTh ? NaN : s[i];
+  for (let i = 0; i < s.length; i++) {
+    out[i] = (judge[i] <= state.confMaskTh || !Number.isFinite(judge[i])) ? NaN : s[i];
+  }
   _visibleCache = { ...key, values: out };
   return out;
+}
+
+/** Die Schnittkante als weißer Strich.
+ *
+ * Eine Linie zwischen den Knoten, die beim Schneiden entstanden sind — nicht
+ * eingefärbte Knoten: eine Vertexfarbe verläuft in ihre Nachbarn und wird zum
+ * Band, das über die Karte schmiert. Der Strich liegt genau dort, wo gezogen
+ * wurde.
+ *
+ * `depthTest: false` bewusst nicht: die Kante gehört zur Fläche und soll hinter
+ * ihr verschwinden, wenn man die Karte wegdreht. Stattdessen ein kleiner
+ * Tiefen-Versatz, damit sie nicht mit den Dreiecken um dieselben Pixel streitet.
+ */
+let cutSeamLine = null;
+function drawCutSeam() {
+  if (cutSeamLine) {
+    group.remove(cutSeamLine);
+    cutSeamLine.geometry.dispose();
+    cutSeamLine.material.dispose();
+    cutSeamLine = null;
+  }
+  const seams = current && current.seams;
+  if (!seams || !seams.length || !current.positions) return;
+
+  /* Als Röhrchen, nicht als Linie: `LineBasicMaterial.linewidth` ist in WebGL
+   * überall 1 Pixel, egal was dort steht — ein Strich, der bei jeder Zoomstufe
+   * gleich dünn bleibt und beim Herauszoomen verschwindet. Ein Zylinder je
+   * Segment hat eine Dicke in Millimetern und verhält sich wie die Karte.
+   *
+   * Die Dicke hängt an der Größe der Karte, nicht an einer festen Zahl: 0,4 %
+   * des Radius ist auf einem Vorhof wie auf einem Ventrikel derselbe Strich. */
+  mesh.geometry.computeBoundingSphere();
+  const radius = (mesh.geometry.boundingSphere.radius || 50) * 0.004;
+  const tube = new THREE.CylinderGeometry(radius, radius, 1, 6, 1, true);
+  const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const line = new THREE.InstancedMesh(tube, material, seams.length);
+
+  const from = new THREE.Vector3(), to = new THREE.Vector3();
+  const middle = new THREE.Vector3(), direction = new THREE.Vector3();
+  const up = new THREE.Vector3(0, 1, 0);
+  const turn = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  const matrix = new THREE.Matrix4();
+  seams.forEach(([a, b], i) => {
+    from.set(current.positions[a * 3], current.positions[a * 3 + 1], current.positions[a * 3 + 2]);
+    to.set(current.positions[b * 3], current.positions[b * 3 + 1], current.positions[b * 3 + 2]);
+    direction.subVectors(to, from);
+    const length = direction.length() || 1e-6;
+    middle.addVectors(from, to).multiplyScalar(0.5);
+    // Der Zylinder steht auf der Y-Achse; ihn auf die Strecke drehen.
+    turn.setFromUnitVectors(up, direction.clone().normalize());
+    // Etwas über die Enden hinaus, damit an den Knicken keine Lücke bleibt.
+    scale.set(1, length + radius * 2, 1);
+    matrix.compose(middle, turn, scale);
+    line.setMatrixAt(i, matrix);
+  });
+  line.instanceMatrix.needsUpdate = true;
+  line.renderOrder = 2;
+  cutSeamLine = line;
+  group.add(line);
 }
 
 function applyColors() {
@@ -2246,6 +2412,19 @@ function drawLegend() {
     ctx.fillStyle = `rgb(${table[idx*3]},${table[idx*3+1]},${table[idx*3+2]})`;
     ctx.fillRect(0, y, cv.width, 1);
   }
+  if (state.anim.engaged || state.anim.playing) {
+    // Dasselbe auf dem Balken: oben ist vmax, unten vmin.
+    const span = (state.vmax - state.vmin) || 1;
+    const yOf = (t) => (1 - (t - state.vmin) / span) * (h - 1);
+    const half = (state.anim.band || 0) / 2;
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = themeToken('--text') || '#e8f4f8';
+    const top = yOf(state.anim.t + half), bottom = yOf(state.anim.t - half);
+    ctx.fillRect(0, top, cv.width, Math.max(2, bottom - top));
+    ctx.globalAlpha = 1;
+    ctx.fillRect(0, yOf(state.anim.t) - 1, cv.width, 2);
+  }
+
   const ticksEl = document.getElementById('cbar-ticks');
   ticksEl.innerHTML = '';
   for (let i = 0; i <= 4; i++) {
@@ -2308,6 +2487,31 @@ function drawLegendRing() {
     ctx.fill();
   }
 
+  /* Wo die Karte gerade steht, auf der Skala selbst — dieselbe Auskunft wie
+   * die Marke auf der Aktivierungskurve, nur dort, wo die Farben stehen. Ohne
+   * sie sagt der Ring, welche Farbe welche Zeit ist, aber nicht, welche Zeit
+   * gerade gezeigt wird. */
+  if (state.anim.engaged || state.anim.playing) {
+    const span = (state.vmax - state.vmin) || 1;
+    const angleOf = (t) => -Math.PI / 2 + ((t - state.vmin) / span) * Math.PI * 2;
+    const half = (state.anim.band || 0) / 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, (outer + inner) / 2, angleOf(state.anim.t - half),
+            angleOf(state.anim.t + half));
+    ctx.strokeStyle = themeToken('--text') || '#e8f4f8';
+    ctx.lineWidth = Math.max(3, (outer - inner) * 0.5);
+    ctx.globalAlpha = 0.35;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    const at = angleOf(state.anim.t);
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(at) * (inner - 3), cy + Math.sin(at) * (inner - 3));
+    ctx.lineTo(cx + Math.cos(at) * (outer + 3), cy + Math.sin(at) * (outer + 3));
+    ctx.strokeStyle = themeToken('--text') || '#e8f4f8';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
   ctx.fillStyle = themeToken('--muted') || '#9bb';
   ctx.font = '10px ui-monospace, monospace';
   ctx.textAlign = 'center';
@@ -2337,7 +2541,9 @@ function layoutLegend() {
   if (ring) ring.hidden = !cyclic;
   const isLat = state.mode && state.mode.startsWith('scalar:')
              && isLatField(state.mode.slice(7));
-  if (row) row.hidden = !isLat;            // ein Ring über Spannung sagt nichts
+  // Ein Ring über einer Spannungsskala sagt nichts: die ist nicht zyklisch.
+  const ring2 = document.getElementById('cring');
+  if (!isLat && ring2) { ring2.hidden = true; if (bar) bar.hidden = false; }
 
   const stats = document.getElementById('stats');
   const bottom = stats ? stats.getBoundingClientRect().bottom : 0;
@@ -2426,7 +2632,7 @@ function buildTrimUI() {
   // Auch ohne Öffnungen sichtbar, sobald von Hand geschnitten wurde: sonst
   // gäbe es keinen Weg zurück. Rhythmia deckelt seine Stümpfe, da gibt es nie
   // einen Ring — das Werkzeug in der Leiste ist dort der einzige Weg.
-  if (!trimState.rings.length && !cutState.removed.size) {
+  if (!trimState.rings.length && !cutState.shapes.length) {
     group.style.display = 'none';
     return;
   }
@@ -2445,7 +2651,7 @@ function buildTrimUI() {
     };
     list.appendChild(chip);
   });
-  if (cutState.removed.size || trimState.chosen.size) {
+  if (cutState.shapes.length || trimState.chosen.size) {
     const reset = document.createElement('button');
     reset.className = 'chip';
     reset.textContent = T('map.trim.reset');
@@ -2453,12 +2659,13 @@ function buildTrimUI() {
     list.appendChild(reset);
   }
   updateTrimNote();
+  if (typeof refreshSections === 'function') refreshSections();
 }
 
 function updateTrimNote() {
   const note = document.getElementById('trim-note');
   if (!note) return;
-  const cuts = trimState.chosen.size + (cutState.removed.size ? 1 : 0);
+  const cuts = trimState.chosen.size + cutState.shapes.filter(s => !s.preview).length;
   note.textContent = cuts ? T('map.trim.active', { count: cuts }) : '';
 }
 
@@ -2472,25 +2679,20 @@ function applyTrim() {
     current._adjacencyOriginal = buildAdjacencyCSR(current.facesOriginal,
                                                    current.positions.length / 3);
   }
-  /* Zwei Auswahlen, zwei Regeln. Der Kranz um eine Öffnung ist vollständig —
-   * dort fällt ein Dreieck schon bei einer Ecke, sonst bleibt eine Säge stehen.
-   * Der gezeichnete Umriss läuft quer durch die Vernetzung, und dort fällt ein
-   * Dreieck erst bei zweien, sonst franst der Rand aus. */
-  const trimmed = new Set();
-  for (const index of trimState.chosen) {
-    const ring = trimState.rings[index];
-    if (!ring) continue;
-    for (const v of EPM.vertsWithinOfRing(current.positions, current._adjacencyOriginal,
-                                          ring.vertices, trimState.depthMm)) {
-      trimmed.add(v);
-    }
-  }
-  current.faces = EPM.facesWithout(
-    EPM.facesWithout(current.facesOriginal, trimmed), cutState.removed, 2);
+  rebuildCuts();
   if (mesh) {
-    mesh.geometry.setIndex(new THREE.BufferAttribute(current.faces, 1));
-    mesh.geometry.computeVertexNormals();
+    /* Die Positionen ändern sich mit, weil Randdreiecke aufgeschnitten werden —
+     * also die ganze Geometrie neu setzen und nicht nur den Index. */
+    const geo = mesh.geometry;
+    geo.setAttribute('position', new THREE.BufferAttribute(current.positions, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(
+      new Float32Array(current.positions.length), 3));
+    geo.setIndex(new THREE.BufferAttribute(current.faces, 1));
+    geo.computeVertexNormals();
+    geo.attributes.position.needsUpdate = true;
   }
+  current._vertexNormals = null;
+  current._vgrid = null;
   // Die Nachbarschaft hängt an den Dreiecken, die Glättung an der Nachbarschaft.
   current._adjacency = null;
   _smoothCache = null;
@@ -3082,7 +3284,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=08b445dcaa90'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=4ea77b9f51d2'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -3356,7 +3558,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=08b445dcaa90');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=4ea77b9f51d2');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -3681,9 +3883,23 @@ document.getElementById('smooth-level').oninput = e => {
 };
 
 document.getElementById('anim-play').onclick = () => state.anim.playing ? stopAnim() : startAnim();
+document.getElementById('anim-stop').onclick = () => {
+  stopAnim();
+  state.anim.engaged = false;         // die ganze Skala, nicht ein Ausschnitt
+  applyColors();
+  _legendKey = null;
+  drawLegend();
+  refreshSkyline();
+};
 document.querySelectorAll('#anim-mode button').forEach(b => b.onclick = () => {
   state.anim.mode = b.dataset.mode;
   document.querySelectorAll('#anim-mode button').forEach(x => x.classList.toggle('on', x === b));
+  /* „Schleife" *ist* die Ansage, dass die Erregung kreist — dann ist die
+   * Skala zyklisch und die Legende ein Ring. Ein zweites Häkchen dafür wäre
+   * dieselbe Frage ein zweites Mal, an anderer Stelle. */
+  state.cyclic = state.anim.mode === 'loop';
+  _legendKey = null;
+  drawLegend();
   if (!state.anim.playing) applyColors();
 });
 document.getElementById('anim-speed').oninput = e => { state.anim.speed = +e.target.value; };
@@ -3885,10 +4101,10 @@ const SCISSORS_CURSOR =
 
 const cutState = {
   drawing: false, points: [], side: 'front',
-  shapes: [],           // was geschnitten wurde: Umriss und Seite, je Schnitt
+  tool: 'polygon',      // 'polygon' zeichnet einen Umriss, 'plane' eine Ebene
+  shapes: [],           // was geschnitten wurde: Umriss, Seite und Blickwinkel
   editing: -1,          // welcher Umriss gerade Griffe trägt
   drag: -1,
-  removed: new Set(),
 };
 
 function cutOverlay() { return document.getElementById('cut-overlay'); }
@@ -3958,7 +4174,7 @@ function startCutting() {
 function stopCutting() {
   const hadPreview = cutState.shapes.some(s => s.preview);
   cutState.shapes = cutState.shapes.filter(s => !s.preview);
-  if (hadPreview) unionRemoved();
+  if (hadPreview) applyTrim();
   cutState.drawing = false;
   cutState.drag = -1;
   cutState.points = [];
@@ -4002,62 +4218,96 @@ function endEditing() {
   buildTrimUI();
 }
 
-/** Jeden Vertex auf den Bildschirm rechnen, dazu wohin er schaut. */
-function projectVertices() {
-  const count = current.positions.length / 3;
-  const projected = new Float32Array(count * 2);
-  /* Negativ heißt zugewandt. Damit fällt am Mitralklappenring nur die vordere
-   * Wand weg und man sieht in die Kammer statt durch sie hindurch. */
-  const facing = new Float32Array(count);
-  const point = new THREE.Vector3();
-  const normal = new THREE.Vector3();
-  const view = new THREE.Vector3();
-  /* Aus den Originalflächen, nicht aus der gezeichneten Geometrie: die hat
-   * nach dem ersten Schnitt Löcher, und dort stünde die Normale auf null. */
-  if (!current._vertexNormals && current.facesOriginal) {
-    current._vertexNormals = EPM.vertexNormals(current.positions, current.facesOriginal);
-  }
-  const normals = current._vertexNormals;
-  const normalMatrix = new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
-  const half = { x: innerWidth / 2, y: innerHeight / 2 };
-
-  mesh.updateMatrixWorld();
-  for (let v = 0; v < count; v++) {
-    point.set(current.positions[v * 3], current.positions[v * 3 + 1],
-              current.positions[v * 3 + 2]);
-    // Über die Gruppe, weil die Karte darin verschoben liegt (Vergleich!).
-    mesh.localToWorld(point);
-    view.subVectors(point, camera.position).normalize();
-    if (normals) {
-      normal.set(normals[v * 3], normals[v * 3 + 1], normals[v * 3 + 2])
-            .applyMatrix3(normalMatrix).normalize();
-      facing[v] = normal.dot(view);
-    }
-    point.project(camera);
-    projected[v * 2] = (point.x + 1) * half.x;
-    projected[v * 2 + 1] = (1 - point.y) * half.y;
-  }
-  return { projected, facing: normals ? facing : null };
-}
-
-/* Jeder Schnitt merkt sich, was *er* weggenommen hat.
+/** Alles neu aufbauen: Ringschnitte, dann jeder gezeichnete Umriss.
  *
- * Ein Umriss gilt in dem Blickwinkel, in dem er gezeichnet wurde. Würde man
- * beim Nachziehen eines Griffs alle Umrisse mit der jetzigen Kamera neu
- * rechnen, änderten sich stillschweigend auch die vorigen Schnitte — an einer
- * Stelle ziehen, an einer anderen fällt etwas weg. */
-function cutShape(shape) {
-  const { projected, facing } = projectVertices();
-  shape.removed = EPM.vertsInsidePolygon(projected, shape.points,
-                                         { facing, side: shape.side });
+ * Die gezeichneten Umrisse *schneiden* die Randdreiecke auf, statt sie
+ * wegzunehmen — sonst folgt der Rand der Vernetzung und sieht aus wie eine
+ * Säge. Dabei entstehen neue Knoten; alles, was je Knoten hängt (die Skalare,
+ * aus denen die Farben kommen), wird für sie zwischen den Enden interpoliert.
+ */
+function rebuildCuts() {
+  if (!current || !current.positionsOriginal) return;
+  let positions = current.positionsOriginal;
+  let faces = current.facesOriginal;
+  let scalars = current.scalarsOriginal || {};
+
+  // Ringschnitte zuerst, ganze Dreiecke: die Auswahl ist dort ein voller Kranz.
+  if (trimState.chosen.size) {
+    if (!current._adjacencyOriginal) {
+      current._adjacencyOriginal = buildAdjacencyCSR(current.facesOriginal,
+                                                     positions.length / 3);
+    }
+    const trimmed = new Set();
+    for (const index of trimState.chosen) {
+      const ring = trimState.rings[index];
+      if (!ring) continue;
+      for (const v of EPM.vertsWithinOfRing(positions, current._adjacencyOriginal,
+                                            ring.vertices, trimState.depthMm)) {
+        trimmed.add(v);
+      }
+    }
+    faces = EPM.facesWithout(faces, trimmed);
+  }
+
+  /* Wo geschnitten wurde: die Knoten, die dabei entstanden sind. Sie liegen
+   * genau auf der Linie, und weiß eingefärbt ergeben sie das Band, das den
+   * Schnitt vom gewachsenen Rand unterscheidet — sonst sieht ein Ausschnitt aus
+   * wie eine Öffnung, die die Anatomie schon hatte. */
+  const rim = new Set();
+  const seams = [];
+  for (const shape of cutState.shapes) {
+    if (!shape.points || shape.points.length < 3 || !shape.view) continue;
+    const project = makeProjector(shape.view, () => positions);
+    const may = EPM.facingTriangles(positions, faces, shape.view.cameraLocal,
+                                    shape.side || 'front');
+    const cut = EPM.clipByPolygon(positions, faces, project, shape.points,
+                                  { keep: 'outside', faceInside: (f) => may[f] === 1 });
+    if (cut.parents.length) scalars = extendScalars(scalars, cut.parents);
+    const first = positions.length / 3;
+    for (let i = 0; i < cut.parents.length; i++) rim.add(first + i);
+    for (const pair of cut.seam) seams.push(pair);
+    positions = cut.positions;
+    faces = cut.faces;
+  }
+
+  current.positions = positions;
+  current.faces = faces;
+  current.scalars = scalars;
+  current.rim = rim;
+  current.seams = seams;
+  drawCutSeam();
 }
 
-function unionRemoved() {
-  cutState.removed.clear();
-  for (const shape of cutState.shapes) {
-    for (const v of shape.removed) cutState.removed.add(v);
+/** Skalare für neu entstandene Knoten: zwischen den Enden ihrer Kante. */
+function extendScalars(scalars, parents) {
+  const out = {};
+  for (const [name, values] of Object.entries(scalars || {})) {
+    if (!values || !values.length) { out[name] = values; continue; }
+    const grown = new Float32Array(values.length + parents.length);
+    grown.set(values);
+    parents.forEach(([a, b, t], i) => {
+      const from = values[a], to = values[b];
+      // Ein Nachbar ohne Messwert vererbt keinen: dazwischen zu mitteln
+      // erfände einen Wert an einer Stelle, an der keiner steht.
+      grown[values.length + i] = (Number.isFinite(from) && Number.isFinite(to))
+        ? from + (to - from) * t
+        : (Number.isFinite(from) ? from : to);
+    });
+    out[name] = grown;
   }
-  applyTrim();
+  return out;
+}
+
+/** Bildschirmlage eines Knotens unter der Kamera, die beim Zeichnen galt. */
+function makeProjector(view, getPositions) {
+  const point = new THREE.Vector3();
+  const half = { x: view.width / 2, y: view.height / 2 };
+  return (index) => {
+    const positions = getPositions();
+    point.set(positions[index * 3], positions[index * 3 + 1], positions[index * 3 + 2]);
+    point.applyMatrix4(view.world).applyMatrix4(view.projView);
+    return [(point.x + 1) * half.x, (1 - point.y) * half.y];
+  };
 }
 
 /** Zeigen, was der Umriss gerade wegnehmen würde.
@@ -4069,38 +4319,89 @@ function unionRemoved() {
  */
 function previewCut() {
   if (!cutState.drawing || cutState.points.length < 3 || !current) return;
-  const shape = { points: cutState.points.map(p => [p[0], p[1]]),
-                  side: cutState.side, removed: new Set(), preview: true };
-  cutShape(shape);
   cutState.shapes = cutState.shapes.filter(s => !s.preview);
-  cutState.shapes.push(shape);
-  unionRemoved();
+  cutState.shapes.push({ points: cutState.points.map(p => [p[0], p[1]]),
+                         side: cutState.side, view: currentView(), preview: true });
+  applyTrim();
+}
+
+/** Die Kamera, wie sie in diesem Augenblick steht — ein Umriss gilt nur in ihr.
+ *
+ * Festgehalten und nicht später erneut gefragt: dieselben Bildschirmpunkte
+ * unter einer gedrehten Kamera bezeichnen eine ganz andere Stelle der Karte,
+ * und ein Schnitt, der sich beim Drehen still verschiebt, wäre schlimmer als
+ * einer, der beim Drehen verschwindet.
+ */
+function currentView() {
+  mesh.updateMatrixWorld();
+  camera.updateMatrixWorld();
+  const projView = new THREE.Matrix4().multiplyMatrices(
+    camera.projectionMatrix, camera.matrixWorldInverse);
+  // Die Kamera in den Koordinaten der Karte: die Normalen liegen dort.
+  const cameraLocal = camera.position.clone()
+    .applyMatrix4(new THREE.Matrix4().copy(mesh.matrixWorld).invert());
+  return { projView, world: mesh.matrixWorld.clone(),
+           cameraLocal: [cameraLocal.x, cameraLocal.y, cameraLocal.z],
+           width: innerWidth, height: innerHeight };
+}
+
+/** Aus zwei Punkten die halbe Bildfläche machen, die weggeschnitten wird.
+ *
+ * Die Linie ist der Schnitt; die Ebene steht senkrecht auf dem Bildschirm.
+ * Welche Seite fällt, ist die *linke* in Zugrichtung — das ist willkürlich,
+ * aber vorhersagbar, und die andere bekommt man, indem man in die Gegenrichtung
+ * zieht. Das Rechteck wird weit über den Rand hinaus aufgespannt, damit es die
+ * Karte sicher ganz erfasst.
+ */
+function planePolygon(from, to) {
+  const dx = to[0] - from[0], dy = to[1] - from[1];
+  const length = Math.hypot(dx, dy) || 1;
+  const reach = (innerWidth + innerHeight) * 2;
+  // Nach links von der Zugrichtung.
+  const nx = dy / length * reach, ny = -dx / length * reach;
+  const ax = from[0] - dx / length * reach, ay = from[1] - dy / length * reach;
+  const bx = to[0] + dx / length * reach, by = to[1] + dy / length * reach;
+  return [[ax, ay], [bx, by], [bx + nx, by + ny], [ax + nx, ay + ny]];
 }
 
 /** Den gezeichneten Umriss anwenden: was darin liegt, fällt weg. */
 function applyCut() {
+  if (cutState.tool === 'plane') {
+    if (cutState.points.length < 2) { stopCutting(); return; }
+    cutState.shapes = cutState.shapes.filter(s => !s.preview);
+    cutState.shapes.push({ points: planePolygon(cutState.points[0], cutState.points[1]),
+                           side: 'through', view: currentView(), plane: true });
+    cutState.drawing = false;
+    cutState.points = [];
+    controls.enabled = true;
+    document.getElementById('t-cut').classList.remove('on');
+    applyTrim();
+    buildTrimUI();
+    return;
+  }
   if (cutState.points.length < 3) { stopCutting(); return; }
   // Griffe in regelmäßigem Abstand, nicht nur an den geklickten Ecken: sonst
   // ließe sich eine lange gerade Kante nur als Ganzes verschieben.
   cutState.shapes = cutState.shapes.filter(s => !s.preview);
   const shape = { points: EPM.resamplePolygon(cutState.points, 55),
-                  side: cutState.side, removed: new Set() };
-  cutShape(shape);
+                  side: cutState.side, view: currentView() };
   cutState.shapes.push(shape);
   cutState.drawing = false;
   cutState.points = [];
   controls.enabled = true;
   document.getElementById('t-cut').classList.remove('on');
-  unionRemoved();
+  applyTrim();
   // Erst jetzt: die Gruppe erscheint bei einer geschlossenen Karte überhaupt
   // erst durch den Schnitt, und ohne sie gäbe es keinen Weg zurück.
   buildTrimUI();
+  // Wer gerade geschnitten hat, sucht als Nächstes den Weg zurück — der steht
+  // in diesem Abschnitt, und zugeklappt findet ihn niemand.
+  if (typeof openSection === 'function') openSection('trim');
   startEditing(cutState.shapes.length - 1);
 }
 
 function resetCuts() {
   cutState.shapes = [];
-  cutState.removed.clear();
   trimState.chosen.clear();
   endEditing();
   buildTrimUI();
@@ -4122,6 +4423,10 @@ cutOverlay().addEventListener('pointerdown', (event) => {
   }
   cutState.points.push([event.clientX, event.clientY]);
   drawCutOutline();
+  if (cutState.tool === 'plane' && cutState.points.length === 2) {
+    applyCut();                      // zwei Punkte sind eine Ebene, mehr nicht
+    return;
+  }
   previewCut();
 });
 
@@ -4196,8 +4501,7 @@ renderer.domElement.addEventListener('pointerup', (event) => {
   if (cutState.drag < 0) return;
   cutState.drag = -1;
   event.stopPropagation();
-  const shape = cutState.shapes[cutState.editing];
-  if (shape) { cutShape(shape); unionRemoved(); }   // … beim Loslassen die Karte
+  if (cutState.shapes[cutState.editing]) applyTrim();   // … beim Loslassen die Karte
 }, true);
 
 // Dreht die Kamera, passt der Umriss nicht mehr zur Ansicht, in der er gesetzt
@@ -4221,6 +4525,23 @@ window.epcoreLookFrom = (x, y, z) => {
   controls.update();
 };
 
+/* Der Stand der Aktivierung, von außen lesbar: Zeitpunkt, Bandbreite, ob
+ * gerade ein Ausschnitt gezeigt wird. Nur zum Nachsehen — geschrieben wird
+ * hier nichts. */
+/* Ob das weiße Band wirklich auf den Schnittkanten liegt — auf der
+ * Grafikkarte nachgesehen, nicht in der Absicht. */
+window.epcoreRimCheck = () => ({
+  count: (current && current.seams) ? current.seams.length : 0,
+  drawn: cutSeamLine ? cutSeamLine.count : 0,
+  white: cutSeamLine ? (cutSeamLine.material.color.getHex() === 0xffffff ? 1 : 0) : 0,
+});
+
+window.epcoreAnimView = () => ({
+  t: state.anim.t, band: state.anim.band, playing: state.anim.playing,
+  engaged: state.anim.engaged, mode: state.anim.mode,
+  window: [state.vmin, state.vmax], cyclic: !!state.cyclic,
+});
+
 window.epcoreTagView = () => ({
   groups: tagMeshes.map(t => ({ category: t.group.category, label: t.group.label,
                                 points: t.group.points.length, visible: t.inst.visible })),
@@ -4243,10 +4564,20 @@ window.epcoreCutView = () => ({
 document.getElementById('t-cut').onclick = () => {
   if (cutState.drawing) { stopCutting(); return; }
   cutState.side = 'front';
+  cutState.tool = 'polygon';
   startCutting();
 };
-document.getElementById('cut-front').onclick = () => { cutState.side = 'front'; startCutting(); };
-document.getElementById('cut-through').onclick = () => { cutState.side = 'through'; startCutting(); };
+document.getElementById('cut-front').onclick = () => {
+  cutState.side = 'front'; cutState.tool = 'polygon'; startCutting();
+};
+document.getElementById('cut-through').onclick = () => {
+  cutState.side = 'through'; cutState.tool = 'polygon'; startCutting();
+};
+document.getElementById('cut-plane').onclick = () => {
+  cutState.side = 'through';        // eine Ebene kennt keine Vorder- und Rückwand
+  cutState.tool = 'plane';
+  startCutting();
+};
 document.getElementById('cut-reset').onclick = () => { stopCutting(); resetCuts(); };
 
 const ablColor = document.getElementById('abl-color');
@@ -4280,16 +4611,110 @@ window.epviewActions = {
   closeStudy: () => closeMap(),
 };
 
-const cyclicBox = document.getElementById('cyclic');
-if (cyclicBox) cyclicBox.onchange = () => {
-  state.cyclic = cyclicBox.checked;
-  _legendKey = null;
-  drawLegend();
-};
 addEventListener('resize', () => { if (state.mode) layoutLegend(); });
 
+/* Ein Abschnitt zur Zeit, und ein Abschnitt nur dann, wenn er etwas enthält.
+ *
+ * Die Gruppen darin blenden sich selbst aus, wenn sie nichts zu sagen haben
+ * (keine Aktivierungszeiten, keine Punkte, keine Öffnungen). Ein Titel über
+ * einem leeren Abschnitt ist ein Versprechen, hinter dem nichts steht — also
+ * verschwindet er mit. */
+function refreshSections() {
+  for (const section of document.querySelectorAll('.sec')) {
+    const groups = [...section.querySelectorAll('.grp')];
+    const anything = groups.some(g => g.style.display !== 'none');
+    section.hidden = !anything;
+    if (section.hidden) section.open = false;
+  }
+}
+
+function openSection(id) {
+  const wanted = document.getElementById('sec-' + id);
+  if (!wanted || wanted.hidden) return;
+  for (const section of document.querySelectorAll('.sec')) {
+    section.open = section === wanted;
+  }
+}
+
+document.querySelectorAll('.sec > summary').forEach(summary => {
+  summary.addEventListener('click', (event) => {
+    // Aufklappen heißt: die anderen zu. `details` täte das von sich aus nur
+    // mit `name`, und das kennt die WebView im Programm nicht überall.
+    const section = summary.parentElement;
+    if (!section.open) { event.preventDefault(); openSection(section.dataset.sec); }
+  });
+});
+
+/* Auf der Legende ziehen stellt Zeiger und Bandbreite.
+ *
+ * Die Skala ist die Stelle, an der die Frage entsteht — „was ist bei 120 ms
+ * los" liest man an den Farben ab, nicht an einem Schieberegler weiter unten.
+ * Mit Umschalttaste wird die Breite gezogen statt der Mitte, wie auf der
+ * Aktivierungskurve auch. */
+(() => {
+  const ring = document.getElementById('cring');
+  const bar = document.getElementById('cbar');
+  if (!ring || !bar) return;
+
+  const set = (t, wide) => {
+    if (!current || !isLatField((state.mode || '').slice(7))) return;
+    const clamped = Math.max(state.vmin, Math.min(state.vmax, t));
+    if (wide) {
+      state.anim.band = Math.max((state.vmax - state.vmin) / 200,
+                                 Math.abs(clamped - state.anim.t) * 2);
+      const band = document.getElementById('anim-band');
+      if (band) band.value = state.anim.band;
+    } else {
+      stopAnim();
+      state.anim.engaged = true;
+      state.anim.t = clamped;
+      const cursor = document.getElementById('anim-cursor');
+      if (cursor) cursor.value = state.anim.t;
+    }
+    updateAnimReadout();
+    applyColors();
+    _legendKey = null;
+    drawLegend();
+    refreshSkyline();
+  };
+
+  const fromRing = (event) => {
+    const box = ring.getBoundingClientRect();
+    const x = event.clientX - (box.left + box.width / 2);
+    const y = event.clientY - (box.top + box.height / 2);
+    // Winkel ab oben, im Uhrzeigersinn — so, wie der Ring gezeichnet ist.
+    let turn = (Math.atan2(y, x) + Math.PI / 2) / (Math.PI * 2);
+    if (turn < 0) turn += 1;
+    return state.vmin + turn * (state.vmax - state.vmin);
+  };
+  const fromBar = (event) => {
+    const box = bar.getBoundingClientRect();
+    const t = 1 - (event.clientY - box.top) / (box.height || 1);
+    return state.vmin + Math.max(0, Math.min(1, t)) * (state.vmax - state.vmin);
+  };
+
+  for (const [element, read] of [[ring, fromRing], [bar, fromBar]]) {
+    let dragging = false;
+    element.style.cursor = 'pointer';
+    element.addEventListener('pointerdown', (event) => {
+      dragging = true;
+      element.setPointerCapture(event.pointerId);
+      set(read(event), event.shiftKey);
+    });
+    element.addEventListener('pointermove', (event) => {
+      if (dragging) set(read(event), event.shiftKey);
+    });
+    element.addEventListener('pointerup', () => { dragging = false; });
+    element.addEventListener('pointercancel', () => { dragging = false; });
+  }
+})();
+
 document.getElementById('t-swap').onclick = () => swapComparison();
-document.getElementById('t-close').onclick = () => closeMap();
+document.getElementById('t-close').onclick = () => {
+  // Gefragt, nicht getan: eine offene Studie zuzuklappen nimmt Schnitte,
+  // Vergleich und Fenster mit, und der Weg zurück ist, sie neu zu öffnen.
+  if (confirm(T('map.close.confirm') || 'Studie schließen?')) closeMap();
+};
 document.getElementById('t-compare').onclick = () => {
   if (comparison) clearComparison(); else rememberComparison();
 };
@@ -4461,7 +4886,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=08b445dcaa90');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=4ea77b9f51d2');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -4509,7 +4934,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=08b445dcaa90';
+import '../shared/bridge.js?v=4ea77b9f51d2';
 
 /* In der Schale steht "Öffnen" auch oben in der Leiste, für beide Module. Das
  * Menü hier daneben wäre eine zweite Antwort auf dieselbe Frage — die Knöpfe

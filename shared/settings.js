@@ -31,6 +31,9 @@ export const DEFAULTS = {
    * 3D canvas is drawn with alpha anyway, and filling it was a decision taken
    * on the user's behalf. */
   snapshotBackground: 'transparent',
+  //: 'auto' heißt: die Skala folgt der gezeigten Größe. Sonst der Name einer
+  //: festen Skala, für den, der immer dieselbe sehen will.
+  mapColourScale: 'auto',
 };
 
 const listeners = new Set();

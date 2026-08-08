@@ -440,6 +440,164 @@ export function vertsWithinOfRing(positions, adjacency, ringVertices, depthMm) {
  * innen. Funktioniert auch für einen überschlagenen Umriss, den jemand mit
  * zittriger Hand zieht — dort gilt die Regel „ungerade" statt „irgendwie".
  */
+/** Die Fläche entlang eines gezeichneten Umrisses aufschneiden.
+ *
+ * Ganze Dreiecke wegzunehmen kann nur so genau sein wie die Vernetzung: der
+ * Rand springt von Knoten zu Knoten und sieht aus wie eine Säge. Gemessen an
+ * der Demokarte sind das Zacken von ein bis zwei Millimetern — bei einem
+ * Schnitt am Mitralklappenring genau die Größenordnung, um die es geht.
+ *
+ * Hier fallen deshalb die Randdreiecke nicht weg, sondern werden geteilt: wo
+ * eine Kante die gezeichnete Linie kreuzt, entsteht ein neuer Knoten *auf* der
+ * Linie, und der übrig bleibende Teil wird neu vernetzt. Der Rand ist dann die
+ * Linie und nicht die Vernetzung.
+ *
+ * `project(index) -> [x, y]` liefert die Bildschirmlage eines Knotens; für neue
+ * Knoten wird zwischen den Enden interpoliert, was auf dem Schirm dasselbe ist
+ * (die Projektion ist auf einer Kante linear in homogenen Koordinaten und über
+ * die kurze Strecke einer Dreieckskante nicht unterscheidbar).
+ *
+ * Zurück kommen die neuen Positionen, die neuen Dreiecke und für jeden neuen
+ * Knoten seine Herkunft (`[a, b, t]`) — damit der Aufrufer Skalare, Farben und
+ * alles andere, was je Knoten hängt, genauso interpolieren kann.
+ */
+export function clipByPolygon(positions, faces, project, polygon, options = {}) {
+  const { keep = 'outside', faceInside = null } = options;
+  if (!polygon || polygon.length < 3) {
+    return { positions, faces, parents: [], removedFaces: 0 };
+  }
+  const inside = new Map();
+  const isInside = (index) => {
+    if (!inside.has(index)) {
+      const at = project(index);
+      inside.set(index, at ? pointInPolygon(at[0], at[1], polygon) : false);
+    }
+    return inside.get(index);
+  };
+
+  const out = Array.from(positions);
+  const parents = [];
+  const cuts = new Map();                 // Kantenschlüssel -> neuer Knoten
+
+  const crossing = (a, b) => {
+    const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+    if (cuts.has(key)) return cuts.get(key);
+    const from = project(a), to = project(b);
+    if (!from || !to) return null;
+    /* Der Übergang wird gesucht, nicht gerechnet: der Umriss ist ein beliebiges
+     * Vieleck, und die Grenze zu suchen kostet acht Halbierungen — ein
+     * Zehntel Pixel, und kein Sonderfall für Ecken, Selbstschnitte oder
+     * Umrisse, die eine Kante mehrfach kreuzen. */
+    let lo = 0, hi = 1;
+    const startInside = pointInPolygon(from[0], from[1], polygon);
+    for (let i = 0; i < 12; i++) {
+      const mid = (lo + hi) / 2;
+      const x = from[0] + (to[0] - from[0]) * mid;
+      const y = from[1] + (to[1] - from[1]) * mid;
+      if (pointInPolygon(x, y, polygon) === startInside) lo = mid; else hi = mid;
+    }
+    const t = (lo + hi) / 2;
+    const index = out.length / 3;
+    for (let axis = 0; axis < 3; axis++) {
+      out.push(positions[a * 3 + axis]
+               + (positions[b * 3 + axis] - positions[a * 3 + axis]) * t);
+    }
+    parents.push([a, b, t]);
+    cuts.set(key, index);
+    return index;
+  };
+
+  const kept = [];
+  //: Die Schnittkante selbst: Paare von Knoten, die auf der gezogenen Linie
+  //: liegen. Aus ihnen wird der weiße Strich — als Linie gezeichnet und nicht
+  //: als eingefärbte Knoten, denn eine Vertexfarbe verläuft in die Nachbarn
+  //: hinein und wird zum Band statt zur Kante.
+  const seam = [];
+  let removedFaces = 0;
+  for (let f = 0; f < faces.length; f += 3) {
+    const tri = [faces[f], faces[f + 1], faces[f + 2]];
+    if (faceInside && !faceInside(f / 3)) { kept.push(...tri); continue; }
+    const flags = tri.map(isInside);
+    const count = flags[0] + flags[1] + flags[2];
+    const wanted = keep === 'outside' ? 0 : 3;
+    if (count === wanted) { kept.push(...tri); continue; }
+    if (count === (keep === 'outside' ? 3 : 0)) { removedFaces++; continue; }
+
+    // Gemischt: die Ecken so drehen, dass die einzelne auf der einen Seite
+    // vorn steht — dann sind es nur zwei Fälle statt sechs.
+    const dropSide = keep === 'outside';
+    const single = [0, 1, 2].find(i => flags[i] !== flags[(i + 1) % 3]
+                                     && flags[i] !== flags[(i + 2) % 3]);
+    if (single === undefined) { kept.push(...tri); continue; }
+    const a = tri[single], b = tri[(single + 1) % 3], c = tri[(single + 2) % 3];
+    const ab = crossing(a, b), ac = crossing(a, c);
+    if (ab == null || ac == null) { kept.push(...tri); continue; }
+
+    seam.push([ab, ac]);
+    if (flags[single] === dropSide) {
+      // Die einzelne Ecke fällt weg, ein Viereck bleibt.
+      kept.push(ab, b, c, ab, c, ac);
+      removedFaces++;
+    } else {
+      // Die einzelne Ecke bleibt, ein Dreieck bleibt.
+      kept.push(a, ab, ac);
+      removedFaces++;
+    }
+  }
+
+  const Faces = faces instanceof Uint32Array ? Uint32Array : Array;
+  return {
+    positions: Float32Array.from(out),
+    faces: Faces === Array ? kept : Uint32Array.from(kept),
+    parents,
+    seam,
+    removedFaces,
+  };
+}
+
+/** Welche Dreiecke überhaupt geschnitten werden dürfen.
+ *
+ * Je *Dreieck* entschieden, nicht je Knoten. Ein Knoten hat eine gemittelte
+ * Normale, und über eine gewölbte Wand kippt die von Knoten zu Knoten hin und
+ * her — die Auswahl wird dann sprenklig und aus einem Schnitt werden viele
+ * kleine Löcher. Die Normale eines Dreiecks kippt nicht.
+ *
+ * `toCamera` zeigt von der Fläche zur Kamera; `side` ist 'front' (die
+ * zugewandte Wand), 'back' oder 'through' (beide).
+ */
+export function facingTriangles(positions, faces, cameraAt, side = 'front') {
+  const count = faces.length / 3;
+  const may = new Uint8Array(count);
+  if (side === 'through') { may.fill(1); return may; }
+  const wantFront = side !== 'back';
+  for (let f = 0; f < count; f++) {
+    const a = faces[f * 3] * 3, b = faces[f * 3 + 1] * 3, c = faces[f * 3 + 2] * 3;
+    const abx = positions[b] - positions[a], aby = positions[b + 1] - positions[a + 1],
+          abz = positions[b + 2] - positions[a + 2];
+    const acx = positions[c] - positions[a], acy = positions[c + 1] - positions[a + 1],
+          acz = positions[c + 2] - positions[a + 2];
+    const nx = aby * acz - abz * acy, ny = abz * acx - abx * acz, nz = abx * acy - aby * acx;
+    // Von der Mitte des Dreiecks zur Kamera.
+    const cx = (positions[a] + positions[b] + positions[c]) / 3;
+    const cy = (positions[a + 1] + positions[b + 1] + positions[c + 1]) / 3;
+    const cz = (positions[a + 2] + positions[b + 2] + positions[c + 2]) / 3;
+    const dot = nx * (cameraAt[0] - cx) + ny * (cameraAt[1] - cy) + nz * (cameraAt[2] - cz);
+    may[f] = (dot > 0) === wantFront ? 1 : 0;
+  }
+  return may;
+}
+
+/** Punkt im Vieleck, ungerade Kreuzungszahl. */
+function pointInPolygon(x, y, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [xi, yi] = polygon[i], [xj, yj] = polygon[j];
+    const straddles = (yi > y) !== (yj > y);
+    if (straddles && x < ((xj - xi) * (y - yi)) / (yj - yi + 1e-12) + xi) inside = !inside;
+  }
+  return inside;
+}
+
 /** Vertexnormalen aus der *ungeschnittenen* Fläche.
  *
  * Nicht aus der gezeichneten Geometrie nehmen: die trägt nach einem Schnitt die
