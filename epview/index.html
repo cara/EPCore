@@ -15,9 +15,9 @@
   } catch (e) { /* Speicher abgeschaltet */ }
 </script>
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/theme.js?v=4ea77b9f51d2"></script>
-<script type="module" src="../shared/settings.js?v=4ea77b9f51d2"></script>
-<script type="module" src="../shared/i18n.js?v=4ea77b9f51d2"></script>
+<script type="module" src="../shared/theme.js?v=abd75daee5c4"></script>
+<script type="module" src="../shared/settings.js?v=abd75daee5c4"></script>
+<script type="module" src="../shared/i18n.js?v=abd75daee5c4"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -1111,7 +1111,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=4ea77b9f51d2",
+    "three": "../vendor/three/three.module.js?v=abd75daee5c4",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -1121,14 +1121,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import epcoreTheme from '../shared/theme.js?v=4ea77b9f51d2';
-import * as EP from './epconv.js?v=4ea77b9f51d2';
-import * as EPM from './epmetrics.js?v=4ea77b9f51d2';
-import * as EPCV from './epconduction.js?v=4ea77b9f51d2';
-import * as EPA from './epablation.js?v=4ea77b9f51d2';
-import * as EPSave from '../shared/save.js?v=4ea77b9f51d2';
-import * as EPO from './epopenep.js?v=4ea77b9f51d2';
-import { LUTS, UNMAPPED, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=4ea77b9f51d2';
+import epcoreTheme from '../shared/theme.js?v=abd75daee5c4';
+import * as EP from './epconv.js?v=abd75daee5c4';
+import * as EPM from './epmetrics.js?v=abd75daee5c4';
+import * as EPCV from './epconduction.js?v=abd75daee5c4';
+import * as EPA from './epablation.js?v=abd75daee5c4';
+import * as EPSave from '../shared/save.js?v=abd75daee5c4';
+import * as EPO from './epopenep.js?v=abd75daee5c4';
+import { LUTS, UNMAPPED, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=abd75daee5c4';
 
 /* =====================================================================
  *  Color lookup tables
@@ -3284,7 +3284,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=4ea77b9f51d2'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=abd75daee5c4'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -3558,7 +3558,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=4ea77b9f51d2');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=abd75daee5c4');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -4148,6 +4148,23 @@ function drawCutOutline() {
   const ctx = canvas.getContext('2d');
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
   ctx.clearRect(0, 0, innerWidth, innerHeight);
+  if (cutState.drawing && cutState.tool === 'plane' && cutState.points.length === 1
+      && cutState.aim) {
+    // Die halbe Bildfläche, die fallen würde — schraffiert, nicht gefüllt: die
+    // Karte darunter muss sichtbar bleiben, sonst sagt die Vorschau nichts.
+    const half = planePolygon(cutState.points[0], cutState.aim);
+    ctx.beginPath();
+    half.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+    ctx.fillStyle = themeToken('--accent-wash') || 'rgba(69,198,218,0.12)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cutState.points[0][0], cutState.points[0][1]);
+    ctx.lineTo(cutState.aim[0], cutState.aim[1]);
+    ctx.strokeStyle = themeToken('--accent') || '#45c6da';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
   if (cutState.drawing) drawOutline(ctx, cutState.points, { dashed: true, handles: true });
   const edited = cutState.shapes[cutState.editing];
   if (edited) drawOutline(ctx, edited.points, { dashed: false, handles: true });
@@ -4155,6 +4172,14 @@ function drawCutOutline() {
 
 function startCutting() {
   if (!current) { alert(T('map.msg.load.first')); return; }
+  /* Solange gezeichnet wird, liegt die Zeichenfläche über den Tafeln.
+   *
+   * Sie lag darunter (8 gegen 10), und ein Klick über der Kennzahlenspalte oder
+   * der Legende setzte keinen Punkt — er traf die Tafel. Für den Zeichnenden
+   * sieht das aus, als hätte das Werkzeug den Klick verschluckt, und der Umriss
+   * bekommt eine Ecke, die er nicht wollte. Die Werkzeugleiste bleibt oben
+   * drüber (16), damit sich das Werkzeug jederzeit wieder weglegen lässt. */
+  cutOverlay().style.zIndex = '14';
   endEditing();
   cutState.drawing = true;
   cutState.points = [];
@@ -4178,6 +4203,8 @@ function stopCutting() {
   cutState.drawing = false;
   cutState.drag = -1;
   cutState.points = [];
+  cutState.aim = null;
+  cutOverlay().style.zIndex = '';
   controls.enabled = true;
   document.getElementById('t-cut').classList.remove('on');
   if (cutState.editing < 0) {
@@ -4268,6 +4295,29 @@ function rebuildCuts() {
     for (const pair of cut.seam) seams.push(pair);
     positions = cut.positions;
     faces = cut.faces;
+  }
+
+  /* Ein Schnitt, der alles nimmt, ist keiner.
+   *
+   * Gemeldet: „ab dem dritten Punkt verschwindet die gesamte Anatomie, beim
+   * Ebenenwerkzeug sofort". Hier nicht nachstellbar — nicht in Chromium, nicht
+   * in WebKit, nicht im Rahmen der Schale, nicht bei Pixelverhältnis 2. Was
+   * sich unabhängig davon sagen lässt: eine leere Karte ist nie das, was jemand
+   * wollte. Der Schnitt wird dann verworfen und sagt, was er vorhatte — mit
+   * Zahlen, damit der nächste Bericht eine Ursache hat statt eines Eindrucks. */
+  const leftOver = faces.length / 3;
+  const started = current.facesOriginal.length / 3;
+  if (started > 0 && leftOver < started * 0.02) {
+    console.warn('[epview] Schnitt verworfen: von %d Dreiecken blieben %d übrig '
+                 + '(%d Umriss(e), Seite %s)', started, leftOver, cutState.shapes.length,
+                 (cutState.shapes[cutState.shapes.length - 1] || {}).side);
+    cutState.shapes.pop();
+    if (typeof epcoreNotify === 'function') {
+      epcoreNotify(T('map.cut.everything') || 'Der Schnitt hätte die ganze Karte '
+                   + 'genommen und wurde verworfen.');
+    }
+    rebuildCuts();
+    return;
   }
 
   current.positions = positions;
@@ -4431,6 +4481,17 @@ cutOverlay().addEventListener('pointerdown', (event) => {
 });
 
 cutOverlay().addEventListener('pointermove', (event) => {
+  /* Bei der Ebene zeigt der Zeiger schon, was fallen würde.
+   *
+   * Welche Seite fällt, ist aus zwei Klicks nicht zu erraten — und wer es
+   * falsch errät, sieht die ganze Karte verschwinden. Also mitzeichnen: die
+   * Linie, die Richtung, und die Fläche, die weg wäre. */
+  if (cutState.drawing && cutState.tool === 'plane' && cutState.points.length === 1
+      && cutState.drag < 0) {
+    cutState.aim = [event.clientX, event.clientY];
+    drawCutOutline();
+    return;
+  }
   if (!cutState.drawing || cutState.drag < 0) return;
   event.preventDefault();
   cutState.points[cutState.drag] = [event.clientX, event.clientY];
@@ -4886,7 +4947,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=4ea77b9f51d2');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=abd75daee5c4');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -4934,7 +4995,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=4ea77b9f51d2';
+import '../shared/bridge.js?v=abd75daee5c4';
 
 /* In der Schale steht "Öffnen" auch oben in der Leiste, für beide Module. Das
  * Menü hier daneben wäre eine zweite Antwort auf dieselbe Frage — die Knöpfe
