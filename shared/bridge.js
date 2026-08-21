@@ -29,7 +29,6 @@ const OWNER = {
   exportCSV: '/eptrace',
   togglePlay: '/eptrace',
   measureIntervals: '/eptrace',
-  toggleStim: '/eptrace',
   toggleTheme: '/eptrace',
   openAnonymizer: '/eptrace',
   // The cross-link: a map point names a moment, the signal view shows it.
@@ -91,6 +90,61 @@ function api() {
 }
 
 const hasNativeHost = () => api() !== null;
+
+/* Was schiefgeht, in das Protokoll der Anwendung.
+ *
+ * Eine WebView hat keine Konsole, in die jemand schauen könnte. Zwei Fehler
+ * dieser Sitzung waren genau deshalb unsichtbar: eine Menü-Aktion, die in einem
+ * Ereignis-Zuhörer `openPath is not defined` warf, und ein Schnitt, der auf
+ * einem Rechner die Karte leerte und sonst nirgends. Beide wären eine Zeile im
+ * Protokoll gewesen.
+ *
+ * Nur im Fenster, nicht im Browser: dort gibt es eine Konsole, und ein zweiter
+ * Weg dorthin wäre Lärm. */
+(() => {
+  const native = api();
+  if (!native || typeof native.report !== 'function') return;
+  const send = (level, text) => {
+    try { native.report(level, String(text).slice(0, 2000), location.pathname); }
+    catch { /* das Protokollieren darf nie das sein, was etwas kaputtmacht */ }
+  };
+  addEventListener('error', (event) => {
+    send('error', `${event.message} (${event.filename}:${event.lineno})`);
+  });
+  addEventListener('unhandledrejection', (event) => {
+    send('error', `unhandled rejection: ${event.reason && event.reason.message || event.reason}`);
+  });
+  /* console.warn('%d von %d', a, b) ist die übliche Schreibweise, und ohne das
+   * hier stünde im Protokoll wörtlich „%d von %d" mit den Zahlen hinten dran.
+   * Ein Protokoll, das man erst zusammensetzen muss, ist ein schlechteres
+   * Protokoll — und es ist der einzige Weg, auf dem das Fenster etwas sagt. */
+  const asText = (value) => (value && value.message) ? value.message : String(value);
+  const merge = (args) => {
+    const [first, ...rest] = args;
+    if (typeof first !== 'string' || !/%[sdifoOc]/.test(first)) {
+      return args.map(asText).join(' ');
+    }
+    let next = 0;
+    const filled = first.replace(/%([sdifoOc%])/g, (match, kind) => {
+      if (kind === '%') return '%';
+      if (kind === 'c') { next++; return ''; }        // Stilangabe, kein Wert
+      if (next >= rest.length) return match;
+      const value = rest[next++];
+      if (kind === 'd' || kind === 'i') return String(Math.trunc(Number(value)));
+      if (kind === 'f') return String(Number(value));
+      return asText(value);
+    });
+    return [filled, ...rest.slice(next).map(asText)].join(' ');
+  };
+
+  for (const level of ['error', 'warn']) {
+    const original = console[level].bind(console);
+    console[level] = (...args) => {
+      original(...args);
+      send(level === 'warn' ? 'warning' : 'error', merge(args));
+    };
+  }
+})();
 
 /* --- the backend ---------------------------------------------------------- */
 
@@ -157,6 +211,25 @@ function localFile(root, entry) {
   };
 }
 
+/** Ein EnSite-Velocity-Studienarchiv, gelesen und als PLY zurück.
+ *
+ * Velocity packt die Studie in ein geteiltes gzip-tar und legt darin eine
+ * Punktwolke ab. Ein Browser kann beides nicht: das Archiv nicht auspacken und
+ * die Oberfläche nicht rekonstruieren — der Leser dafür steht in Python. Ohne
+ * Backend gibt es hier deshalb nichts zu holen, und `null` sagt genau das: auf
+ * der öffentlichen Seite bleibt es bei „das kann nur die Anwendung".
+ */
+async function velocityMesh(path) {
+  if (!await hasBackend()) return null;
+  const response = await fetch('/api/velocity/mesh?path=' + encodeURIComponent(path));
+  if (!response.ok) {
+    let detail = 'HTTP ' + response.status;
+    try { detail = (await response.json()).detail || detail; } catch { /* kein JSON */ }
+    throw new Error(detail);
+  }
+  return response.arrayBuffer();
+}
+
 /** Where a map point falls in the recording, or null if nothing is calibrated.
  *
  * The caller must not invent a fallback: a jump computed from an offset nobody
@@ -186,10 +259,23 @@ function report(message) {
 /** Shell only: which pane claimed which action, and what could not be delivered yet. */
 const claimed = Object.create(null);
 const queued = [];
+/** Panes whose page has actually announced itself. */
+const announced = new Set();
 
+/* A frame that exists is not a frame that can listen.
+ *
+ * `contentWindow` is there the moment the iframe element is — pointing at
+ * about:blank, because the module has not loaded yet. Posting to it succeeded,
+ * so nothing was queued, and the message went to a document that would be
+ * replaced a moment later. Opening a study from the start tab therefore did
+ * nothing the first time and worked the second, when the frame was already
+ * there: the difference the user sees, and no error anywhere.
+ *
+ * The claim a module sends on registering is the only honest sign that
+ * somebody is home. Until it arrives, the action waits in the queue. */
 function deliver(pane, action, payload) {
   const frame = window.epcoreFrames?.[pane];
-  if (!frame?.contentWindow) return false;
+  if (!frame?.contentWindow || !announced.has(pane)) return false;
   frame.contentWindow.postMessage({ type: MESSAGE, action, payload }, window.location.origin);
   return true;
 }
@@ -233,6 +319,7 @@ const epcore = {
    * each view is a second answer to a question already answered. */
   inShell: () => shell() !== null,
   locate,
+  velocityMesh,
   localFiles,
   localFile,
   hasBackend,
@@ -334,6 +421,7 @@ window.addEventListener('message', (event) => {
   }
   if (event.data.type === 'epcore.claim' && isShell()) {
     const pane = event.data.src?.startsWith('/epview') ? 'epview' : 'eptrace';
+    announced.add(pane);
     for (const action of event.data.actions) claimed[action] = pane;
     for (let i = queued.length - 1; i >= 0; i--) {
       if (queued[i].pane === pane && deliver(pane, queued[i].action, queued[i].payload)) {

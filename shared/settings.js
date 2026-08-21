@@ -34,6 +34,11 @@ export const DEFAULTS = {
   //: 'auto' heißt: die Skala folgt der gezeigten Größe. Sonst der Name einer
   //: festen Skala, für den, der immer dieselbe sehen will.
   mapColourScale: 'auto',
+
+  /* Der Hinweis, dass ein Ordner mehrere Aufzeichnungen enthält und oben links
+   * gewechselt wird. Einmal gelesen ist er verstanden — wer ihn wegklickt, will
+   * ihn nicht bei jedem Öffnen wiedersehen. */
+  showManyRecordingsHint: true,
 };
 
 const listeners = new Set();

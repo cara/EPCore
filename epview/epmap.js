@@ -32,6 +32,15 @@ export const LUTS = {
 
 export const UNMAPPED = [128, 128, 128];
 
+/* Gewebe, dessen Zeit außerhalb des Fensters liegt.
+ *
+ * Nicht dieselbe Farbe wie UNMAPPED: dort steht kein Wert, hier steht einer,
+ * nur nicht in der gezeigten Spanne. Und nicht der Rand der Farbskala, was es
+ * vorher war — eine Stelle, die 40 ms nach dem Fensterende aktiviert, sah
+ * genauso aus wie die späteste Stelle *im* Fenster, und die Karte behauptete
+ * damit etwas Falsches über den Ort der Aktivierung. */
+export const OUTSIDE_WINDOW = [92, 99, 104];
+
 // sRGB(0..255) -> linear float, so vertex colors look right under physical lights.
 export function srgbToLinear(c) { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
 

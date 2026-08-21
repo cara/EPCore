@@ -318,14 +318,23 @@ export function activation(positions, lat) {
  * Vorderwand und ein grobes am Dach würden sonst behaupten, vorne aktiviere
  * dreimal so viel Gewebe.
  */
-export function activationHistogram(positions, faces, lat, bins = 60) {
+export function activationHistogram(positions, faces, lat, bins = 60, range = null) {
   const areas = triangleAreas(positions, faces);
   let lo = Infinity, hi = -Infinity;
-  for (let i = 0; i < lat.length; i++) {
-    const v = lat[i];
-    if (!Number.isFinite(v)) continue;
-    if (v < lo) lo = v;
-    if (v > hi) hi = v;
+  if (range && Number.isFinite(range.lo) && Number.isFinite(range.hi) && range.hi > range.lo) {
+    /* Das Fenster gibt die Spanne vor. Zieht jemand es auf 5…100 ms, ist das
+     * die Frage „wieviel Fläche aktiviert in diesen 95 ms" — und nicht mehr
+     * die nach dem ganzen Schlag. Vorher lief die Kurve über den gesamten
+     * Datenbereich weiter, während die Karte daneben nur das Fenster zeigte:
+     * zwei Zeitachsen für einen Blick. */
+    lo = range.lo; hi = range.hi;
+  } else {
+    for (let i = 0; i < lat.length; i++) {
+      const v = lat[i];
+      if (!Number.isFinite(v)) continue;
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
   }
   if (!(hi > lo)) return { bins: [], lo: null, hi: null, totalAreaMm2: 0 };
 
@@ -348,6 +357,10 @@ export function activationHistogram(positions, faces, lat, bins = 60) {
       if (v > max) max = v;
     }
     if (known < 3) continue;                 // teilweise unbelegt: nicht raten
+    // Ganz außerhalb der Spanne: zählt nicht mit. Sonst läge die gesamte
+    // Fläche eines Dreiecks, das 200 ms nach dem Fenster aktiviert, auf dem
+    // letzten Balken und machte dort einen Berg, den es nicht gibt.
+    if (max < lo || min > hi) continue;
     total += area;
     const from = Math.max(0, Math.min(bins - 1, Math.floor((min - lo) / width)));
     const to = Math.max(0, Math.min(bins - 1, Math.floor((max - lo) / width)));

@@ -12,8 +12,8 @@
  *  Parameter injiziert, damit das Modul ohne Bundler testbar bleibt.
  * ===================================================================== */
 
-import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=abd75daee5c4';
-import { readVisitag, summarise as summariseAblation } from './epablation.js?v=abd75daee5c4';
+import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=8e1f1b561c45';
+import { readVisitag, summarise as summariseAblation } from './epablation.js?v=8e1f1b561c45';
 
 const SENTINEL = 1e4;
 
@@ -753,6 +753,72 @@ export async function parseRhythmiaFiles(files, onProgress) {
  *  EnSite (NavX / Velocity / Precision)
  * ===================================================================== */
 
+/** Zahlen zu Dreiergruppen, gleich ob sie in Zeilen oder am Stück stehen.
+ *
+ * Ein echter Export schreibt ein Tripel je Zeile. Steht alles in einer Zeile,
+ * hat das genau eine Lesart — 3k Zahlen sind k Tripel — und die Zeilenlogik
+ * machte daraus stillschweigend *ein* Tripel und warf den Rest weg. Das ist
+ * kein Format, über das man raten müsste, sondern eines, das man lesen kann.
+ */
+function tripleRows(rows) {
+  if (rows.length === 1 && rows[0].length > 3 && rows[0].length % 3 === 0) {
+    const flat = rows[0], out = [];
+    for (let i = 0; i < flat.length; i += 3) out.push([flat[i], flat[i+1], flat[i+2]]);
+    return out;
+  }
+  return rows;
+}
+
+/** Dreiecksindizes aus den `<Polygons>`-Zeilen, geprüft gegen die Vertexzahl.
+ *
+ * EnSite zählt ab 1: in einem echten Export (fixtures/maps/EnSiteExport.xml)
+ * laufen die Indizes 1…801 bei 801 Vertices. Blind eins abzuziehen ist
+ * trotzdem gefährlich, denn eine Datei, die nicht so aussieht, wird dabei
+ * lautlos zu Unsinn: aus Index 0 wird −1, als Uint32 4294967295, und WebGL
+ * bricht den Zeichenaufruf ab, ohne dass jemand davon erfährt. Genau so lag
+ * eine Karte mit einem einzigen Vertex in der Szene, und der Leser meldete
+ * Erfolg.
+ *
+ * Also nachrechnen. Passt die Zählung ab 1, wird sie genommen. Passt nur die
+ * ab 0, wird sie genommen und gesagt. Passt keine, verweigert der Lauf mit den
+ * Zahlen, um die es geht — eine kaputte Karte ist schlechter als keine.
+ */
+function triangleIndices(rows, vertexCount, volIdx = 0) {
+  const usable = rows.filter(r => r.length >= 3);
+  if (!usable.length) {
+    throw new Error(`EnSite: Volume ${volIdx} hat keine brauchbaren Polygonzeilen `
+                  + `(erwartet drei Indizes je Zeile).`);
+  }
+  let lowest = Infinity, highest = -Infinity;
+  for (const row of usable) {
+    for (let c = 0; c < 3; c++) {
+      const value = Math.trunc(row[c]);
+      if (value < lowest) lowest = value;
+      if (value > highest) highest = value;
+    }
+  }
+  let base;
+  if (lowest >= 1 && highest <= vertexCount) base = 1;
+  else if (lowest >= 0 && highest <= vertexCount - 1) base = 0;
+  else {
+    throw new Error(`EnSite: Volume ${volIdx} nennt Dreiecksecken ${lowest}…${highest}, `
+                  + `hat aber ${vertexCount} Vertices. Weder ab 1 noch ab 0 gezählt `
+                  + `ergibt das eine Fläche — die Datei ist nicht die, für die sie `
+                  + `sich ausgibt.`);
+  }
+  if (base === 0) {
+    console.warn('[epconv] EnSite: Volume %d zählt Dreiecksecken ab 0, nicht ab 1 '
+                 + 'wie sonst. Gelesen wie geschrieben.', volIdx);
+  }
+  const tris = new Uint32Array(usable.length * 3);
+  for (let i = 0; i < usable.length; i++) {
+    tris[i*3]     = Math.trunc(usable[i][0]) - base;
+    tris[i*3 + 1] = Math.trunc(usable[i][1]) - base;
+    tris[i*3 + 2] = Math.trunc(usable[i][2]) - base;
+  }
+  return tris;
+}
+
 export function parseEnSite(text, dxlText = null) {
   const dp = getDOMParser();
   if (!dp) throw new Error('DOMParser nicht verfügbar (Browser erforderlich).');
@@ -766,7 +832,7 @@ export function parseEnSite(text, dxlText = null) {
   for (const vol of iterTag(root, 'Volume')) {
     const vEl = firstTag(vol, 'Vertices');
     if (!vEl || !vEl.textContent) { volIdx++; continue; }
-    const vr = textToRows(vEl.textContent);
+    const vr = tripleRows(textToRows(vEl.textContent));
     if (!vr.length || vr[0].length < 3) { volIdx++; continue; }
     const positions = new Float32Array(vr.length * 3);
     for (let i = 0; i < vr.length; i++) { positions[i*3]=vr[i][0]; positions[i*3+1]=vr[i][1]; positions[i*3+2]=vr[i][2]; }
@@ -783,9 +849,8 @@ export function parseEnSite(text, dxlText = null) {
 
     const pEl = firstTag(vol, 'Polygons');
     if (!pEl || !pEl.textContent) { volIdx++; continue; }
-    const pr = textToRows(pEl.textContent);
-    const allTris = new Uint32Array(pr.length * 3);
-    for (let i = 0; i < pr.length; i++) { allTris[i*3]=pr[i][0]-1; allTris[i*3+1]=pr[i][1]-1; allTris[i*3+2]=pr[i][2]-1; } // 1-basiert
+    const pr = tripleRows(textToRows(pEl.textContent));
+    const allTris = triangleIndices(pr, positions.length / 3, volIdx);
 
     let mapData = null;
     const mEl = firstTag(vol, 'Map_data');

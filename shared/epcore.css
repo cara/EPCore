@@ -318,6 +318,27 @@ input[type=file]::file-selector-button {
   min-height: 24px;
 }
 
+/* Ein `select` in nativer Darstellung nimmt die Mindesthöhe nicht an: WebKit
+ * bemisst es aus der Schriftgröße und blieb bei 19–23 px, gemessen an der
+ * Sprachwahl, den Zeitachsen in EPTrace und der Systemwahl im Anonymisierer.
+ * Chromium hielt sich daran, deshalb fiel es nie auf — und das Fenster der
+ * Anwendung ist WebKit. Erst ohne die native Darstellung greift die Regel.
+ *
+ * Der Pfeil kommt dann von hier, sonst verlöre das Feld sein Kennzeichen. Als
+ * eingebettetes SVG, weil `static/` ohne Netz auskommen muss. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 22px;
+  background-image: url("data:image/svg+xml;charset=utf-8,\
+%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E\
+%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238fa3b0' stroke-width='1.5' \
+stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  background-size: 10px 6px;
+}
+
 /* --- motion --------------------------------------------------------------- */
 /* Transitions here are decoration. For anyone who has asked the system not to
  * animate, decoration is not worth the vestibular cost. */

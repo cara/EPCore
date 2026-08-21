@@ -15,9 +15,9 @@
   } catch (e) { /* Speicher abgeschaltet */ }
 </script>
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/theme.js?v=abd75daee5c4"></script>
-<script type="module" src="../shared/settings.js?v=abd75daee5c4"></script>
-<script type="module" src="../shared/i18n.js?v=abd75daee5c4"></script>
+<script type="module" src="../shared/theme.js?v=8e1f1b561c45"></script>
+<script type="module" src="../shared/settings.js?v=8e1f1b561c45"></script>
+<script type="module" src="../shared/i18n.js?v=8e1f1b561c45"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -229,7 +229,12 @@
     transition: border-color 0.15s;
   }
   select:hover { border-color: var(--line-strong); }
-  select:focus { outline: none; border-color: var(--accent-dim); }
+  /* Kein `outline: none` hier. Der Ring gehört der Tastatur, und die
+     gemeinsame Datei nimmt ihn bei Mausfokus schon selbst weg
+     (`:focus:not(:focus-visible)`). Diese Regel war spezifischer und hat
+     ihn wieder abgeräumt — in der Karte kam man mit der Tabulatortaste
+     auf ein Auswahlfeld, das nicht sagte, dass es dran ist. */
+  select:focus { border-color: var(--accent-dim); }
   select option { background: var(--panel-solid); }
 
   .seg { display: flex; gap: 4px; padding: 4px; }
@@ -252,7 +257,7 @@
     background: var(--field);
     border: 1px solid var(--line); border-radius: 7px; padding: 7px 8px;
   }
-  input[type=number]:focus { outline: none; border-color: var(--accent-dim); }
+  input[type=number]:focus { border-color: var(--accent-dim); }
 
   input[type=range] {
     width: 100%; appearance: none; height: 3px; border-radius: 2px;
@@ -335,6 +340,13 @@
     font-family: var(--mono); font-size: 10.5px; color: var(--text); text-align: left;
   }
   .ticks span { line-height: 1; }
+  #legend-outside { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+  #legend-outside[hidden] { display: none; }
+  #legend-outside .swatch {
+    width: 10px; height: 10px; border-radius: 2px; flex: none;
+    border: 1px solid var(--line);
+  }
+
   .ticks span small { display: block; color: var(--muted); font-size: 8.5px; letter-spacing: 0.15em; }
   #legend .cap {
     margin-top: 10px; text-align: center; font-family: var(--mono);
@@ -468,9 +480,7 @@
   }
   @keyframes rec-pulse { 50% { opacity: 0.45; } }
 
-  #rec-dot { cursor: pointer; visibility: hidden; }
-  #rec-dot.on { visibility: visible; }
-  #studypick {
+    #studypick {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
     z-index: 30; display: none; padding: 16px 18px; min-width: 320px;
     max-width: min(560px, 92vw); max-height: 80vh; overflow: auto;
@@ -843,7 +853,6 @@
        Ende, das jemand vorher kennt. -->
   <button class="tool" id="t-rec" data-i18n-keep-label
           data-i18n-title="map.rec.free.title">● REC</button>
-  <span class="tool" id="rec-dot" style="color:var(--warn)">● REC</span>
   <!-- Ganz rechts und nur ein Kreuz: Schließen ist die einzige Aktion hier, die
        etwas wegnimmt, und sie steht dort, wo man sie erwartet — nicht zwischen
        den Werkzeugen, wo sie sich anklicken lässt, während man etwas anderes
@@ -1021,7 +1030,11 @@
   <div class="grp" id="grp-trim" style="display:none">
       <label><span data-i18n="map.trim"></span>
         <span id="trim-note" style="float:right;color:var(--accent-dim);font-size:10px"></span></label>
-      <div class="field"><small data-i18n="map.trim.depth"></small>
+      <!-- Die Tiefe gilt den erkannten Öffnungen (Venenstümpfe, Klappenebene),
+           nicht dem gezeichneten Schnitt. Ohne Öffnung bewegt sie nichts, also
+           steht sie dort auch nicht — ein Regler ohne Wirkung ist ein Versprechen,
+           hinter dem nichts steht. -->
+      <div class="field" id="trim-depth-row" hidden><small data-i18n="map.trim.depth"></small>
         <span id="trim-depth-val" style="color:var(--accent-dim)">8 mm</span>
         <input type="range" id="trim-depth" min="1" max="30" step="1" value="8"></div>
       <div class="toggles" id="trim-list" style="margin-top:6px"></div>
@@ -1067,6 +1080,12 @@
        nichts passiert. Deshalb auf Ansage rund. -->
   <canvas id="cring" width="180" height="180" hidden></canvas>
   <div class="cap" id="legend-cap">Voltage · mV</div>
+    <!-- Sagt, was das neutrale Grau auf der Karte bedeutet. Ohne diese
+         Zeile ist eine graue Fläche eine Frage: fehlt dort ein Wert oder
+         liegt er nur außerhalb der Spanne? -->
+    <div class="cap" id="legend-outside" hidden>
+      <span class="swatch"></span><span data-i18n="map.legend.outside"></span>
+    </div>
 </div>
 
 <div id="egm" role="dialog" aria-label="Elektrogramm">
@@ -1111,7 +1130,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=abd75daee5c4",
+    "three": "../vendor/three/three.module.js?v=8e1f1b561c45",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -1121,14 +1140,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import epcoreTheme from '../shared/theme.js?v=abd75daee5c4';
-import * as EP from './epconv.js?v=abd75daee5c4';
-import * as EPM from './epmetrics.js?v=abd75daee5c4';
-import * as EPCV from './epconduction.js?v=abd75daee5c4';
-import * as EPA from './epablation.js?v=abd75daee5c4';
-import * as EPSave from '../shared/save.js?v=abd75daee5c4';
-import * as EPO from './epopenep.js?v=abd75daee5c4';
-import { LUTS, UNMAPPED, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=abd75daee5c4';
+import epcoreTheme from '../shared/theme.js?v=8e1f1b561c45';
+import * as EP from './epconv.js?v=8e1f1b561c45';
+import * as EPM from './epmetrics.js?v=8e1f1b561c45';
+import * as EPCV from './epconduction.js?v=8e1f1b561c45';
+import * as EPA from './epablation.js?v=8e1f1b561c45';
+import * as EPSave from '../shared/save.js?v=8e1f1b561c45';
+import * as EPO from './epopenep.js?v=8e1f1b561c45';
+import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=8e1f1b561c45';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1196,6 +1215,22 @@ function makeControls() {
   const c = new OrbitControls(camera, renderer.domElement);
   c.enableDamping = true; c.dampingFactor = 0.08; c.rotateSpeed = 0.85; c.autoRotateSpeed = 1.1;
   c.addEventListener('change', onControlsChange);   // hält den Hover-Readout aktuell (siehe P-1)
+  /* Hier und nicht weiter unten am fertigen Objekt: nach jedem Rollen mit Q/E
+   * wird die Steuerung neu aufgebaut, damit die Umlaufachse der gerollten
+   * folgt. Eine Anmeldung, die nur am ersten Objekt hing, war danach still —
+   * die Griffe eines Schnitts blieben beim Drehen in der Luft stehen, weil
+   * niemand mehr davon erfuhr. */
+  c.addEventListener('start', () => { if (cutState.drag < 0) endEditing(); });
+  /* Und nach jedem Zug dreht die Karte weiter um *diese* Ansicht, nicht um die
+   * Y-Achse der Welt.
+   *
+   * OrbitControls kreist um `camera.up`, und das blieb (0,1,0), egal wie die
+   * Karte stand. Gemessen: nach einem Zug nach unten stand die Kamera senkrecht
+   * über der Anatomie, und waagerechtes Ziehen bewegte sie um keinen einzigen
+   * Millimeter — dort fallen Blickrichtung und Umlaufachse zusammen, und die
+   * Drehung läuft ins Leere. Am Ende jedes Zuges wird `up` auf das gesetzt, was
+   * im Bild gerade oben ist; die Kamera steht schon dort, also springt nichts. */
+  c.addEventListener('end', () => followTheView());
   return c;
 }
 controls = makeControls();
@@ -1212,6 +1247,21 @@ function rebuildControls() {
   controls.minDistance = saved.minDistance; controls.maxDistance = saved.maxDistance;
   controls.update();
 }
+/** Die Umlaufachse auf das setzen, was im Bild oben ist. */
+let _followPending = false;
+function followTheView() {
+  if (_followPending) return;
+  _followPending = true;
+  requestAnimationFrame(() => {
+    _followPending = false;
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
+    if (!Number.isFinite(up.x) || up.lengthSq() < 0.5) return;
+    if (up.distanceToSquared(camera.up) < 1e-8) return;   // schon dort
+    camera.up.copy(up);
+    rebuildControls();
+  });
+}
+
 let _rollRebuildPending = false;
 function scheduleControlsRebuild() {
   if (_rollRebuildPending) return;
@@ -1807,6 +1857,14 @@ function loadGeometry(data, name) {
   data.scalarsOriginal = data.scalarsOriginal || data.scalars;
   trimState.chosen.clear();
   cutState.shapes = [];
+  /* Und alles, was von den Schnitten sonst noch im Raum hängt.
+   *
+   * Die Liste zu leeren genügt nicht: das weiße Band der Schnittkante ist ein
+   * eigenes Objekt in der Gruppe und wurde nur beim nächsten Schnitt abgeräumt.
+   * Wer die Anatomie wechselte, sah die Kanten der vorigen weiter in der Luft
+   * stehen — an einer Karte, die sie nie hatte. */
+  endEditing();
+  drawCutSeam();
   buildTrimUI();
 
   buildModeOptions(data);
@@ -1872,9 +1930,7 @@ function selectMode(mode, data = current) {
   if (mode.startsWith('scalar:')) {
     const field = mode.slice(7);
     const meta = FIELD_META[field.toLowerCase()] || { unit: '', cmap: 'rhythmia_voltage', range: null };
-    // Was in den Einstellungen steht, sonst die Skala, die zur Größe gehört.
-    const chosen = (window.epcoreSettings && window.epcoreSettings.get('mapColourScale')) || 'auto';
-    state.cmap = (chosen && chosen !== 'auto') ? chosen : meta.cmap;
+    state.cmap = scaleFor(field);
     state.unit = meta.unit;
     state.fieldRange = dataRange(data.scalars[field]);
     if (!state.windows[field]) {
@@ -2077,7 +2133,8 @@ function drawSkyline(field) {
   ctx.clearRect(0, 0, width, height);
 
   const histogram = EPM.activationHistogram(current.positions, current.faces,
-                                            visibleScalar(field));
+                                            visibleScalar(field), 60,
+                                            { lo: state.vmin, hi: state.vmax });
   const bins = histogram.bins;
   if (!bins.length) { note.textContent = ''; return; }
 
@@ -2370,12 +2427,21 @@ function applyColors() {
     const table = linLut(state.cmap);                 // already-linear LUT (perf option A)
     const vmin = state.vmin, vmax = state.vmax, span = (vmax - vmin) || 1e-9;
     const uR = srgbToLinear(UNMAPPED[0]), uG = srgbToLinear(UNMAPPED[1]), uB = srgbToLinear(UNMAPPED[2]);
+    /* Bei der Aktivierung heißt ein enger gezogenes Fenster: zeig mir diese
+     * Spanne. Was davor oder danach aktiviert, gehört nicht hinein — und an
+     * den Rand der Skala geklemmt log die Karte, weil 40 ms nach Fensterende
+     * dieselbe Farbe trug wie das Fensterende selbst. Bei der Spannung bleibt
+     * das Klemmen richtig: dort ist „unter 0,5 mV" eine Aussage, keine Lücke. */
+    const windowed = isLatField(field);
+    const oR = srgbToLinear(OUTSIDE_WINDOW[0]), oG = srgbToLinear(OUTSIDE_WINDOW[1]),
+          oB = srgbToLinear(OUTSIDE_WINDOW[2]);
     const animOn = isLatField(field) && state.anim.engaged;
     const t = state.anim.t, band = state.anim.band, W = vmax - vmin, mode = state.anim.mode;
     for (let i = 0; i < n; i++) {
       const v = s[i];
       if (Number.isNaN(v)) { arr[i*3]=uR; arr[i*3+1]=uG; arr[i*3+2]=uB; continue; }
       if (state.isolateScar && v >= vmin) { arr[i*3]=0.10; arr[i*3+1]=0.10; arr[i*3+2]=0.10; continue; }
+      if (windowed && (v < vmin || v > vmax)) { arr[i*3]=oR; arr[i*3+1]=oG; arr[i*3+2]=oB; continue; }
       let tt = (v - vmin) / span; tt = tt < 0 ? 0 : tt > 1 ? 1 : tt;
       const idx = (tt * 255) | 0;
       let r = table[idx*3], g = table[idx*3+1], b = table[idx*3+2];
@@ -2390,28 +2456,83 @@ function applyColors() {
   drawLegend();
 }
 
+/** Welche Farbskala zu einem Feld gehört.
+ *
+ * Voreinstellung „automatisch": Spannung bekommt die Spannungsskala, die
+ * Aktivierung die zyklische. Wer immer dieselbe sehen will, sagt das einmal in
+ * den Einstellungen — in der Kartenansicht steht die Wahl bewusst nicht mehr.
+ */
+function scaleFor(field) {
+  const meta = FIELD_META[String(field).toLowerCase()] || { cmap: 'rhythmia_voltage' };
+  const chosen = (window.epcoreSettings && window.epcoreSettings.get('mapColourScale')) || 'auto';
+  return (chosen && chosen !== 'auto') ? chosen : meta.cmap;
+}
+
+/* Und die Karte hört zu, statt die Einstellung nur beim Moduswechsel zu lesen.
+ *
+ * Vorher galt eine geänderte Skala erst, wenn jemand die Größe umschaltete oder
+ * die Studie neu lud: in den Einstellungen gewählt, zurück zur Karte — und dort
+ * stand die alte. Da die Wahl aus der Kartenansicht entfernt wurde, war das der
+ * einzige Weg, und er führte ins Leere. */
+if (window.epcoreSettings && typeof window.epcoreSettings.onChange === 'function') {
+  window.epcoreSettings.onChange(() => {
+    if (!current || !state.mode || !state.mode.startsWith('scalar:')) return;
+    const wanted = scaleFor(state.mode.slice(7));
+    if (wanted === state.cmap) return;
+    state.cmap = wanted;
+    const picker = document.getElementById('cmap');
+    if (picker) picker.value = state.cmap;
+    applyColors();
+    drawLegend();
+  });
+}
+
 /* ---------- legend ---------- */
 // P-5: applyColors() läuft während Wiedergabe und Video-Export in jedem Frame.
 // Die Legende hängt aber nur an Farbskala, Fenster, Einheit und Modus — ohne
 // diesen Wächter wären das 280 fillRect plus DOM-Neubau, 60-mal pro Sekunde.
 let _legendKey = null;
+let _legendMark = null;   // wo der Zeiger zuletzt stand
+let _legendGrad = null;   // der Verlauf, einmal gemalt
+
+/* Der Verlauf ändert sich mit der Farbskala, nicht mit der Zeit. Einmal in
+ * eine Ablagefläche, danach kostet ein Bild einen Zeichenaufruf statt 280. */
+function legendGradient(width, height) {
+  const key = state.cmap + '|' + width + '|' + height;
+  if (_legendGrad && _legendGrad.key === key) return _legendGrad.canvas;
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  const table = lut(state.cmap);
+  for (let y = 0; y < height; y++) {
+    const t = 1 - y / (height - 1);
+    const idx = (t * 255) | 0;
+    ctx.fillStyle = `rgb(${table[idx*3]},${table[idx*3+1]},${table[idx*3+2]})`;
+    ctx.fillRect(0, y, width, 1);
+  }
+  _legendGrad = { key, canvas };
+  return canvas;
+}
+
 function drawLegend() {
   if (!state.mode || !state.mode.startsWith('scalar:')) { _legendKey = null; return; }
   const key = state.mode + '|' + state.cmap + '|' + state.vmin + '|' + state.vmax + '|'
             + state.unit + '|' + (state.cyclic ? 'ring' : 'bar');
-  if (key === _legendKey) return;
+  /* Der Zeiger gehört in den Schlüssel. Ohne ihn kehrte der Wächter während
+   * der Wiedergabe bei jedem Bild um: die Marke war gezeichnet, aber nur ein
+   * einziges Mal, und stand danach still, während die Karte lief. */
+  const mark = (state.anim.engaged || state.anim.playing)
+             ? state.anim.t + '|' + state.anim.band + '|' + state.anim.mode : 'aus';
+  if (key === _legendKey && mark === _legendMark) return;
+  const fresh = key !== _legendKey;
   _legendKey = key;
-  layoutLegend();
+  _legendMark = mark;
+  if (fresh) layoutLegend();
   const cv = document.getElementById('cbar');
   const ctx = cv.getContext('2d');
-  const table = lut(state.cmap);
   const h = cv.height;
-  for (let y = 0; y < h; y++) {
-    const t = 1 - y / (h - 1);
-    const idx = (t * 255) | 0;
-    ctx.fillStyle = `rgb(${table[idx*3]},${table[idx*3+1]},${table[idx*3+2]})`;
-    ctx.fillRect(0, y, cv.width, 1);
-  }
+  ctx.clearRect(0, 0, cv.width, h);
+  ctx.drawImage(legendGradient(cv.width, h), 0, 0);
   if (state.anim.engaged || state.anim.playing) {
     // Dasselbe auf dem Balken: oben ist vmax, unten vmin.
     const span = (state.vmax - state.vmin) || 1;
@@ -2424,6 +2545,10 @@ function drawLegend() {
     ctx.globalAlpha = 1;
     ctx.fillRect(0, yOf(state.anim.t) - 1, cv.width, 2);
   }
+
+  // Die Beschriftung hängt am Fenster, nicht am Zeitpunkt: beim Abspielen
+  // bleibt sie stehen, sonst baut sie sich 60-mal je Sekunde neu auf.
+  if (!fresh) { if (state.cyclic) drawLegendRing(); return; }
 
   const ticksEl = document.getElementById('cbar-ticks');
   ticksEl.innerHTML = '';
@@ -2445,6 +2570,22 @@ function drawLegend() {
   const field = state.mode.slice(7);
   const meta = FIELD_META[field.toLowerCase()] || { label: field, unit: state.unit };
   document.getElementById('legend-cap').textContent = (meta.label || field) + (meta.unit ? ' · ' + meta.unit : '');
+  /* Nur bei der Aktivierung, und nur wenn wirklich etwas draußen liegt: eine
+     Erklärung für eine Farbe, die nirgends vorkommt, ist Lärm. */
+  const note = document.getElementById('legend-outside');
+  if (note) {
+    const shown = visibleScalar(field);
+    let anyOutside = false;
+    if (isLatField(field)) {
+      for (let i = 0; i < shown.length; i++) {
+        const v = shown[i];
+        if (Number.isFinite(v) && (v < state.vmin || v > state.vmax)) { anyOutside = true; break; }
+      }
+    }
+    note.hidden = !anyOutside;
+    const swatch = note.querySelector('.swatch');
+    if (swatch) swatch.style.background = `rgb(${OUTSIDE_WINDOW.join(',')})`;
+  }
   if (state.cyclic) drawLegendRing();
 }
 
@@ -2455,23 +2596,22 @@ function drawLegend() {
  * Balken, statt neben ihm zu stehen: zwei Legenden für eine Skala sind eine
  * Frage zu viel.
  */
-function drawLegendRing() {
-  const canvas = document.getElementById('cring');
-  if (!canvas) return;
-  const scale = window.devicePixelRatio || 1;
-  const size = 180;
-  if (canvas.width !== Math.round(size * scale)) {
-    canvas.width = canvas.height = Math.round(size * scale);
-    canvas.style.width = canvas.style.height = size + 'px';
-  }
+let _ringFace = null;
+
+/** Ring und Beschriftung — alles, was nicht vom Zeitpunkt abhängt.
+ *
+ * Beim Abspielen läuft der Zeiger mit, der Ring darunter nicht. Ihn je Bild
+ * aus 360 Keilen neu zu legen wäre die teuerste Art, dasselbe Bild zu malen.
+ */
+function ringFace(size, scale, cx, cy, outer, inner) {
+  const key = state.cmap + '|' + size + '|' + scale + '|' + state.vmin + '|' + state.vmax
+            + '|' + (themeToken('--muted') || '');
+  if (_ringFace && _ringFace.key === key) return _ringFace.canvas;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = Math.round(size * scale);
   const ctx = canvas.getContext('2d');
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
-  ctx.clearRect(0, 0, size, size);
   const table = lut(state.cmap);
-  /* Der Ring muss samt Beschriftung in die Fläche passen: bei 0,40 lagen die
-   * Zahlen links und rechts halb außerhalb und wurden vom Rand der Tafel
-   * abgeschnitten. */
-  const cx = size / 2, cy = size / 2, outer = size * 0.33, inner = size * 0.21;
 
   // In feinen Keilen, damit kein Farbverlauf über den Rundungsfehler stolpert.
   const steps = 360;
@@ -2486,6 +2626,39 @@ function drawLegendRing() {
     ctx.fillStyle = `rgb(${table[idx*3]},${table[idx*3+1]},${table[idx*3+2]})`;
     ctx.fill();
   }
+
+  ctx.fillStyle = themeToken('--muted') || '#9bb';
+  ctx.font = '10px ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i < 4; i++) {
+    const t = i / 4;
+    const angle = -Math.PI / 2 + t * Math.PI * 2;
+    const value = state.vmin + (state.vmax - state.vmin) * t;
+    ctx.fillText(round(value), cx + Math.cos(angle) * (outer + 16),
+                 cy + Math.sin(angle) * (outer + 16));
+  }
+  _ringFace = { key, canvas };
+  return canvas;
+}
+
+function drawLegendRing() {
+  const canvas = document.getElementById('cring');
+  if (!canvas) return;
+  const scale = window.devicePixelRatio || 1;
+  const size = 180;
+  if (canvas.width !== Math.round(size * scale)) {
+    canvas.width = canvas.height = Math.round(size * scale);
+    canvas.style.width = canvas.style.height = size + 'px';
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(scale, 0, 0, scale, 0, 0);
+  ctx.clearRect(0, 0, size, size);
+  /* Der Ring muss samt Beschriftung in die Fläche passen: bei 0,40 lagen die
+   * Zahlen links und rechts halb außerhalb und wurden vom Rand der Tafel
+   * abgeschnitten. */
+  const cx = size / 2, cy = size / 2, outer = size * 0.33, inner = size * 0.21;
+  ctx.drawImage(ringFace(size, scale, cx, cy, outer, inner), 0, 0, size, size);
 
   /* Wo die Karte gerade steht, auf der Skala selbst — dieselbe Auskunft wie
    * die Marke auf der Aktivierungskurve, nur dort, wo die Farben stehen. Ohne
@@ -2510,18 +2683,6 @@ function drawLegendRing() {
     ctx.strokeStyle = themeToken('--text') || '#e8f4f8';
     ctx.lineWidth = 2;
     ctx.stroke();
-  }
-
-  ctx.fillStyle = themeToken('--muted') || '#9bb';
-  ctx.font = '10px ui-monospace, monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  for (let i = 0; i < 4; i++) {
-    const t = i / 4;
-    const angle = -Math.PI / 2 + t * Math.PI * 2;
-    const value = state.vmin + (state.vmax - state.vmin) * t;
-    ctx.fillText(round(value), cx + Math.cos(angle) * (outer + 16),
-                 cy + Math.sin(angle) * (outer + 16));
   }
 }
 
@@ -2651,6 +2812,34 @@ function buildTrimUI() {
     };
     list.appendChild(chip);
   });
+  /* Jeder gezeichnete Schnitt als eigener Knopf: so kommt man an ihn heran,
+   * ohne die Stelle im Bild zu treffen, und sieht zugleich, wie viele es sind.
+   * Der zweite Weg ist der Klick auf die Schnittkante selbst. */
+  cutState.shapes.filter(s => !s.preview).forEach((shape) => {
+    const index = cutState.shapes.indexOf(shape);
+    const chip = document.createElement('button');
+    chip.className = 'chip' + (cutState.editing === index ? ' on' : '');
+    chip.dataset.cut = String(index);
+    chip.textContent = T(shape.plane ? 'map.trim.plane' : 'map.trim.outline');
+    chip.title = T('map.trim.edit.hint');
+    chip.onclick = () => editCut(index);
+    list.appendChild(chip);
+    // Welche Hälfte fällt, ist aus zwei Klicks nicht zu erraten. Der Schalter
+    // steht bei dem Schnitt, um den es geht, und nur solange er bearbeitet wird.
+    if (shape.plane && cutState.editing === index) {
+      const other = document.createElement('button');
+      other.className = 'chip';
+      other.id = 'cut-flip';
+      other.textContent = T('map.trim.otherside');
+      other.onclick = () => {
+        shape.flip = !shape.flip;
+        shape.points = planePolygon(shape.line[0], shape.line[1], shape.flip);
+        applyTrim();
+        drawCutOutline();
+      };
+      list.appendChild(other);
+    }
+  });
   if (cutState.shapes.length || trimState.chosen.size) {
     const reset = document.createElement('button');
     reset.className = 'chip';
@@ -2658,6 +2847,8 @@ function buildTrimUI() {
     reset.onclick = () => resetCuts();
     list.appendChild(reset);
   }
+  const depthRow = document.getElementById('trim-depth-row');
+  if (depthRow) depthRow.hidden = !trimState.rings.length;
   updateTrimNote();
   if (typeof refreshSections === 'function') refreshSections();
 }
@@ -2688,8 +2879,34 @@ function applyTrim() {
     geo.setAttribute('color', new THREE.BufferAttribute(
       new Float32Array(current.positions.length), 3));
     geo.setIndex(new THREE.BufferAttribute(current.faces, 1));
+    /* Erst das alte Normalenfeld weg, dann rechnen. computeVertexNormals()
+     * legt nur dann ein neues an, wenn keines da ist — sonst nullt es das
+     * vorhandene und lässt dessen Länge stehen. Ein Schnitt schneidet
+     * Randdreiecke auf und erzeugt dabei Vertices: die Positionen wachsen,
+     * die Normalen nicht. WebGL bricht die Zeichnung dann ab
+     * ("Vertex buffer is not big enough for the draw call") — WebKit sichtbar,
+     * Chromium stillschweigend, gemessen an derselben Karte:
+     * Helligkeit 0,4336 → 0,0087 ab dem dritten Punkt. */
+    geo.deleteAttribute('normal');
     geo.computeVertexNormals();
     geo.attributes.position.needsUpdate = true;
+    // Die alte Hülle gehört zur alten Ausdehnung; sonst kann die Karte am Rand
+    // des Bildes aus dem Sichtkörper fallen.
+    geo.computeBoundingSphere();
+    /* Und nachsehen, ob wirklich alles mitgewachsen ist. Ein zu kurzes Feld
+     * hört sich nicht auf zu zeichnen an: WebGL bricht den Zeichenaufruf ab und
+     * meldet das an der Konsole der Engine vorbei — nicht über console.error,
+     * also auch nicht ins Protokoll der Anwendung. Kommt später ein Feld dazu,
+     * das hier niemand neu setzt, steht der Grund hier statt in einem leeren
+     * Fenster. */
+    const lengths = Object.entries(geo.attributes).map(([n, a]) => [n, a.count]);
+    const wanted = current.positions.length / 3;
+    const short = lengths.filter(([, count]) => count !== wanted);
+    if (short.length) {
+      console.error('[epview] Nach dem Schnitt passen die Vertexfelder nicht '
+                    + 'zusammen — %s bei %d Vertices. Die Karte bliebe leer.',
+                    short.map(([n, c]) => `${n}=${c}`).join(', '), wanted);
+    }
   }
   current._vertexNormals = null;
   current._vgrid = null;
@@ -3202,12 +3419,46 @@ function loadParsedMesh(m) {
  * kann. Ohne Backend gibt es hier nichts zu tun — dort gibt es auch keinen
  * nativen Dialog, also fragt niemand danach.
  */
+/** Ein EnSite-Velocity-Archiv über das Backend lesen.
+ *
+ * Velocity packt die Studie in ein geteiltes gzip-tar und legt darin eine
+ * Punktwolke ab. Ein Browser kann beides nicht: das Archiv nicht auspacken und
+ * die Oberfläche nicht rekonstruieren. Der Leser dafür steht in Python und lief
+ * nur über die Befehlszeile — die Kartenansicht sagte deshalb auch *in der
+ * Anwendung*, dafür brauche es die Anwendung.
+ *
+ * Der Server schickt binäres PLY, und das liest der Betrachter ohnehin.
+ */
+async function openVelocityArchive(path, name) {
+  showLoading(T('map.msg.velocity.reading'), name);
+  let buffer;
+  try {
+    buffer = await window.epcore.velocityMesh(path);
+  } catch (err) {
+    throw new Error(T('map.msg.velocity.failed') + err.message);
+  }
+  // Ohne Backend gibt es das nicht — dann gilt, was die Seite ohne Anwendung
+  // immer gesagt hat.
+  if (!buffer) { alert(T('map.msg.onlyapp', { name })); return; }
+  const mesh = EP.parsePLY(buffer);
+  studyName = name;
+  loadParsedMesh({ ...mesh, name, source: 'ensite' });
+}
+
 async function openPath(path) {
   showLoading('Lade…');
   try {
     const listing = await window.epcore.localFiles(path);
     if (!listing || !listing.files || !listing.files.length) {
       alert(T('map.msg.nostudies'));
+      return;
+    }
+    /* Ein Velocity-Archiv erkennt man am geteilten Suffix. Erst fragen, dann
+     * die Dateien einzeln durchreichen: der Browser käme mit ihnen nicht weit. */
+    const velocity = listing.files.find(f => /\.tar\.gz[a-z]{2}$/i.test(f.path || f.name || ''));
+    if (velocity) {
+      const full = (listing.root || path).replace(/\/+$/, '') + '/' + (velocity.path || velocity.name);
+      await openVelocityArchive(full, String(listing.root || path).replace(/^.*[\\/]/, ''));
       return;
     }
     studyName = String(listing.root || path).replace(/^.*[\\/]/, '');
@@ -3242,8 +3493,16 @@ async function openFileList(fileList) {
     return;
   }
   if (!readable.length) {
-    // Gefunden und hier nicht lesbar ist etwas anderes als nicht gefunden.
-    alert(T('map.msg.onlyapp', { name: studies[0].label }));
+    /* Gefunden und hier nicht lesbar ist etwas anderes als nicht gefunden.
+     *
+     * Und es kommt darauf an, wo „hier" ist: im Browser stimmt „das kann nur
+     * die Anwendung". In der Anwendung stimmt es nicht — dort liest sie es,
+     * nur nicht aus einzeln gewählten Dateien, weil ein geteiltes Archiv als
+     * Pfad übergeben werden muss. Wer in der Anwendung sitzt und liest, dafür
+     * brauche es die Anwendung, sucht den Fehler bei sich. */
+    const inApp = await window.epcore.hasBackend();
+    alert(T(inApp ? 'map.msg.onlyfolder' : 'map.msg.onlyapp',
+            { name: studies[0].label }));
     return;
   }
   if (readable.length === 1) { studyName = readable[0].label; await loadFiles(readable[0].files); return; }
@@ -3284,7 +3543,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=abd75daee5c4'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=8e1f1b561c45'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -3328,6 +3587,12 @@ function bakeColorsU8() {
       const v = s[i];
       if (Number.isNaN(v)) { out[i*3]=UNMAPPED[0]; out[i*3+1]=UNMAPPED[1]; out[i*3+2]=UNMAPPED[2]; continue; }
       if (state.isolateScar && v >= state.vmin) { out[i*3]=26; out[i*3+1]=26; out[i*3+2]=26; continue; }
+      // Dieselbe Regel wie am Schirm; ein Export, der anders aussieht als das
+      // Bild, an dem gearbeitet wurde, ist ein zweites Bild.
+      if (isLatField(state.mode.slice(7)) && (v < state.vmin || v > state.vmax)) {
+        out[i*3]=OUTSIDE_WINDOW[0]; out[i*3+1]=OUTSIDE_WINDOW[1]; out[i*3+2]=OUTSIDE_WINDOW[2];
+        continue;
+      }
       let t = (v - state.vmin) / span; t = t < 0 ? 0 : t > 1 ? 1 : t;
       const idx = (t * 255) | 0;
       out[i*3]=table[idx*3]; out[i*3+1]=table[idx*3+1]; out[i*3+2]=table[idx*3+2];
@@ -3558,7 +3823,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=abd75daee5c4');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=8e1f1b561c45');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -3616,18 +3881,66 @@ function compositeFrame() {
 function snapshotBackground() {
   const setting = window.epcoreSettings && window.epcoreSettings.get('snapshotBackground');
   if (!setting || setting === 'transparent') return null;
-  if (setting === 'theme') return themeToken('--bg-0') || '#05080b';
-  return setting;                       // eine Farbe, wie eingestellt
+  /* „Standard" heißt: so wie das Programm gerade aussieht — im Dunkeln
+   * schwarz, im Hellen weiß. Nicht der Ton der Tafeln: ein Bild, das im
+   * Bericht auf Weiß liegt, soll dort keinen dunkelgrauen Kasten bilden. */
+  const light = document.documentElement.dataset.theme === 'light';
+  return light ? '#ffffff' : '#000000';
+}
+
+/** Wie weit die Karte im Bild reicht.
+ *
+ * Die Leinwand ist so groß wie das Fenster; die Karte steht irgendwo darin,
+ * meist mit viel Luft ringsum. Ein Schnappschuss, der die ganze Fläche mitnimmt,
+ * ist auf einer Folie ein kleines Bild in einem großen leeren Rahmen.
+ *
+ * Gesucht wird an den Pixeln, nicht an der Geometrie: was gezeichnet wurde,
+ * zählt — Karte, Marker, Schnittkanten. Der Rand ist die Luft, die ein Bild
+ * braucht, um nicht abgeschnitten zu wirken.
+ */
+function drawnBounds(source, padding = 12) {
+  const W = source.width, H = source.height;
+  const probe = document.createElement('canvas');
+  probe.width = W; probe.height = H;
+  const ctx = probe.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(source, 0, 0);
+  let data;
+  try {
+    data = ctx.getImageData(0, 0, W, H).data;
+  } catch {
+    return { x: 0, y: 0, width: W, height: H };
+  }
+  let left = W, right = -1, top = H, bottom = -1;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (data[(y * W + x) * 4 + 3] > 8) {
+        if (x < left) left = x;
+        if (x > right) right = x;
+        if (y < top) top = y;
+        if (y > bottom) bottom = y;
+      }
+    }
+  }
+  if (right < 0) return { x: 0, y: 0, width: W, height: H };   // nichts gezeichnet
+  left = Math.max(0, left - padding);
+  top = Math.max(0, top - padding);
+  right = Math.min(W - 1, right + padding);
+  bottom = Math.min(H - 1, bottom + padding);
+  return { x: left, y: top, width: right - left + 1, height: bottom - top + 1 };
 }
 
 function snapshotCanvas() {
-  ensureRecCanvas();
-  const W = recCanvas.width, H = recCanvas.height;
-  recCtx.clearRect(0, 0, W, H);
+  const source = renderer.domElement;
+  const box = drawnBounds(source);
+  const shot = document.createElement('canvas');
+  shot.width = box.width;
+  shot.height = box.height;
+  const ctx = shot.getContext('2d');
   const background = snapshotBackground();
-  if (background) { recCtx.fillStyle = background; recCtx.fillRect(0, 0, W, H); }
-  recCtx.drawImage(renderer.domElement, 0, 0, W, H);
-  return recCanvas;
+  if (background) { ctx.fillStyle = background; ctx.fillRect(0, 0, box.width, box.height); }
+  ctx.drawImage(source, box.x, box.y, box.width, box.height,
+                0, 0, box.width, box.height);
+  return shot;
 }
 
 function drawLegendOverlay(ctx, W, H) {
@@ -3651,7 +3964,6 @@ function drawLegendOverlay(ctx, W, H) {
 }
 
 function recIndicator(on) {
-  document.getElementById('rec-dot').classList.toggle('on', on);
   document.getElementById('t-rec').classList.toggle('on', on);
 }
 
@@ -3815,15 +4127,33 @@ const T = (key, params) => (window.epcoreI18n ? window.epcoreI18n.t(key, params)
 const dirInput = document.getElementById('file-dir');
 dirInput.onchange = () => { if (dirInput.files.length) openFileList(dirInput.files); };
 
-const openMenu = document.getElementById('m-open');
-document.getElementById('t-open').onclick = (e) => {
-  e.stopPropagation();
-  openMenu.classList.toggle('open');
-};
-document.getElementById('t-open-dir').onclick = () => { openMenu.classList.remove('open'); dirInput.click(); };
-document.getElementById('t-open-files').onclick = () => { openMenu.classList.remove('open'); fileInput.click(); };
-document.addEventListener('click', () => openMenu.classList.remove('open'));
-document.getElementById('pick-dir').onclick = () => dirInput.click();
+/* Über denselben Aufklapper wie die anderen Menüs der Leiste.
+ *
+ * Von Hand verdrahtet schaltete dieses hier `.open` um — eine Klasse, zu der
+ * es keine Regel gibt. Die Datei kennt nur `.tmenu.show`. Der Knopf war also
+ * da, reagierte auf den Klick und zeigte nie ein Menü: die einzige Art, in der
+ * Kartenansicht eine Studie zu öffnen, wenn keine Schale darum herum ist. */
+/** Einen Studienordner wählen — über den Systemdialog, wo es einen gibt.
+ *
+ * Der Unterschied ist nicht kosmetisch: das Dateifeld des Browsers liefert
+ * Dateien *ohne* Pfad, und ein geteiltes Velocity-Archiv lässt sich nur über
+ * einen Pfad lesen. Deshalb erkannte dieselbe Studie über die Leiste der
+ * Schale und über „Öffnen" hier nicht dasselbe — der eine Weg ging über das
+ * Backend, der andere über den Browser. Jetzt beide über denselben.
+ */
+async function chooseFolder() {
+  const native = window.epcore.api();
+  if (native && typeof native.open_folder_dialog === 'function') {
+    const chosen = await native.open_folder_dialog();
+    if (chosen && chosen.path) { await openPath(chosen.path); return; }
+    if (chosen) return;                  // abgebrochen
+  }
+  dirInput.click();                      // ohne Wirt: der Weg des Browsers
+}
+
+document.getElementById('t-open-dir').onclick = () => chooseFolder();
+document.getElementById('t-open-files').onclick = () => fileInput.click();
+document.getElementById('pick-dir').onclick = () => chooseFolder();
 document.getElementById('studypick-close').onclick = () => document.getElementById('studypick').classList.remove('show');
 document.getElementById('demo').onclick = loadDemo;
 fileInput.onchange = () => { if (fileInput.files.length) openFileList(fileInput.files); };
@@ -4012,7 +4342,8 @@ function setupDrop(btnId, menuId) {
   };
   menu.querySelectorAll('.tool').forEach(it => it.addEventListener('click', () => menu.classList.remove('show')));
 }
-setupDrop('t-cut-more', 'm-cut'); setupDrop('t-cam', 'm-cam'); setupDrop('t-vid', 'm-vid'); setupDrop('t-save', 'm-save');
+setupDrop('t-cut-more', 'm-cut'); setupDrop('t-cam', 'm-cam'); setupDrop('t-vid', 'm-vid');
+setupDrop('t-save', 'm-save'); setupDrop('t-open', 'm-open');
 addEventListener('click', (e) => {
   document.querySelectorAll('.tmenu.show').forEach(m => m.classList.remove('show'));
   const rs = document.getElementById('recset'); if (rs && rs.classList.contains('show') && !rs.contains(e.target)) rs.classList.remove('show');
@@ -4053,7 +4384,6 @@ document.getElementById('t-shot').onclick = () => {
 };
 document.getElementById('t-orbit').onclick = () => state.recording ? stopRecording() : startOrbit();
 document.getElementById('t-export').onclick = () => state.recording ? stopRecording() : startExport();
-document.getElementById('rec-dot').onclick = () => stopRecording();
 document.getElementById('t-rec').onclick = () => toggleFreeRecording();
 
 const recsetEl = document.getElementById('recset');
@@ -4102,6 +4432,7 @@ const SCISSORS_CURSOR =
 const cutState = {
   drawing: false, points: [], side: 'front',
   tool: 'polygon',      // 'polygon' zeichnet einen Umriss, 'plane' eine Ebene
+  flip: false,          // bei der Ebene: welche der beiden Hälften fällt
   shapes: [],           // was geschnitten wurde: Umriss, Seite und Blickwinkel
   editing: -1,          // welcher Umriss gerade Griffe trägt
   drag: -1,
@@ -4134,6 +4465,15 @@ function drawOutline(ctx, points, { dashed, handles }) {
   }
 }
 
+/** Woran ein Schnitt angefasst wird.
+ *
+ * Beim Umriss sind das seine Ecken. Bei der Ebene die zwei geklickten Punkte:
+ * ihr „Umriss" ist ein Rechteck weit jenseits des Bildrands, und ein Griff dort
+ * wäre nicht erreichbar. */
+function handlePoints(shape) {
+  return shape && shape.plane && shape.line ? shape.line : (shape ? shape.points : []);
+}
+
 function drawCutOutline() {
   const canvas = cutOverlay();
   const scale = window.devicePixelRatio || 1;
@@ -4152,7 +4492,7 @@ function drawCutOutline() {
       && cutState.aim) {
     // Die halbe Bildfläche, die fallen würde — schraffiert, nicht gefüllt: die
     // Karte darunter muss sichtbar bleiben, sonst sagt die Vorschau nichts.
-    const half = planePolygon(cutState.points[0], cutState.aim);
+    const half = planePolygon(cutState.points[0], cutState.aim, cutState.flip);
     ctx.beginPath();
     half.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
     ctx.closePath();
@@ -4167,7 +4507,7 @@ function drawCutOutline() {
   }
   if (cutState.drawing) drawOutline(ctx, cutState.points, { dashed: true, handles: true });
   const edited = cutState.shapes[cutState.editing];
-  if (edited) drawOutline(ctx, edited.points, { dashed: false, handles: true });
+  if (edited) drawOutline(ctx, handlePoints(edited), { dashed: false, handles: true });
 }
 
 function startCutting() {
@@ -4196,22 +4536,36 @@ function startCutting() {
   drawCutOutline();
 }
 
-function stopCutting() {
-  const hadPreview = cutState.shapes.some(s => s.preview);
-  cutState.shapes = cutState.shapes.filter(s => !s.preview);
-  if (hadPreview) applyTrim();
+/** Das Zeichnen verlassen — von welchem Weg aus auch immer.
+ *
+ * Es gibt drei: abbrechen, einen Umriss schließen, eine Ebene setzen. Der
+ * Ebenenzweig räumte die Zeichenfläche nicht ab: sie blieb über allem liegen
+ * und fing jede Maustaste ab. Die Karte ließ sich danach nicht mehr drehen und
+ * das Werkzeug nicht mehr weglegen — nichts stürzte ab, es reagierte nur nichts
+ * mehr. Der Polygonzweig entkam dem nur, weil `startEditing` die Fläche gleich
+ * darauf durchlässig machte, also aus Versehen. */
+function leaveDrawing() {
   cutState.drawing = false;
   cutState.drag = -1;
   cutState.points = [];
   cutState.aim = null;
-  cutOverlay().style.zIndex = '';
   controls.enabled = true;
+  const canvas = cutOverlay();
+  canvas.style.zIndex = '';
+  canvas.style.cursor = '';
+  // Durchlässig, sobald nicht mehr gezeichnet wird: die Griffe werden auf der
+  // 3D-Fläche gegriffen, nicht hier.
+  canvas.style.pointerEvents = 'none';
+  if (cutState.editing < 0) canvas.style.display = 'none';
+  else canvas.style.display = '';
   document.getElementById('t-cut').classList.remove('on');
-  if (cutState.editing < 0) {
-    const canvas = cutOverlay();
-    canvas.style.display = 'none';
-    canvas.style.pointerEvents = 'none';
-  }
+}
+
+function stopCutting() {
+  const hadPreview = cutState.shapes.some(s => s.preview);
+  cutState.shapes = cutState.shapes.filter(s => !s.preview);
+  if (hadPreview) applyTrim();
+  leaveDrawing();
   drawCutOutline();
 }
 
@@ -4230,6 +4584,69 @@ function startEditing(index) {
   canvas.style.display = '';
   canvas.style.pointerEvents = 'none';      // Drehen bleibt möglich
   drawCutOutline();
+}
+
+/** Welcher Schnitt liegt unter dem Zeiger, wenn überhaupt einer.
+ *
+ * Gemessen an der Naht im Raum, nicht am gespeicherten Umriss: der gilt nur in
+ * der Ansicht, in der er gezeichnet wurde, die Naht liegt in der Karte. Was
+ * hinter der Oberfläche liegt, zählt nicht — sonst fasst ein Klick eine Kante
+ * an, die man gar nicht sieht.
+ */
+const _seamPoint = new THREE.Vector3();
+function cutNear(clientX, clientY, reach = 14) {
+  if (!mesh || !current) return -1;
+  mesh.updateMatrixWorld();
+  camera.updateMatrixWorld();
+  let best = -1, bestDistance = reach;
+  cutState.shapes.forEach((shape, index) => {
+    const points = shape._seamPoints;
+    if (shape.preview || !points || !points.length) return;
+    for (let i = 0; i < points.length; i += 3) {
+      _seamPoint.set(points[i], points[i + 1], points[i + 2]).applyMatrix4(mesh.matrixWorld);
+      const depth = camera.position.distanceTo(_seamPoint);
+      _seamPoint.project(camera);
+      if (_seamPoint.z > 1) continue;                 // hinter der Kamera
+      const x = (_seamPoint.x * 0.5 + 0.5) * innerWidth;
+      const y = (-_seamPoint.y * 0.5 + 0.5) * innerHeight;
+      const distance = Math.hypot(x - clientX, y - clientY);
+      if (distance >= bestDistance) continue;
+      // Verdeckt? Was die Karte selbst zuerst trifft, gewinnt.
+      ptr.x = (x / innerWidth) * 2 - 1;
+      ptr.y = -(y / innerHeight) * 2 + 1;
+      ray.setFromCamera(ptr, camera);
+      const hit = ray.intersectObject(mesh, false)[0];
+      if (hit && hit.distance < depth - 1.5) continue;
+      bestDistance = distance; best = index;
+    }
+  });
+  return best;
+}
+
+/** Einen fertigen Schnitt wieder anfassen.
+ *
+ * Die Griffe hängen an Bildschirmkoordinaten und gelten nur in der Ansicht, in
+ * der gezeichnet wurde. Statt sie in einer anderen Ansicht falsch anzubieten,
+ * kommt die Ansicht zurück — dann liegen sie wieder dort, wo sie gesetzt
+ * wurden, und das Verschieben korrigiert wirklich den alten Schnitt.
+ */
+function editCut(index) {
+  const shape = cutState.shapes[index];
+  if (!shape) return;
+  const view = shape.view;
+  if (view && view.eye && view.target) {
+    const moved = camera.position.distanceTo(new THREE.Vector3().fromArray(view.eye)) > 1e-3
+               || controls.target.distanceTo(new THREE.Vector3().fromArray(view.target)) > 1e-3;
+    if (moved) {
+      camera.position.fromArray(view.eye);
+      controls.target.fromArray(view.target);
+      camera.updateProjectionMatrix();
+      controls.update();
+      epcoreNotify(T('map.cut.view.restored'));
+    }
+  }
+  startEditing(index);
+  buildTrimUI();
 }
 
 function endEditing() {
@@ -4294,6 +4711,15 @@ function rebuildCuts() {
     for (let i = 0; i < cut.parents.length; i++) rim.add(first + i);
     for (const pair of cut.seam) seams.push(pair);
     positions = cut.positions;
+    /* Wo dieser Schnitt im Raum liegt — die Mitte jedes Nahtstücks. Damit ist
+     * ein Klick auf die Kante einem Schnitt zuzuordnen, ohne dass man wüsste,
+     * aus welcher Richtung er gesetzt wurde. */
+    shape._seamPoints = new Float32Array(cut.seam.length * 3);
+    cut.seam.forEach(([a, b], i) => {
+      shape._seamPoints[i*3]     = (positions[a*3]     + positions[b*3])     / 2;
+      shape._seamPoints[i*3 + 1] = (positions[a*3 + 1] + positions[b*3 + 1]) / 2;
+      shape._seamPoints[i*3 + 2] = (positions[a*3 + 2] + positions[b*3 + 2]) / 2;
+    });
     faces = cut.faces;
   }
 
@@ -4307,6 +4733,16 @@ function rebuildCuts() {
    * Zahlen, damit der nächste Bericht eine Ursache hat statt eines Eindrucks. */
   const leftOver = faces.length / 3;
   const started = current.facesOriginal.length / 3;
+  if (cutState.shapes.length) {
+    // Jeder Schnitt sagt, was er getan hat. Im Fenster landet das im Protokoll
+    // der Anwendung (siehe shared/bridge.js) — sonst ist ein Bericht wie
+    // „alles verschwindet" ein Eindruck ohne Zahl dahinter.
+    console.warn('[epview] Schnitt: %d von %d Dreiecken bleiben, %d Umriss(e), '
+                 + 'Seite %s, Werkzeug %s', leftOver, started,
+                 cutState.shapes.length,
+                 (cutState.shapes[cutState.shapes.length - 1] || {}).side,
+                 cutState.tool);
+  }
   if (started > 0 && leftOver < started * 0.02) {
     console.warn('[epview] Schnitt verworfen: von %d Dreiecken blieben %d übrig '
                  + '(%d Umriss(e), Seite %s)', started, leftOver, cutState.shapes.length,
@@ -4392,6 +4828,9 @@ function currentView() {
     .applyMatrix4(new THREE.Matrix4().copy(mesh.matrixWorld).invert());
   return { projView, world: mesh.matrixWorld.clone(),
            cameraLocal: [cameraLocal.x, cameraLocal.y, cameraLocal.z],
+           // Genug, um genau hierher zurückzukehren: ein Schnitt lässt sich
+           // sonst nach dem Drehen nicht mehr ehrlich nachbessern.
+           eye: camera.position.toArray(), target: controls.target.toArray(),
            width: innerWidth, height: innerHeight };
 }
 
@@ -4403,12 +4842,15 @@ function currentView() {
  * zieht. Das Rechteck wird weit über den Rand hinaus aufgespannt, damit es die
  * Karte sicher ganz erfasst.
  */
-function planePolygon(from, to) {
+function planePolygon(from, to, flip = false) {
   const dx = to[0] - from[0], dy = to[1] - from[1];
   const length = Math.hypot(dx, dy) || 1;
   const reach = (innerWidth + innerHeight) * 2;
-  // Nach links von der Zugrichtung.
-  const nx = dy / length * reach, ny = -dx / length * reach;
+  // Nach links von der Zugrichtung — oder nach rechts, wenn die andere Seite
+  // gewählt wurde. Aus zwei Klicks ist nicht zu erraten, welche Hälfte gemeint
+  // ist; geraten wird die eine, gewählt wird die andere.
+  const side = flip ? -1 : 1;
+  const nx = dy / length * reach * side, ny = -dx / length * reach * side;
   const ax = from[0] - dx / length * reach, ay = from[1] - dy / length * reach;
   const bx = to[0] + dx / length * reach, by = to[1] + dy / length * reach;
   return [[ax, ay], [bx, by], [bx + nx, by + ny], [ax + nx, ay + ny]];
@@ -4419,27 +4861,33 @@ function applyCut() {
   if (cutState.tool === 'plane') {
     if (cutState.points.length < 2) { stopCutting(); return; }
     cutState.shapes = cutState.shapes.filter(s => !s.preview);
-    cutState.shapes.push({ points: planePolygon(cutState.points[0], cutState.points[1]),
+    /* Die beiden geklickten Punkte bleiben erhalten. Der Umriss einer Ebene ist
+     * ein Rechteck weit außerhalb des Bildes — daran ließe sich nichts fassen.
+     * Gezogen wird an der Linie, aus der es berechnet wird. */
+    const line = [cutState.points[0].slice(), cutState.points[1].slice()];
+    const flip = !!cutState.flip;
+    cutState.shapes.push({ points: planePolygon(line[0], line[1], flip), line, flip,
                            side: 'through', view: currentView(), plane: true });
-    cutState.drawing = false;
-    cutState.points = [];
-    controls.enabled = true;
-    document.getElementById('t-cut').classList.remove('on');
+    leaveDrawing();
     applyTrim();
     buildTrimUI();
+    if (typeof openSection === 'function') openSection('trim');
+    editCut(cutState.shapes.length - 1);
     return;
   }
   if (cutState.points.length < 3) { stopCutting(); return; }
-  // Griffe in regelmäßigem Abstand, nicht nur an den geklickten Ecken: sonst
-  // ließe sich eine lange gerade Kante nur als Ganzes verschieben.
   cutState.shapes = cutState.shapes.filter(s => !s.preview);
-  const shape = { points: EPM.resamplePolygon(cutState.points, 55),
+  /* Genau die geklickten Ecken, keine mehr.
+   *
+   * Vorher lagen 55 Griffe in gleichem Abstand auf dem Umriss — gedacht, damit
+   * sich auch eine lange gerade Kante biegen lässt. In der Hand hieß das: wer
+   * fünf Punkte setzt, findet danach fünfzig und muss den gewollten erst
+   * suchen. Der Schnitt bleibt derselbe, denn beide Punktfolgen beschreiben
+   * denselben Umriss. */
+  const shape = { points: cutState.points.map(p => p.slice()),
                   side: cutState.side, view: currentView() };
   cutState.shapes.push(shape);
-  cutState.drawing = false;
-  cutState.points = [];
-  controls.enabled = true;
-  document.getElementById('t-cut').classList.remove('on');
+  leaveDrawing();
   applyTrim();
   // Erst jetzt: die Gruppe erscheint bei einer geschlossenen Karte überhaupt
   // erst durch den Schnitt, und ohne sie gäbe es keinen Weg zurück.
@@ -4447,7 +4895,7 @@ function applyCut() {
   // Wer gerade geschnitten hat, sucht als Nächstes den Weg zurück — der steht
   // in diesem Abschnitt, und zugeklappt findet ihn niemand.
   if (typeof openSection === 'function') openSection('trim');
-  startEditing(cutState.shapes.length - 1);
+  editCut(cutState.shapes.length - 1);
 }
 
 function resetCuts() {
@@ -4540,7 +4988,7 @@ addEventListener('keydown', (event) => {
 renderer.domElement.addEventListener('pointerdown', (event) => {
   const shape = cutState.shapes[cutState.editing];
   if (!shape) return;
-  const index = EPM.handleAt(shape.points, event.clientX, event.clientY, 11);
+  const index = EPM.handleAt(handlePoints(shape), event.clientX, event.clientY, 11);
   if (index < 0) return;
   event.preventDefault();
   event.stopPropagation();                  // OrbitControls darf nicht mitdrehen
@@ -4554,7 +5002,12 @@ renderer.domElement.addEventListener('pointermove', (event) => {
   if (!shape) return;
   event.preventDefault();
   event.stopPropagation();
-  shape.points[cutState.drag] = [event.clientX, event.clientY];
+  if (shape.plane && shape.line) {
+    shape.line[cutState.drag] = [event.clientX, event.clientY];
+    shape.points = planePolygon(shape.line[0], shape.line[1], shape.flip);
+  } else {
+    shape.points[cutState.drag] = [event.clientX, event.clientY];
+  }
   drawCutOutline();                         // beim Ziehen nur der Umriss …
 }, true);
 
@@ -4566,9 +5019,36 @@ renderer.domElement.addEventListener('pointerup', (event) => {
 }, true);
 
 // Dreht die Kamera, passt der Umriss nicht mehr zur Ansicht, in der er gesetzt
-// wurde. Dann verschwinden die Griffe, damit niemand aus einer neuen Richtung
-// weiterzieht und glaubt, er korrigiere den alten Schnitt.
-controls.addEventListener('start', () => { if (cutState.drag < 0) endEditing(); });
+// wurde. Dann verschwinden die Griffe — angemeldet in makeControls(), damit
+// auch die nach einem Rollen neu gebaute Steuerung davon weiß.
+
+/* Ein Klick auf die Schnittkante holt den Schnitt zurück.
+ *
+ * Bis hierher war ein gesetzter Schnitt endgültig: die Griffe verschwanden beim
+ * ersten Drehen, und es gab keinen Weg zurück außer alles zu verwerfen. Die
+ * weiße Kante liegt sichtbar in der Karte — sie ist der naheliegende Griff.
+ *
+ * Ein Klick, kein Zug: nach dem Drehen der Karte darf sich nichts öffnen. */
+let _pressedAt = null;
+renderer.domElement.addEventListener('pointerdown', (event) => {
+  _pressedAt = [event.clientX, event.clientY];
+});
+renderer.domElement.addEventListener('click', (event) => {
+  if (cutState.drawing || cutState.drag >= 0) return;
+  if (_pressedAt && Math.hypot(event.clientX - _pressedAt[0],
+                               event.clientY - _pressedAt[1]) > 4) return;
+  const index = cutNear(event.clientX, event.clientY);
+  if (index < 0) return;
+  if (index === cutState.editing) return;   // schon offen
+  editCut(index);
+});
+
+/* Und die Hand soll es wissen, bevor sie klickt. */
+renderer.domElement.addEventListener('pointermove', (event) => {
+  if (cutState.drawing || cutState.drag >= 0 || !cutState.shapes.length) return;
+  const over = cutNear(event.clientX, event.clientY) >= 0;
+  renderer.domElement.style.cursor = over ? 'pointer' : '';
+});
 
 /* Nur zum Nachsehen von außen: wo die Griffe liegen und aus welcher Richtung
  * geschaut wird. Die Oberflächentests fassen den Umriss so an, wie die Hand es
@@ -4580,6 +5060,35 @@ controls.addEventListener('start', () => { if (cutState.drag < 0) endEditing(); 
 /* Damit ein Test die Kamera irgendwohin stellen kann. Sie ist sonst nur über
  * Ziehen erreichbar, und "wie dunkel ist die Unterseite" lässt sich per Maus
  * nicht wiederholbar fragen. */
+/* Die Länge jedes Vertexfeldes. Weicht eines ab, hört WebGL auf zu zeichnen
+ * und sagt nichts, was im Fenster ankäme — genau daran verschwand die Karte
+ * nach einem Schnitt. Der Test prüft die Ursache, nicht nur das Bild. */
+/* Nur zum Nachsehen: die Szene selbst. Ein Zeichenaufruf, der abbricht, nennt
+ * nicht das Objekt, an dem es liegt — der Weg dahin führt über alles, was
+ * gezeichnet wird. */
+window.epcoreScene = () => scene;
+
+/* Was auf der Karte steht, in Zahlen: die gerade sichtbaren Werte und die
+ * Farben, die daraus werden. Dieselbe Bäckerei wie der Export, damit ein Test
+ * über die Farbe zugleich prüft, dass das exportierte Modell so aussieht. */
+/* Womit die nächste Aufnahme laufen würde. Die Einstellungen wirken erst im
+ * fertigen Video — ohne diesen Blick könnte ein Test nur prüfen, dass sich ein
+ * Regler bewegen lässt, nicht dass ihn jemand liest. */
+window.epcoreRecOptions = () => ({ ...recOpts });
+
+window.epcoreShownValues = () =>
+  (state.mode || '').startsWith('scalar:') ? visibleScalar(state.mode.slice(7)) : null;
+window.epcoreShownColours = () => bakeColorsU8();
+
+window.epcoreMeshAttributes = () => {
+  if (!mesh) return null;
+  const out = {};
+  for (const name of Object.keys(mesh.geometry.attributes)) {
+    out[name] = mesh.geometry.attributes[name].count;
+  }
+  return out;
+};
+
 window.epcoreLookFrom = (x, y, z) => {
   camera.position.set(x, y, z);
   camera.lookAt(controls.target);
@@ -4614,10 +5123,39 @@ window.epcoreTagView = () => ({
   ablationSites: (current && current.ablation || []).length,
 });
 
+/* Wo die Kante eines Schnitts auf dem Schirm liegt. Die Oberflächentests
+ * greifen sie an, wie die Hand es täte — sie müssen dafür wissen, wohin, und
+ * die Naht steht in keiner Auszeichnung. */
+window.epcoreSeamAt = (index) => {
+  const shape = cutState.shapes[index];
+  const points = shape && shape._seamPoints;
+  if (!points || !points.length || !mesh) return null;
+  mesh.updateMatrixWorld();
+  camera.updateMatrixWorld();
+  const at = new THREE.Vector3();
+  for (let i = 0; i < points.length; i += 3) {
+    at.set(points[i], points[i + 1], points[i + 2])
+      .applyMatrix4(mesh.matrixWorld).project(camera);
+    if (at.z > 1) continue;
+    const x = (at.x * 0.5 + 0.5) * innerWidth;
+    const y = (-at.y * 0.5 + 0.5) * innerHeight;
+    // Nur was wirklich getroffen werden kann: dieselbe Prüfung wie beim Klick.
+    if (cutNear(x, y, 3) === index) return [Math.round(x), Math.round(y)];
+  }
+  return null;
+};
+
 window.epcoreCutView = () => ({
   editing: cutState.editing,
   drawing: cutState.drawing,
-  handles: (cutState.shapes[cutState.editing] || { points: [] }).points,
+  tool: cutState.tool,
+  side: cutState.side,
+  flip: !!cutState.flip,
+  handles: handlePoints(cutState.shapes[cutState.editing]) || [],
+  overlay: (() => { const c = cutOverlay();
+                    return { display: c.style.display, pointer: c.style.pointerEvents,
+                             z: c.style.zIndex }; })(),
+  controls: controls.enabled,
   cuts: cutState.shapes.length,
   camera: camera.position.toArray(),
 });
@@ -4947,7 +5485,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=abd75daee5c4');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=8e1f1b561c45');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -4995,7 +5533,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=abd75daee5c4';
+import '../shared/bridge.js?v=8e1f1b561c45';
 
 /* In der Schale steht "Öffnen" auch oben in der Leiste, für beide Module. Das
  * Menü hier daneben wäre eine zweite Antwort auf dieselbe Frage — die Knöpfe
