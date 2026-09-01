@@ -12,8 +12,8 @@
  *  Parameter injiziert, damit das Modul ohne Bundler testbar bleibt.
  * ===================================================================== */
 
-import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=1a0eefe5fd00';
-import { readVisitag, summarise as summariseAblation } from './epablation.js?v=1a0eefe5fd00';
+import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=4dadfbb5e889';
+import { readVisitag, summarise as summariseAblation } from './epablation.js?v=4dadfbb5e889';
 
 const SENTINEL = 1e4;
 
@@ -1230,6 +1230,10 @@ export function parseCartoPoints(files) {
       unipolarMv: cartoNumber(attr('Voltages', 'Unipolar')),
       woiMs: (woiFrom != null && woiTo != null) ? [woiFrom, woiTo] : null,
       mapAnnotation: cartoNumber(attr('Annotations', 'Map_Annotation')),
+      // Reference annotation, same as carto_points.py reads it: reannotation
+      // needs the reference on both paths, and a conformance test caught the
+      // browser dropping it.
+      referenceAnnotation: cartoNumber(attr('Annotations', 'Reference_Annotation')),
       // Nur der nackte Name: ein Verzeichnispfad aus dem Export gehört nicht
       // in etwas, das mit einer Karte weiterreist.
       egmName: ecgName ? ecgName.replace(/^.*[\\/]/, '') : null,
