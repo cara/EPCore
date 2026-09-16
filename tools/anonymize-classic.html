@@ -2385,7 +2385,27 @@ async function buildPlan(files, profile) {
 // weiterhin gemeldet und nicht verschwiegen werden.
 const PASSTHROUGH_MAGIC = [];
 
+// Beside a database SQLite keeps a rollback journal (`-journal`) or a
+// write-ahead log (`-wal`). Both hold whole pages — the journal as they were
+// before a change, the log what has not been copied back — and so the very
+// names the database scrub replaces. Opening the database replays them: a log
+// covers the scrubbed pages, a hot journal writes the old ones back. This page
+// cannot merge either into the database, so it reports them.
+//
+// By name, not by magic: in PERSIST mode SQLite zeroes the journal header and
+// leaves the pages behind it. The naming rule is SQLite's own. `-shm` holds
+// page numbers and no content, and is not reported.
+const PASSTHROUGH_NAMES = [
+  { name: "SQLite-Begleitdatei (-wal/-journal)", pattern: /-(wal|journal)$/i },
+];
+
 async function unanonymisableKind(file) {
+  const base = String(file.name || "").split("/").pop();
+  if (file.size > 0) {
+    for (const { name, pattern } of PASSTHROUGH_NAMES) {
+      if (pattern.test(base)) return name;
+    }
+  }
   for (const { name, at, bytes } of PASSTHROUGH_MAGIC) {
     if (file.size < at + bytes.length) continue;
     const head = new Uint8Array(
@@ -2597,7 +2617,8 @@ function anonymizeDicomBytes(bytes, replacement, targets, withDates) {
 // Datei herunterlädt, wäre der falsche Handel. Stattdessen dieselbe Regel wie
 // bei DICOM — **längenerhaltend** überschreiben. Der Serial-Type im
 // Record-Header kodiert die Länge, also bleibt der Header unangetastet, keine
-// Zelle wächst, keine Seite muss geteilt werden, keine Freiliste anfassen.
+// Zelle wächst, keine Seite muss geteilt werden, die Freiliste behält ihre
+// Form (nur ihr Inhalt wird genullt, siehe sqliteWipeFreeSpace).
 //
 // Zwei Preise, beide sichtbar:
 //
@@ -2636,7 +2657,8 @@ function sqliteHeader(bytes) {
   let pageSize = view.getUint16(16);
   if (pageSize === 1) pageSize = 65536;
   const reserved = bytes[20];
-  return { pageSize, reserved, pages: view.getUint32(28) };
+  return { pageSize, reserved, pages: view.getUint32(28),
+           encoding: view.getUint32(56) };
 }
 
 /** Every table-leaf page reachable from `root`, as page numbers (1-based). */
@@ -2744,15 +2766,302 @@ function sqliteIsPii(rules, table, column) {
       && (c === "value" || c === "name");
 }
 
+// A value overwritten in place is gone from its cell. It is not necessarily
+// gone from the file, and a query cannot tell:
+//
+//  * An index keeps its own copy of every key. Overwritten in the table and not
+//    in the index, the name stays in the file and the database is corrupt — the
+//    row is no longer where the index says (integrity_check: "row 1 missing
+//    from index"). Such a column is left alone and reported.
+//  * What the vendor's SQLite deleted or moved without SQLITE_SECURE_DELETE is
+//    still there, in free blocks inside a page and on the free list. Those
+//    bytes belong to no row, so they are zeroed — length-preserving like the
+//    rest, no header field or pointer changes.
+//  * Journal and write-ahead log beside the database: see PASSTHROUGH_NAMES.
+//
+// The Python side rewrites the whole file with VACUUM INTO instead, which a
+// page without SQLite cannot do; tests/conformance/test_sqlite_scrubber.py
+// holds both to the same databases (fixtures/sqlite_residue.py).
+
+/** Every page of the b-tree rooted at `root` — interior and leaf, table and
+ *  index — as `{ page, type }`. */
+function sqliteTreePages(bytes, header, root, seen) {
+  const out = [];
+  const stack = [root];
+  while (stack.length) {
+    const page = stack.pop();
+    if (page < 1 || seen.has(page)) continue;
+    const at = (page - 1) * header.pageSize;
+    if (at + header.pageSize > bytes.length) continue;
+    seen.add(page);
+    const view = new DataView(bytes.buffer, bytes.byteOffset + at,
+                              header.pageSize);
+    const offset = page === 1 ? 100 : 0;
+    const type = view.getUint8(offset);
+    if (type !== 0x02 && type !== 0x05 && type !== 0x0a && type !== 0x0d) continue;
+    out.push({ page, type });
+    if (type === 0x0a || type === 0x0d) continue;
+    const cells = view.getUint16(offset + 3);
+    stack.push(view.getUint32(offset + 8));          // rightmost pointer
+    for (let i = 0; i < cells; i++) {
+      const cellAt = view.getUint16(offset + 12 + i * 2);
+      if (cellAt + 4 <= header.pageSize) stack.push(view.getUint32(cellAt));
+    }
+  }
+  return out;
+}
+
+function sqliteSerialSize(serial) {
+  if (serial >= 12) return Math.floor((serial - 12) / 2);
+  return [0, 1, 2, 3, 4, 6, 8, 8, 0, 0][serial] || 0;
+}
+
+function sqliteText(bytes, value) {
+  return value && value.isText
+    ? dicomLatin1(bytes.subarray(value.at, value.at + value.size)) : null;
+}
+
+/** Every index in sqlite_master as `{ name, table, root, sql }`. `sql` is null
+ *  for the indexes SQLite creates itself for UNIQUE and PRIMARY KEY. */
+function sqliteIndexes(bytes, header) {
+  const out = [];
+  for (const page of sqliteLeafPages(bytes, header, 1, new Set())) {
+    for (const row of sqliteCells(bytes, header, page)) {
+      if (row.overflow || !row.values || row.values.length < 5) continue;
+      const [kind, name, table, root, sql] = row.values;
+      if (sqliteText(bytes, kind) !== "index") continue;
+      let rootPage = 0;
+      if (root.serial >= 1 && root.serial <= 6) {
+        for (let i = 0; i < root.size; i++) rootPage = rootPage * 256 + bytes[root.at + i];
+      }
+      out.push({ name: sqliteText(bytes, name) || "", table: sqliteText(bytes, table) || "",
+                 root: rootPage, sql: sqliteText(bytes, sql) });
+    }
+  }
+  return out;
+}
+
+/** Rows of sqlite_master whose record runs onto overflow pages. */
+function sqliteMasterOverflow(bytes, header) {
+  let n = 0;
+  for (const page of sqliteLeafPages(bytes, header, 1, new Set())) {
+    for (const row of sqliteCells(bytes, header, page)) if (row.overflow) n++;
+  }
+  return n;
+}
+
+/** The b-tree page type byte of `page`, or -1 past the end of the file. */
+function sqlitePageType(bytes, header, page) {
+  const at = (page - 1) * header.pageSize + (page === 1 ? 100 : 0);
+  return page >= 1 && at < bytes.length ? bytes[at] : -1;
+}
+
+/** The text keys of an index b-tree as latin-1 strings, and whether a key runs
+ *  onto overflow pages (then not all of its text is here to compare). */
+function sqliteIndexText(bytes, header, root) {
+  const usable = header.pageSize - header.reserved;
+  const maxLocal = Math.floor((usable - 12) * 64 / 255) - 23;
+  const values = new Set();
+  let overflow = false;
+  for (const { page, type } of sqliteTreePages(bytes, header, root, new Set())) {
+    if (type !== 0x0a && type !== 0x02) continue;
+    const base = (page - 1) * header.pageSize;
+    const view = new DataView(bytes.buffer, bytes.byteOffset + base, header.pageSize);
+    const pointers = type === 0x02 ? 12 : 8;
+    const count = view.getUint16(3);
+    for (let i = 0; i < count; i++) {
+      // An interior index cell starts with the left child pointer.
+      let at = base + view.getUint16(pointers + i * 2) + (type === 0x02 ? 4 : 0);
+      const [payload, n1] = sqliteVarint(bytes, at); at += n1;
+      if (payload > maxLocal) { overflow = true; continue; }
+      const [headerLen, n2] = sqliteVarint(bytes, at);
+      let typeAt = at + n2;
+      let valueAt = at + headerLen;
+      while (typeAt < at + headerLen) {
+        const [serial, n] = sqliteVarint(bytes, typeAt); typeAt += n;
+        const size = sqliteSerialSize(serial);
+        if (serial >= 13 && serial % 2 === 1) {
+          values.add(dicomLatin1(bytes.subarray(valueAt, valueAt + size)));
+        }
+        valueAt += size;
+      }
+    }
+  }
+  return { values, overflow };
+}
+
+/** What an identifying value is overwritten with, or null to leave it. */
+function sqliteReplacement(rules, column, value, replacement, withDates, bytes) {
+  if (!value || !value.isText || value.size === 0) return null;
+  const c = column.toLowerCase();
+  const isDate = (rules.date_columns || []).includes(c);
+  if (isDate && !withDates && !/birth/.test(c)) return null;
+  const base = (isDate && !/time/.test(c)) ? "20000101" : replacement;
+  const out = new Uint8Array(value.size).fill(0x20);
+  out.set(dicomBytesOf(base.slice(0, value.size)));
+  for (let k = 0; k < value.size; k++) {
+    if (bytes[value.at + k] !== out[k]) return out;
+  }
+  return null;                                     // already replaced
+}
+
 /**
- * Overwrite the identifying columns in place. Returns
- * `{ changes, overflow, tables }`; `bytes` is modified.
+ * Identifying columns of `table` that an index also holds, as
+ * column -> [index names]. The SQL of an index names its columns — including
+ * inside an expression like lower(last_name) — but the indexes SQLite makes for
+ * UNIQUE have no SQL, so each index is also read and its keys compared with the
+ * values that would be overwritten. A column with nothing left to overwrite is
+ * no risk and not reported, or a database scrubbed once reports itself forever.
+ */
+function sqliteIndexedColumns(bytes, header, rules, table, wanted, pages, indexes,
+                              replacement, withDates) {
+  const out = new Map();
+  const own = indexes.filter(ix => ix.root > 0
+                                   && ix.table.toLowerCase() === table.toLowerCase());
+  if (!own.length) return out;
+  const pending = new Map(wanted.map(({ c }) => [c, new Set()]));
+  for (const page of pages) {
+    for (const row of sqliteCells(bytes, header, page)) {
+      if (row.overflow || !row.values) continue;
+      for (const { c, i } of wanted) {
+        if (sqliteReplacement(rules, c, row.values[i], replacement, withDates, bytes)) {
+          pending.get(c).add(sqliteText(bytes, row.values[i]));
+        }
+      }
+    }
+  }
+  for (const ix of own) {
+    const keys = sqliteIndexText(bytes, header, ix.root);
+    const columns = ix.sql ? ix.sql.slice(ix.sql.indexOf("(") + 1) : "";
+    for (const { c } of wanted) {
+      if (!pending.get(c).size) continue;
+      const word = c.replace(/[^A-Za-z0-9_]/g, "\\$&");
+      const named = new RegExp(`(^|[^A-Za-z0-9_])${word}($|[^A-Za-z0-9_])`, "i")
+        .test(columns);
+      const shared = keys.overflow || [...pending.get(c)].some(v => keys.values.has(v));
+      if (named || shared) out.set(c, [...(out.get(c) || []), ix.name]);
+    }
+  }
+  return out;
+}
+
+/**
+ * Zero the bytes no live row owns: inside every b-tree page the free blocks and
+ * the gap between the cell pointers and the cells, and the pages on the free
+ * list. `roots` must name every tree in the file. The free list is walked first
+ * and only zeroed when it adds up — its length matches the header and none of
+ * its pages is part of a tree — because zeroing a page that is in use is a
+ * corrupt database. Returns `{ zeroed, note }`.
+ */
+function sqliteWipeFreeSpace(bytes, header, roots) {
+  const { pageSize } = header;
+  const usable = pageSize - header.reserved;
+  const pageCount = Math.floor(bytes.length / pageSize);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let zeroed = 0;
+  const zero = (from, to) => {
+    for (let k = from; k < to; k++) {
+      if (bytes[k] !== 0) { bytes[k] = 0; zeroed++; }
+    }
+  };
+
+  const tree = new Map();
+  const seen = new Set();
+  for (const root of roots) {
+    for (const { page, type } of sqliteTreePages(bytes, header, root, seen)) {
+      tree.set(page, type);
+    }
+  }
+  for (const [page, type] of tree) {
+    const base = (page - 1) * pageSize;
+    const offset = page === 1 ? 100 : 0;
+    const cells = view.getUint16(base + offset + 3);
+    const content = view.getUint16(base + offset + 5) || 65536;
+    const pointersEnd = offset + (type === 0x02 || type === 0x05 ? 12 : 8) + cells * 2;
+    if (pointersEnd <= content && content <= usable) {
+      zero(base + pointersEnd, base + content);
+    }
+    let block = view.getUint16(base + offset + 1);
+    for (let guard = 0; block && guard < usable; guard++) {
+      if (block < content || block + 4 > usable) break;
+      const next = view.getUint16(base + block);
+      const size = view.getUint16(base + block + 2);
+      if (size < 4 || block + size > usable) break;
+      zero(base + block + 4, base + block + size);   // keep next and size
+      if (next && next < block + size) break;       // the chain only goes forward
+      block = next;
+    }
+  }
+
+  const trunks = [], leaves = [];
+  const listed = new Set();
+  let consistent = true;
+  let trunk = view.getUint32(32);
+  while (trunk && consistent) {
+    if (trunk < 2 || trunk > pageCount || listed.has(trunk) || tree.has(trunk)) {
+      consistent = false; break;
+    }
+    listed.add(trunk); trunks.push(trunk);
+    const base = (trunk - 1) * pageSize;
+    const count = view.getUint32(base + 4);
+    if (8 + count * 4 > usable) { consistent = false; break; }
+    for (let i = 0; i < count; i++) {
+      const leaf = view.getUint32(base + 8 + i * 4);
+      if (leaf < 2 || leaf > pageCount || listed.has(leaf) || tree.has(leaf)) {
+        consistent = false; break;
+      }
+      listed.add(leaf); leaves.push(leaf);
+    }
+    trunk = view.getUint32(base);
+  }
+  if (!consistent || listed.size !== view.getUint32(36)) {
+    return { zeroed, note: "Freiliste nicht schlüssig — gelöschte Inhalte darin "
+                         + "wurden NICHT entfernt" };
+  }
+  for (const t of trunks) {
+    const base = (t - 1) * pageSize;
+    zero(base + 8 + view.getUint32(base + 4) * 4, base + usable);
+  }
+  for (const leaf of leaves) {
+    const base = (leaf - 1) * pageSize;
+    zero(base, base + usable);
+  }
+  return { zeroed, note: null };
+}
+
+/**
+ * Overwrite the identifying columns in place and zero the free space. Returns
+ * `{ changes, overflow, tables, wiped, notes }`; `bytes` is modified. Anything
+ * in `notes` means the database is not anonymised.
  */
 function anonymizeSqliteBytes(bytes, rules, replacement, withDates) {
   const header = sqliteHeader(bytes);
-  if (!header) return { changes: 0, overflow: 0, tables: 0, notes: ["kein SQLite-Kopf"] };
+  if (!header) {
+    return { changes: 0, overflow: 0, tables: 0, wiped: 0, notes: ["kein SQLite-Kopf"] };
+  }
+  // A UTF-16 database stores two bytes per character. Every comparison below —
+  // column names out of the schema, values against index keys — reads single
+  // bytes, so nothing would match: no column found, nothing replaced, nothing
+  // said. 0 is a database that has no schema yet.
+  if (header.encoding !== 0 && header.encoding !== 1) {
+    const name = { 2: "UTF-16le", 3: "UTF-16be" }[header.encoding]
+      || `unbekannt (${header.encoding})`;
+    return { changes: 0, overflow: 0, tables: 0, wiped: 0,
+             notes: [`Textkodierung ${name} — Datenbank NICHT geändert`] };
+  }
+  // A schema row that runs onto overflow pages is a table or an index this
+  // walker cannot see: its identifiers would be skipped, or its keys left
+  // behind a column that was overwritten. Nothing is written then.
+  const masterOverflow = sqliteMasterOverflow(bytes, header);
+  if (masterOverflow) {
+    return { changes: 0, overflow: masterOverflow, tables: 0, wiped: 0,
+             notes: [`${masterOverflow} Schema-Eintrag/Einträge laufen auf `
+                   + `Overflow-Seiten weiter — Datenbank NICHT geändert`] };
+  }
   const schema = sqliteSchema(bytes, header);
+  const indexes = sqliteIndexes(bytes, header);
   let changes = 0, overflow = 0, tables = 0;
+  const notes = [];
 
   for (const [table, info] of Object.entries(schema)) {
     if (!info.root) continue;
@@ -2761,34 +3070,43 @@ function anonymizeSqliteBytes(bytes, rules, replacement, withDates) {
       .filter(({ c }) => sqliteIsPii(rules, table, c));
     if (!wanted.length) continue;
     tables++;
-    for (const page of sqliteLeafPages(bytes, header, info.root, new Set())) {
+    // A WITHOUT ROWID table is stored as an index b-tree. sqliteLeafPages
+    // follows table pages only, so its rows would come back as none — nothing
+    // replaced and nothing said.
+    const rootType = sqlitePageType(bytes, header, info.root);
+    if (rootType === 0x02 || rootType === 0x0a) {
+      notes.push(`${table} ist eine WITHOUT-ROWID-Tabelle und wurde NICHT geändert`);
+      continue;
+    }
+    const pages = sqliteLeafPages(bytes, header, info.root, new Set());
+    const indexed = sqliteIndexedColumns(bytes, header, rules, table, wanted, pages,
+                                         indexes, replacement, withDates);
+    for (const [column, names] of indexed) {
+      notes.push(`${table}.${column} steht auch im Index ${names.join(", ")} `
+               + `und wurde NICHT geändert`);
+    }
+    for (const page of pages) {
       for (const row of sqliteCells(bytes, header, page)) {
         if (row.overflow) { overflow++; continue; }
         for (const { c, i } of wanted) {
+          if (indexed.has(c)) continue;
           const value = row.values[i];
-          if (!value || !value.isText || value.size === 0) continue;
-          const isDate = (rules.date_columns || []).includes(c.toLowerCase());
-          if (isDate && !withDates && !/birth/.test(c.toLowerCase())) continue;
-          const base = (isDate && !/time/.test(c.toLowerCase()))
-            ? "20000101" : replacement;
-          const repl = dicomBytesOf(base.slice(0, value.size));
-          const out = new Uint8Array(value.size).fill(0x20);
-          out.set(repl);
-          let differs = false;
-          for (let k = 0; k < value.size; k++) {
-            if (bytes[value.at + k] !== out[k]) { differs = true; break; }
-          }
-          if (differs) { bytes.set(out, value.at); changes++; }
+          const out = sqliteReplacement(rules, c, value, replacement, withDates, bytes);
+          if (out) { bytes.set(out, value.at); changes++; }
         }
       }
     }
   }
-  const notes = [];
+
+  const roots = [1, ...Object.values(schema).map(t => t.root),
+                 ...indexes.map(ix => ix.root)].filter(r => r > 0);
+  const wipe = sqliteWipeFreeSpace(bytes, header, roots);
+  if (wipe.note) notes.push(wipe.note);
   if (overflow) {
     notes.push(`${overflow} Datensatz/Datensätze laufen auf Overflow-Seiten `
              + `weiter und wurden NICHT geändert`);
   }
-  return { changes, overflow, tables, notes };
+  return { changes, overflow, tables, wiped: wipe.zeroed, notes };
 }
 
 // === SCRUB-CORE END ===
@@ -2796,7 +3114,8 @@ function anonymizeSqliteBytes(bytes, rules, replacement, withDates) {
 //     unanonymisableKind, isDicomBytes, readDicomMeta, padReplacement,
 //     anonymizeDicomBytes, dicomTargets, dicomTagKey, dicomLatin1,
 //     dicomBytesOf, dicomArchiveRules, sqliteHeader, sqliteSchema,
-//     sqliteVarint, sqliteIsPii, anonymizeSqliteBytes ===
+//     sqliteVarint, sqliteIsPii, anonymizeSqliteBytes, PASSTHROUGH_NAMES,
+//     sqliteTreePages, sqliteIndexes, sqliteIndexText, sqliteWipeFreeSpace ===
 
 function logLine(msg) {
   const el = document.getElementById("log");

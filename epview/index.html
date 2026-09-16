@@ -15,9 +15,9 @@
   } catch (e) { /* Speicher abgeschaltet */ }
 </script>
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/theme.js?v=4dadfbb5e889"></script>
-<script type="module" src="../shared/settings.js?v=4dadfbb5e889"></script>
-<script type="module" src="../shared/i18n.js?v=4dadfbb5e889"></script>
+<script type="module" src="../shared/theme.js?v=dd389fa303c1"></script>
+<script type="module" src="../shared/settings.js?v=dd389fa303c1"></script>
+<script type="module" src="../shared/i18n.js?v=dd389fa303c1"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -1130,7 +1130,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=4dadfbb5e889",
+    "three": "../vendor/three/three.module.js?v=dd389fa303c1",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -1140,14 +1140,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import epcoreTheme from '../shared/theme.js?v=4dadfbb5e889';
-import * as EP from './epconv.js?v=4dadfbb5e889';
-import * as EPM from './epmetrics.js?v=4dadfbb5e889';
-import * as EPCV from './epconduction.js?v=4dadfbb5e889';
-import * as EPA from './epablation.js?v=4dadfbb5e889';
-import * as EPSave from '../shared/save.js?v=4dadfbb5e889';
-import * as EPO from './epopenep.js?v=4dadfbb5e889';
-import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=4dadfbb5e889';
+import epcoreTheme from '../shared/theme.js?v=dd389fa303c1';
+import * as EP from './epconv.js?v=dd389fa303c1';
+import * as EPM from './epmetrics.js?v=dd389fa303c1';
+import * as EPCV from './epconduction.js?v=dd389fa303c1';
+import * as EPA from './epablation.js?v=dd389fa303c1';
+import * as EPSave from '../shared/save.js?v=dd389fa303c1';
+import * as EPO from './epopenep.js?v=dd389fa303c1';
+import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=dd389fa303c1';
 
 /* =====================================================================
  *  Color lookup tables
@@ -3543,7 +3543,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=4dadfbb5e889'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=dd389fa303c1'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -3823,7 +3823,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=4dadfbb5e889');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=dd389fa303c1');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -4477,7 +4477,10 @@ function handlePoints(shape) {
 function drawCutOutline() {
   const canvas = cutOverlay();
   const scale = window.devicePixelRatio || 1;
-  if (canvas.width !== Math.round(innerWidth * scale)) {
+  // Auch wenn sich nur die Höhe ändert: Griffe, die mit dem Fenster nach unten
+  // umgerechnet werden, lägen sonst jenseits der Fläche — greifbar, aber unsichtbar.
+  if (canvas.width !== Math.round(innerWidth * scale)
+      || canvas.height !== Math.round(innerHeight * scale)) {
     canvas.width = Math.round(innerWidth * scale);
     canvas.height = Math.round(innerHeight * scale);
     // Und die Größe auf dem Schirm dazu, in CSS-Pixeln: ohne sie zeichnet die
@@ -4521,6 +4524,7 @@ function startCutting() {
    * drüber (16), damit sich das Werkzeug jederzeit wieder weglegen lässt. */
   cutOverlay().style.zIndex = '14';
   endEditing();
+  holdStill();
   cutState.drawing = true;
   cutState.points = [];
   controls.enabled = false;                 // sonst dreht das Zeichnen die Karte
@@ -4633,20 +4637,108 @@ function cutNear(clientX, clientY, reach = 14) {
 function editCut(index) {
   const shape = cutState.shapes[index];
   if (!shape) return;
-  const view = shape.view;
-  if (view && view.eye && view.target) {
-    const moved = camera.position.distanceTo(new THREE.Vector3().fromArray(view.eye)) > 1e-3
-               || controls.target.distanceTo(new THREE.Vector3().fromArray(view.target)) > 1e-3;
-    if (moved) {
-      camera.position.fromArray(view.eye);
-      controls.target.fromArray(view.target);
-      camera.updateProjectionMatrix();
-      controls.update();
-      epcoreNotify(T('map.cut.view.restored'));
-    }
+  const pose = poseOfView(shape.view);
+  if (pose) {
+    /* Ohne Meldung. Dass die Ansicht zurückkommt, sieht man; ein Dialog davor
+     * musste im Fenster erst weggeklickt werden, bevor sich ein Griff fassen
+     * ließ.
+     *
+     * Die Abstandsgrenzen gehören zu der Karte, die zuletzt eingerahmt wurde.
+     * Eine engere hätte die Kamera still vor der Stelle angehalten, von der aus
+     * geschnitten wurde. */
+    const reach = pose.eye.distanceTo(pose.target);
+    controls.minDistance = Math.min(controls.minDistance, reach);
+    controls.maxDistance = Math.max(controls.maxDistance, reach);
+    camera.up.copy(pose.up);
+    camera.position.copy(pose.eye);
+    controls.target.copy(pose.target);
+    camera.lookAt(controls.target);
+    // Auch wenn die Kamera schon dort stand: ein Rest Schwung oder die
+    // Selbstdrehung nähme die Griffe mit dem nächsten Bild wieder weg.
+    holdStill();
   }
+  /* Griffe nur, wo sie stimmen. Kommt die Kamera nicht an, stünden sie neben
+   * der Kante, und ein Zug daran schnitte an einer Stelle, die niemand gewählt
+   * hat. */
+  if (!standsWhereCutWasMade(shape.view)) { endEditing(); return; }
+  fitCutToWindow(shape);
   startEditing(index);
   buildTrimUI();
+}
+
+/** Die Karte anhalten: Selbstdrehung aus, Schwung weg.
+ *
+ * Ein Umriss besteht aus Bildschirmpunkten, Griffe ebenso — beide gelten nur
+ * für eine Kamera, die stillsteht. Mit `enableDamping` dreht die Karte nach dem
+ * Loslassen noch eine Weile weiter, und die Selbstdrehung hinterlässt denselben
+ * Schwung, wenn man sie abschaltet. Eine neu gebaute Steuerung hat keinen; sie
+ * liest dabei auch `camera.up` neu. */
+function holdStill() {
+  if (controls.autoRotate) {
+    controls.autoRotate = false;
+    document.getElementById('t-rotate').classList.remove('on');
+  }
+  rebuildControls();
+}
+
+/** Wo die Kamera stehen muss, damit ein Schnitt wieder so im Bild liegt wie
+ * beim Zeichnen — in den Weltkoordinaten von jetzt.
+ *
+ * Die Karte kann seither gewandert sein: „Zentrieren" und der Vergleich
+ * verschieben ihre Gruppe. Der Schnitt hängt an der Karte, nicht an der Welt;
+ * Auge, Ziel und Oben ziehen deshalb mit ihr um. */
+function poseOfView(view) {
+  if (!mesh || !view || !view.eye || !view.target || !view.up || !view.world) return null;
+  mesh.updateMatrixWorld();
+  const since = new THREE.Matrix4().multiplyMatrices(
+    mesh.matrixWorld, new THREE.Matrix4().copy(view.world).invert());
+  return {
+    eye: new THREE.Vector3().fromArray(view.eye).applyMatrix4(since),
+    target: new THREE.Vector3().fromArray(view.target).applyMatrix4(since),
+    up: new THREE.Vector3().fromArray(view.up).transformDirection(since),
+  };
+}
+
+/** Steht die Kamera noch so, wie der Schnitt gezeichnet wurde?
+ *
+ * Nur dann gelten seine Griffe: sie sind Bildschirmpunkte dieser einen
+ * Ansicht. Verglichen wird auch, was im Bild oben ist — Auge und Ziel allein
+ * lassen eine Drehung um die Blickachse durch. */
+function standsWhereCutWasMade(view) {
+  const pose = poseOfView(view);
+  if (!pose) return false;
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+  return camera.position.distanceTo(pose.eye) <= 1e-3
+      && controls.target.distanceTo(pose.target) <= 1e-3
+      && up.distanceToSquared(pose.up) <= 1e-8;
+}
+
+/** Die Punkte eines Schnitts auf die heutige Fenstergröße umrechnen.
+ *
+ * Sie sind Bildschirmpunkte des Fensters, in dem gezeichnet wurde; ist es
+ * seither anders groß, zeigen dieselben Zahlen auf andere Stellen der Karte.
+ * Bei derselben Kamera ist die Umrechnung exakt: die Höhe des Blickfelds
+ * bleibt, die Breite folgt dem Seitenverhältnis. Ein Punkt behält also seine
+ * Höhe im Bild, und sein Abstand von der Mitte ändert sich waagerecht um das
+ * Verhältnis der beiden Seitenverhältnisse. Der Schnitt selbst bleibt derselbe —
+ * nur seine Beschreibung bekommt die Maße von jetzt.
+ *
+ * Setzt voraus, dass die Kamera dort steht, wo gezeichnet wurde. */
+function fitCutToWindow(shape) {
+  const view = shape && shape.view;
+  if (!view || !innerWidth || !innerHeight) return false;
+  if (view.width === innerWidth && view.height === innerHeight) return false;
+  const stretch = (view.width / view.height) / (innerWidth / innerHeight);
+  const fit = ([x, y]) => [((x / view.width * 2 - 1) * stretch + 1) / 2 * innerWidth,
+                           y / view.height * innerHeight];
+  if (shape.plane && shape.line) {
+    shape.line = shape.line.map(fit);
+    shape.points = planePolygon(shape.line[0], shape.line[1], shape.flip);
+  } else {
+    shape.points = shape.points.map(fit);
+  }
+  shape.view = currentView();
+  return true;
 }
 
 function endEditing() {
@@ -4714,6 +4806,7 @@ function rebuildCuts() {
     /* Wo dieser Schnitt im Raum liegt — die Mitte jedes Nahtstücks. Damit ist
      * ein Klick auf die Kante einem Schnitt zuzuordnen, ohne dass man wüsste,
      * aus welcher Richtung er gesetzt wurde. */
+    shape._seam = cut.seam;
     shape._seamPoints = new Float32Array(cut.seam.length * 3);
     cut.seam.forEach(([a, b], i) => {
       shape._seamPoints[i*3]     = (positions[a*3]     + positions[b*3])     / 2;
@@ -4831,6 +4924,10 @@ function currentView() {
            // Genug, um genau hierher zurückzukehren: ein Schnitt lässt sich
            // sonst nach dem Drehen nicht mehr ehrlich nachbessern.
            eye: camera.position.toArray(), target: controls.target.toArray(),
+           // Und was im Bild oben war. Die Umlaufachse folgt nach jedem Zug der
+           // Ansicht (followTheView); ohne dies käme die Ansicht um die eigene
+           // Achse gedreht zurück, und die Griffe stünden neben ihrer Kante.
+           up: new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion).toArray(),
            width: innerWidth, height: innerHeight };
 }
 
@@ -4866,13 +4963,14 @@ function applyCut() {
      * Gezogen wird an der Linie, aus der es berechnet wird. */
     const line = [cutState.points[0].slice(), cutState.points[1].slice()];
     const flip = !!cutState.flip;
-    cutState.shapes.push({ points: planePolygon(line[0], line[1], flip), line, flip,
-                           side: 'through', view: currentView(), plane: true });
+    const shape = { points: planePolygon(line[0], line[1], flip), line, flip,
+                    side: 'through', view: currentView(), plane: true };
+    cutState.shapes.push(shape);
     leaveDrawing();
     applyTrim();
     buildTrimUI();
     if (typeof openSection === 'function') openSection('trim');
-    editCut(cutState.shapes.length - 1);
+    reopenIfKept(shape);
     return;
   }
   if (cutState.points.length < 3) { stopCutting(); return; }
@@ -4895,7 +4993,18 @@ function applyCut() {
   // Wer gerade geschnitten hat, sucht als Nächstes den Weg zurück — der steht
   // in diesem Abschnitt, und zugeklappt findet ihn niemand.
   if (typeof openSection === 'function') openSection('trim');
-  editCut(cutState.shapes.length - 1);
+  reopenIfKept(shape);
+}
+
+/** Den eben gesetzten Schnitt zum Nachbessern öffnen — wenn es ihn noch gibt.
+ *
+ * Ein Schnitt, der die ganze Karte genommen hätte, wird beim Neuaufbau
+ * verworfen. Blind den letzten der Liste zu öffnen hieße dann, einen älteren
+ * zu öffnen: die Kamera spränge in dessen Ansicht, gleich nach einer Meldung
+ * über etwas ganz anderes. */
+function reopenIfKept(shape) {
+  const index = cutState.shapes.indexOf(shape);
+  if (index >= 0) editCut(index);
 }
 
 function resetCuts() {
@@ -5145,6 +5254,26 @@ window.epcoreSeamAt = (index) => {
   return null;
 };
 
+/* Wo die Naht eines Schnitts auf dem Schirm liegt: beide Enden jedes Stücks,
+ * so wie die Kamera sie gerade sieht. Sie entstand auf seinem Umriss — in der
+ * Ansicht des Schnitts liegt sie also genau auf dessen Kanten. Ein Test misst
+ * daran, ob die Griffe eines wieder aufgenommenen Schnitts dort sitzen, wo die
+ * Karte geschnitten ist, statt nur zu prüfen, dass es Griffe gibt. */
+window.epcoreSeamOnScreen = (index) => {
+  const shape = cutState.shapes[index];
+  const pairs = shape && shape._seam;
+  if (!pairs || !current || !current.positions || !mesh) return [];
+  mesh.updateMatrixWorld();
+  camera.updateMatrixWorld();
+  const at = new THREE.Vector3();
+  const onScreen = (i) => {
+    at.set(current.positions[i * 3], current.positions[i * 3 + 1], current.positions[i * 3 + 2])
+      .applyMatrix4(mesh.matrixWorld).project(camera);
+    return [(at.x * 0.5 + 0.5) * innerWidth, (-at.y * 0.5 + 0.5) * innerHeight];
+  };
+  return pairs.map(([a, b]) => [onScreen(a), onScreen(b)]);
+};
+
 window.epcoreCutView = () => ({
   editing: cutState.editing,
   drawing: cutState.drawing,
@@ -5392,6 +5521,16 @@ epcoreTheme.onChange((name) => {
 addEventListener('resize', () => {
   camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  /* Die Griffe sind Bildschirmpunkte und rechnen sich mit dem Fenster um. Die
+   * Kamera hat sich nicht bewegt, also bleibt der Schnitt, wie er ist — auch
+   * mitten im Ziehen: bis zum nächsten Zeigerereignis liegen alle Punkte, der
+   * gezogene eingeschlossen, noch im alten Maß. Steht die Kamera nicht mehr
+   * beim Schnitt, gibt es nichts umzurechnen; dann gehen die Griffe weg. */
+  const edited = cutState.shapes[cutState.editing];
+  if (edited) {
+    if (!standsWhereCutWasMade(edited.view)) endEditing();
+    else if (fitCutToWindow(edited)) drawCutOutline();
+  }
 });
 
 // Q/E roll the view around the camera->target axis (rotate camera.up, then re-derive).
@@ -5427,6 +5566,18 @@ addEventListener('keydown', (e) => {
 /* =====================================================================
  *  Loop
  * ===================================================================== */
+/** Griffe weg, sobald die Kamera nicht mehr beim Schnitt steht.
+ *
+ * Einmal je Bild und nicht an einem Ereignis der Steuerung: nur ein Zug meldet
+ * `start`. Rollen mit Q/E, Einrahmen und die Selbstdrehung bewegen die Kamera
+ * ohne, und der Vergleich und „Zentrieren" bewegen gar nicht die Kamera, sondern
+ * die Karte. Auf jedem dieser Wege blieben die Griffe neben ihrer Kante stehen,
+ * und ein Zug daran schnitt aus einer Ansicht, die es nicht mehr gab. */
+function putHandlesAwayIfOffPose() {
+  const shape = cutState.shapes[cutState.editing];
+  if (shape && cutState.drag < 0 && !standsWhereCutWasMade(shape.view)) endEditing();
+}
+
 function animate(now) {
   requestAnimationFrame(animate);
   const rec = state.recording;
@@ -5435,6 +5586,7 @@ function animate(now) {
     if (rec.start == null) rec.start = t;
     const progress = clamp01((t - rec.start) / rec.durationMs);
     rec.driver(progress);
+    putHandlesAwayIfOffPose();
     renderer.setScissorTest(false);
     renderer.setViewport(0, 0, innerWidth, innerHeight);
     renderer.render(scene, camera);
@@ -5446,6 +5598,7 @@ function animate(now) {
   // normal loop (also used for 'live' recording)
   stepAnim(t);
   controls.update();
+  putHandlesAwayIfOffPose();
   if (_readoutDirty) { _readoutDirty = false; updateReadout(); }
   if (comparison) placeCompareTags();
   renderer.setScissorTest(false);
@@ -5485,7 +5638,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=4dadfbb5e889');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=dd389fa303c1');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -5533,7 +5686,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=4dadfbb5e889';
+import '../shared/bridge.js?v=dd389fa303c1';
 
 /* In der Schale steht "Öffnen" auch oben in der Leiste, für beide Module. Das
  * Menü hier daneben wäre eine zweite Antwort auf dieselbe Frage — die Knöpfe

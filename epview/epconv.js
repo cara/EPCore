@@ -12,8 +12,8 @@
  *  Parameter injiziert, damit das Modul ohne Bundler testbar bleibt.
  * ===================================================================== */
 
-import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=4dadfbb5e889';
-import { readVisitag, summarise as summariseAblation } from './epablation.js?v=4dadfbb5e889';
+import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=dd389fa303c1';
+import { readVisitag, summarise as summariseAblation } from './epablation.js?v=dd389fa303c1';
 
 const SENTINEL = 1e4;
 
