@@ -931,7 +931,7 @@ export const PROFILES = {
     "id": "rhythmia",
     "label": "Boston Scientific Rhythmia HDx",
     "family": "map",
-    "verified": true,
+    "verified": false,
     "detect": {
       "marker_files": [
         "*.000"
@@ -988,7 +988,38 @@ export const PROFILES = {
         "host": "ANONHOST"
       }
     },
-    "verification": "Gegen einen echten Rhythmia-HDx-Export geprüft (2026-08-06, 7,5 GB, sieben Teile): 4265 Binärblöcke unverändert durchgeschrieben, 1679 Ersetzungen — 1268 Timestamp, 191 StartTime, 198 Comment, je einmal EncryptedPatientInfo und EncryptedStudyInfo. Die Identität liegt bei diesem Hersteller nicht im Klartext: über 4265 Blöcke hinweg gibt es kein Namens-, MRN- oder Geburtsdatumsfeld, sondern zwei verschlüsselte Datensätze — beide werden durch [ENCRYPTED RECORD REMOVED BY EPCORE] ersetzt. Selbstscan sauber. NICHT geprüft: (a) der Export war unvollständig (letztes Teil fehlt) und wurde für den Lauf am letzten intakten Block gekürzt — die letzten 10,9 MB sind ungeprüft; (b) handgetippte Felder bleiben stehen (1046 Label, 864 UneditablePrefix) und werden nur gemeldet, weil ein Label die Bedeutung der Karte trägt; (c) Screenshots und Videos: dieser Export hatte keine, und eingebrannte Patientenzeilen in Bildern kann kein Textscrubber entfernen — sie stehen in der Liste der nicht untersuchten Dateien; (d) ein Haus, eine Softwarefassung."
+    "known_residue": [
+      {
+        "id": "binary_absolute_times",
+        "names": [
+          "*_ts.dat",
+          "surfelec_*_all.dat",
+          "surfmark_*_all.dat",
+          "anatpts_*_all.dat",
+          "beats_*_floats.dat",
+          "fieldmapgrid_*_positions.dat",
+          "*_trigger_sig_*.dat"
+        ]
+      },
+      {
+        "id": "xml_time_fields",
+        "names": [
+          "TS",
+          "tsB",
+          "tsE",
+          "mapdata_start_ts",
+          "mapdata_end_ts",
+          "DropTime",
+          "LastModTS",
+          "AnatomyMeshDataLastUpdatedTs",
+          "CreationTime",
+          "FavoriteTS",
+          "startTimestamp",
+          "endTimestamp"
+        ]
+      }
+    ],
+    "verification": "Gegen einen echten Rhythmia-HDx-Export geprüft (2026-08-06, 7,5 GB, sieben Teile): 4265 Binärblöcke unverändert durchgeschrieben, 1679 Ersetzungen — 1268 Timestamp, 191 StartTime, 198 Comment, je einmal EncryptedPatientInfo und EncryptedStudyInfo. Die Identität liegt bei diesem Hersteller nicht im Klartext: über 4265 Blöcke hinweg gibt es kein Namens-, MRN- oder Geburtsdatumsfeld, sondern zwei verschlüsselte Datensätze — beide werden durch [ENCRYPTED RECORD REMOVED BY EPCORE] ersetzt. Selbstscan sauber. NICHT geprüft: (a) der Export war unvollständig (letztes Teil fehlt) und wurde für den Lauf am letzten intakten Block gekürzt — die letzten 10,9 MB sind ungeprüft; (b) handgetippte Felder bleiben stehen (1046 Label, 864 UneditablePrefix) und werden nur gemeldet, weil ein Label die Bedeutung der Karte trägt; (c) Screenshots und Videos: dieser Export hatte keine, und eingebrannte Patientenzeilen in Bildern kann kein Textscrubber entfernen — sie stehen in der Liste der nicht untersuchten Dateien; (d) ein Haus, eine Softwarefassung. NACHTRAG 2026-09-13 — wieder ungeprüft: Datum und Uhrzeit der Prozedur bleiben aus der Ausgabe lesbar. NICHT entfernt werden (1) absolute Zeitangaben in den byte-genau kopierten Binärblöcken — jeder Float64-Uhrblock *_ts.dat, Spalte 0 von surfelec/surfmark/anatpts/beats_floats, Spalte 3 von fieldmapgrid_positions, die Gates-Triggersätze (Float64 an Offset 8) — und (2) XML-Zeitfelder außerhalb der Datumsliste: TS, tsB/tsE, mapdata_start_ts/mapdata_end_ts, DropTime, LastModTS, AnatomyMeshDataLastUpdatedTs, CreationTime, FavoriteTS, startTimestamp/endTimestamp. Die Prüfung vom 2026-08-06 hat nur nachgesehen, was die Feldtabelle kennt; diese Zeitkanäle hat sie NICHT geprüft, und ihr „Selbstscan sauber\" galt für sie nie. Befund: docs/findings/rhythmia-anonymisierung-zeitangaben.md."
   }
 };
 

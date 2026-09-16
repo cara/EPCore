@@ -1100,7 +1100,7 @@ const PROFILES = {
     "id": "rhythmia",
     "label": "Boston Scientific Rhythmia HDx",
     "family": "map",
-    "verified": true,
+    "verified": false,
     "detect": {
       "marker_files": [
         "*.000"
@@ -1157,7 +1157,38 @@ const PROFILES = {
         "host": "ANONHOST"
       }
     },
-    "verification": "Gegen einen echten Rhythmia-HDx-Export geprüft (2026-08-06, 7,5 GB, sieben Teile): 4265 Binärblöcke unverändert durchgeschrieben, 1679 Ersetzungen — 1268 Timestamp, 191 StartTime, 198 Comment, je einmal EncryptedPatientInfo und EncryptedStudyInfo. Die Identität liegt bei diesem Hersteller nicht im Klartext: über 4265 Blöcke hinweg gibt es kein Namens-, MRN- oder Geburtsdatumsfeld, sondern zwei verschlüsselte Datensätze — beide werden durch [ENCRYPTED RECORD REMOVED BY EPCORE] ersetzt. Selbstscan sauber. NICHT geprüft: (a) der Export war unvollständig (letztes Teil fehlt) und wurde für den Lauf am letzten intakten Block gekürzt — die letzten 10,9 MB sind ungeprüft; (b) handgetippte Felder bleiben stehen (1046 Label, 864 UneditablePrefix) und werden nur gemeldet, weil ein Label die Bedeutung der Karte trägt; (c) Screenshots und Videos: dieser Export hatte keine, und eingebrannte Patientenzeilen in Bildern kann kein Textscrubber entfernen — sie stehen in der Liste der nicht untersuchten Dateien; (d) ein Haus, eine Softwarefassung."
+    "known_residue": [
+      {
+        "id": "binary_absolute_times",
+        "names": [
+          "*_ts.dat",
+          "surfelec_*_all.dat",
+          "surfmark_*_all.dat",
+          "anatpts_*_all.dat",
+          "beats_*_floats.dat",
+          "fieldmapgrid_*_positions.dat",
+          "*_trigger_sig_*.dat"
+        ]
+      },
+      {
+        "id": "xml_time_fields",
+        "names": [
+          "TS",
+          "tsB",
+          "tsE",
+          "mapdata_start_ts",
+          "mapdata_end_ts",
+          "DropTime",
+          "LastModTS",
+          "AnatomyMeshDataLastUpdatedTs",
+          "CreationTime",
+          "FavoriteTS",
+          "startTimestamp",
+          "endTimestamp"
+        ]
+      }
+    ],
+    "verification": "Gegen einen echten Rhythmia-HDx-Export geprüft (2026-08-06, 7,5 GB, sieben Teile): 4265 Binärblöcke unverändert durchgeschrieben, 1679 Ersetzungen — 1268 Timestamp, 191 StartTime, 198 Comment, je einmal EncryptedPatientInfo und EncryptedStudyInfo. Die Identität liegt bei diesem Hersteller nicht im Klartext: über 4265 Blöcke hinweg gibt es kein Namens-, MRN- oder Geburtsdatumsfeld, sondern zwei verschlüsselte Datensätze — beide werden durch [ENCRYPTED RECORD REMOVED BY EPCORE] ersetzt. Selbstscan sauber. NICHT geprüft: (a) der Export war unvollständig (letztes Teil fehlt) und wurde für den Lauf am letzten intakten Block gekürzt — die letzten 10,9 MB sind ungeprüft; (b) handgetippte Felder bleiben stehen (1046 Label, 864 UneditablePrefix) und werden nur gemeldet, weil ein Label die Bedeutung der Karte trägt; (c) Screenshots und Videos: dieser Export hatte keine, und eingebrannte Patientenzeilen in Bildern kann kein Textscrubber entfernen — sie stehen in der Liste der nicht untersuchten Dateien; (d) ein Haus, eine Softwarefassung. NACHTRAG 2026-09-13 — wieder ungeprüft: Datum und Uhrzeit der Prozedur bleiben aus der Ausgabe lesbar. NICHT entfernt werden (1) absolute Zeitangaben in den byte-genau kopierten Binärblöcken — jeder Float64-Uhrblock *_ts.dat, Spalte 0 von surfelec/surfmark/anatpts/beats_floats, Spalte 3 von fieldmapgrid_positions, die Gates-Triggersätze (Float64 an Offset 8) — und (2) XML-Zeitfelder außerhalb der Datumsliste: TS, tsB/tsE, mapdata_start_ts/mapdata_end_ts, DropTime, LastModTS, AnatomyMeshDataLastUpdatedTs, CreationTime, FavoriteTS, startTimestamp/endTimestamp. Die Prüfung vom 2026-08-06 hat nur nachgesehen, was die Feldtabelle kennt; diese Zeitkanäle hat sie NICHT geprüft, und ihr „Selbstscan sauber\" galt für sie nie. Befund: docs/findings/rhythmia-anonymisierung-zeitangaben.md."
   }
 };
 const SHARED = {
@@ -1500,6 +1531,12 @@ const SHARED = {
   ],
   "fallback_year": "1900"
 };
+const RESIDUE_TEXT = {
+  "anon.residue.action": "Die Kopie als nicht anonymisiert behandeln und nicht als anonymisiert weitergeben. Sobald EPCore diese Zeiten entfernt, aus den Originalen neu anonymisieren.",
+  "anon.residue.binary_absolute_times": "in Binärblöcken, die byte-genau kopiert werden: {names}",
+  "anon.residue.title": "BEKANNTER REST — diese Ausgabe ist NICHT vollständig anonymisiert. Datum und Uhrzeit der Prozedur stehen weiterhin darin:",
+  "anon.residue.xml_time_fields": "in XML-Zeitfeldern, die nicht ersetzt werden: {names}"
+};
 // The scrub itself, so the three mapping pages cannot carry three versions of
 // it. They did, and they had drifted: measured over the union of every field
 // any of them knew, CARTO left 7 identifiers in place, EnSite 8, Rhythmia 14 —
@@ -1642,6 +1679,36 @@ function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
   }
 
   return out;
+}
+
+// What a scrub with a profile is known to leave in the output — for Rhythmia,
+// the procedure date and time in binary clock blocks copied byte for byte and
+// in XML time fields the field table does not name. Declared in the profile so
+// this page, the Python run and every summary name the same channels. Mirror of
+// registry.known_residue; tests/conformance holds the two equal. A run with a
+// residue is never "clean".
+function sharedKnownResidue(system) {
+  const profile = PROFILES[system];
+  return ((profile && profile.known_residue) || [])
+    .map(item => ({ id: item.id, names: item.names.slice() }));
+}
+
+// The residue in words — headline, one line per channel, what to do — from the
+// German catalogue strings inlined as RESIDUE_TEXT. Mirror of
+// classic.describe_known_residue(items, "de"), compared line for line in
+// tests/conformance. A missing string shows its key instead of vanishing: a
+// residue nobody has worded yet is still a residue.
+function sharedKnownResidueLines(items) {
+  if (!items || !items.length) return [];
+  const fill = (key, names) => {
+    const text = RESIDUE_TEXT[key] !== undefined
+      ? RESIDUE_TEXT[key]
+      : `⟦${key}⟧` + (names === undefined ? "" : " {names}");
+    return names === undefined ? text : text.split("{names}").join(names.join(", "));
+  };
+  return [fill("anon.residue.title"),
+          ...items.map(item => fill(`anon.residue.${item.id}`, item.names)),
+          fill("anon.residue.action")];
 }
 
 /* PROFILES:END */
