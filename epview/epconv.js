@@ -13,8 +13,8 @@
  * ===================================================================== */
 
 import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment,
-         encodeTagComment } from './epmap.js?v=4b3d0b3d9885';
-import { readVisitag, summarise as summariseAblation } from './epablation.js?v=4b3d0b3d9885';
+         encodeTagComment } from './epmap.js?v=ff90f363800e';
+import { readVisitag, summarise as summariseAblation } from './epablation.js?v=ff90f363800e';
 
 const SENTINEL = 1e4;
 
@@ -2819,6 +2819,20 @@ function dxlCells(line) {
   return { key: parts[0].replace(/:\s*$/, '').trim(), values: parts.slice(1) };
 }
 
+/* Eine Zelle als Text, nachdem feststeht, dass sie eine Zahl ist.
+ *
+ * Die Prüfung ist es, die das Mitführen des Textes sicher macht: eine Zelle,
+ * die keine Zahl ist, ist keine Kennung und erreicht keine Datei. Mitgeführt
+ * wird die Schreibweise des Herstellers, damit zwei Leser nicht über sie
+ * uneins sein können.
+ */
+function dxlNumericText(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  return Number.isFinite(Number(text)) ? text : null;
+}
+
 function dxlNumber(value) {
   if (value == null) return null;
   const text = String(value).trim();
@@ -2880,7 +2894,14 @@ export function parseDxL(text) {
     // projizierte Position ist die Karte, nicht die Messung.
     p.xyz = [p.x, p.y, p.z].every(v => v != null) ? [p.x, p.y, p.z] : null;
     p.surfaceXyz = [p.sx, p.sy, p.sz].every(v => v != null) ? [p.sx, p.sy, p.sz] : null;
-    if (p.number != null) p.id = String(p.number) + '.' + (c + 1);
+    // Die Kennung ist die Nummer so, wie die Datei sie schreibt — nicht eine
+    // aus dem gelesenen Double neu formatierte. Python formatierte sie mit
+    // `%g` zu `1.23457e+06`, hier stand `1234567`, und diese Kennung reist in
+    // das OpenEP-Feld `names`: derselbe Punkt, zwei Namen. Aus dem Double
+    // zurückzurechnen hilft nicht, weil `repr` und `Number::toString` bei
+    // `1e-7`, `1e-6` und jenseits 2^53 auseinandergehen.
+    const numberText = dxlNumericText(get('pt number'));
+    if (numberText !== null) p.id = numberText + '.' + (c + 1);
     points.push(p);
   }
 
@@ -2962,6 +2983,17 @@ export function parseCartoEcg(text) {
                   + 'sich nicht in Millivolt umrechnen.');
   }
 
+  // Zeile 3 nennt, auf welchen Kanälen der Hersteller gemessen hat. Python
+  // liest sie seit je (`_carto_mapping_channel`), der Browser bisher nicht —
+  // und ohne sie muss der Aufrufer den Mapping-Kanal raten. Als Wörterbuch,
+  // nicht der Reihe nach: die Schlüssel stehen in echten Exporten in
+  // wechselnder Reihenfolge, und die Rolle steht am Namen, nicht an der Stelle.
+  const named = {};
+  for (const m of lines[2].matchAll(/(\w+) Mapping Channel=(\S+)/g)) {
+    named[m[1].toLowerCase()] = m[2];
+  }
+  const referenceChannel = (lines[2].match(/Reference Channel=(\S+)/) || [])[1] || null;
+
   const header = lines[3];
   if (header.length % CARTO_FIELD) {
     throw new Error(`Kanalkopf ist ${header.length} Zeichen lang, kein `
@@ -2985,6 +3017,9 @@ export function parseCartoEcg(text) {
     }
   }
   return { channels, samples, gainMv: gain,
+           bipolarChannel: named.bipolar || null,
+           unipolarChannel: named.unipolar || null,
+           referenceChannel,
            sampleRateHz: CARTO_ASSUMED_RATE_HZ, rateAssumed: true };
 }
 
