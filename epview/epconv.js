@@ -13,8 +13,8 @@
  * ===================================================================== */
 
 import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment,
-         encodeTagComment } from './epmap.js?v=ff90f363800e';
-import { readVisitag, summarise as summariseAblation } from './epablation.js?v=ff90f363800e';
+         encodeTagComment } from './epmap.js?v=6c0d1b222fc2';
+import { readVisitag, summarise as summariseAblation } from './epablation.js?v=6c0d1b222fc2';
 
 const SENTINEL = 1e4;
 
@@ -3041,10 +3041,51 @@ function parseCartoPositions(text) {
 // Elektroden. Der Punkt gehört an die Mapping-Elektrode — der Kopf der
 // Signaldatei nennt M1 als unipolaren Mapping-Kanal — also ist Elektrode 1
 // der Anker. (Die Schreibweise "Eleclectrode" ist die des Herstellers.)
-function cartoPositionOf(files, stem) {
+/* Der Ordner, in dem ein Archiveintrag liegt — '' für die oberste Ebene.
+ *
+ * Auflösung folgt der Aufzählung: die Geschwisterdateien eines Punktes werden
+ * in seinem eigenen Ordner gesucht, nicht irgendwo im Archiv. Liegen zwei
+ * Exporte nebeneinander, sind das zwei Studien, und eine Kurve von drüben ist
+ * keine Messung dieses Punktes.
+ */
+function cartoParentOf(name) {
+  const cut = name.lastIndexOf('/');
+  return cut < 0 ? '' : name.slice(0, cut);
+}
+
+/* Sortiert dieser nackte Name auf beiden Lesewegen gleich?
+ *
+ * Python vergleicht Codepunkte, der Browser UTF-16-Codeeinheiten, und genau
+ * oberhalb der BMP gehen sie auseinander: `A_😀.xml` steht in Python und in
+ * UTF-8-Bytes hinter `A_Ａ.xml`, hier davor, weil eine führende
+ * Ersatzcodeeinheit (0xD800..) unter 0xFF21 liegt. Innerhalb der BMP stimmen
+ * beide Ordnungen überein — `Ä` landet überall hinter `B`.
+ */
+function cartoSortsTheSameEverywhere(name) {
+  for (const ch of name) if (ch.codePointAt(0) > 0xFFFF) return false;
+  return true;
+}
+
+/* Bytevergleich über den nackten Namen — dieselbe Ordnung wie Pythons
+ * `sorted(key=lambda p: p.name.encode())`. Der voreingestellte Vergleich von
+ * JS ordnet nach UTF-16-Codeeinheiten und wäre eine andere. */
+function cartoByBareName(a, b) {
+  const enc = new TextEncoder();
+  const x = enc.encode(a.replace(/^.*\//, '')), y = enc.encode(b.replace(/^.*\//, ''));
+  for (let i = 0; i < Math.min(x.length, y.length); i++) {
+    if (x[i] !== y[i]) return x[i] - y[i];
+  }
+  return x.length - y.length;
+}
+
+function cartoPositionOf(files, stem, parent) {
   for (const kind of ['Eleclectrode_Positions_OnAnnotation',
                       'Sensor_Positions_OnAnnotation']) {
     for (const name of Object.keys(files)) {
+      // Nur im eigenen Ordner des Punktes. Vorher wurde das ganze Archiv
+      // durchsucht: liegen zwei Exporte nebeneinander, bekam ein Punkt die
+      // Position eines gleichnamigen Geschwisters aus der anderen Studie.
+      if (cartoParentOf(name) !== parent) continue;
       const bare = name.replace(/^.*\//, '');
       if (!bare.startsWith(stem) || !bare.endsWith(kind + '.txt')) continue;
       const found = parseCartoPositions(decodeLatin1(files[name]));
@@ -3059,8 +3100,20 @@ function cartoPositionOf(files, stem) {
 
 export function parseCartoPoints(files) {
   const names = Object.keys(files)
-    .filter(n => n.replace(/^.*\//, '').endsWith('_Point_Export.xml'));
+    .filter(n => n.replace(/^.*\//, '').endsWith('_Point_Export.xml'))
+    .sort(cartoByBareName);
   if (!names.length) return [];
+
+  // Ein Name, den die beiden Leser verschieden ordnen, macht die Reihenfolge
+  // undefiniert — und die Reihenfolge ist es, woraus eine Punktkennung gebaut
+  // wird. Lieber benannt verweigern als zwei Nummerierungen erzeugen.
+  const outside = names.map(n => n.replace(/^.*\//, ''))
+                       .filter(n => !cartoSortsTheSameEverywhere(n));
+  if (outside.length) {
+    throw new Error(`${outside.length} Punktdatei(en) tragen Zeichen, die Python `
+      + `und der Browser verschieden sortieren — die Punkte bekämen auf beiden `
+      + `Wegen verschiedene Nummern: ${outside.slice(0, 3).join(', ')}`);
+  }
 
   // Ohne XML-Parser gibt es keine Punkte zu lesen — aber eine leere Liste
   // zurückzugeben heißt "diese Studie hat keine", und das ist etwas anderes.
@@ -3093,7 +3146,9 @@ export function parseCartoPoints(files) {
 
     points.push({
       id: root.getAttribute('ID') || bare,
-      xyz: cartoPositionOf(files, bare.replace('_Point_Export.xml', '')),
+      parent: cartoParentOf(name),
+      xyz: cartoPositionOf(files, bare.replace('_Point_Export.xml', ''),
+                           cartoParentOf(name)),
       bipolarMv: cartoNumber(attr('Voltages', 'Bipolar')),
       unipolarMv: cartoNumber(attr('Voltages', 'Unipolar')),
       woiMs: (woiFrom != null && woiTo != null) ? [woiFrom, woiTo] : null,
@@ -3118,16 +3173,22 @@ export function parseCartoPoints(files) {
 // Ein Elektrogramm auf Abruf. Der Aufrufer bekommt die Funktion, nicht die
 // Daten — das ist der ganze Punkt: erst beim Klick wird gelesen.
 export function cartoEgmReader(files) {
+  // Nachschlagen nach Ordner UND nacktem Namen. Vorher gewann über das ganze
+  // Archiv hinweg der letzte Schreiber, sodass ein Punkt die Kurve einer
+  // gleichnamigen Datei aus einer anderen Studie als seine Messung bekam.
   const byName = new Map();
-  for (const name of Object.keys(files)) byName.set(name.replace(/^.*\//, ''), name);
+  for (const name of Object.keys(files)) {
+    byName.set(cartoParentOf(name) + ' ' + name.replace(/^.*\//, ''), name);
+  }
   const cache = new Map();
   return (point) => {
     if (!point || !point.egmName) return null;
-    if (cache.has(point.egmName)) return cache.get(point.egmName);
-    const entry = byName.get(point.egmName);
+    const key = (point.parent || '') + ' ' + point.egmName;
+    if (cache.has(key)) return cache.get(key);
+    const entry = byName.get(key);
     if (!entry) return null;
     const egm = parseCartoEcg(decodeLatin1(files[entry]));
-    cache.set(point.egmName, egm);
+    cache.set(key, egm);
     return egm;
   };
 }
