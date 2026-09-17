@@ -13,8 +13,8 @@
  * ===================================================================== */
 
 import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment,
-         encodeTagComment } from './epmap.js?v=6c0d1b222fc2';
-import { readVisitag, summarise as summariseAblation } from './epablation.js?v=6c0d1b222fc2';
+         encodeTagComment } from './epmap.js?v=f52a215207f7';
+import { readVisitag, summarise as summariseAblation } from './epablation.js?v=f52a215207f7';
 
 const SENTINEL = 1e4;
 
@@ -3162,7 +3162,14 @@ export function parseCartoPoints(files) {
       egmName: ecgName ? ecgName.replace(/^.*[\\/]/, '') : null,
     });
   }
-  points.sort((a, b) => (parseInt(a.id, 10) || 0) - (parseInt(b.id, 10) || 0));
+  // Keine eigene Ordnung mehr: die Reihenfolge ist die der Aufzählung, und die ist
+  // seit R0.5 auf beiden Lesewegen dieselbe (bytweise über den nackten Dateinamen).
+  // Vorher sortierte diese Seite numerisch nach Kennung — bei eindeutigen Kennungen
+  // unsichtbar, bei zwei Karten mit demselben `Point ID` lieferte derselbe Export
+  // hier `1,1,2` und in Python `1,2,1`. Ein Klick löst über `placed[instanceId]`
+  // auf (index.html:3460), also über die Stelle in genau dieser Liste: eine
+  // Ordnung, die die andere Seite nicht teilt, ist damit nicht nur kosmetisch.
+  // Sie kam als Anzeigeordnung (2abd79a) und kein Test hielt sie.
   if (unreadable.length) {
     console.warn(`[epview] ${unreadable.length} von ${names.length} `
                + `Punktdateien nicht lesbar: ${unreadable.slice(0, 5).join(', ')}`);
