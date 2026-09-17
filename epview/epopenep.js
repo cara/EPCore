@@ -27,9 +27,75 @@
  * a gap somebody can see; a fabricated one is not.
  */
 
-import { anatomicalStructures } from './epmetrics.js?v=d646addb4355';
+import { anatomicalStructures } from './epmetrics.js?v=efadfce5e2dc';
+import { statesLatUnit, rhythmiaLatComment, RHYTHMIA_LAT_COMMENT } from './epconv.js?v=efadfce5e2dc';
 
 export const WRITER = 'EPCore';
+
+//: Was die Datei über eine Aktivierung sagt, die ihre Einheit nennt —
+//: wortgleich mit `openep_export.RHYTHMIA_LAT_NOTE`. OpenEP hat ein
+//: Aktivierungsfeld und keinen Platz für eine Einheit, also steht der Satz in
+//: `notes` statt im Kopf des Lesers.
+//: `floor(… + 0.5)` und nicht `round`: der Satz muss die Regel nennen, die der
+//: Code fährt, und die beiden unterscheiden sich. Python rundet die exakte
+//: Hälfte zur geraden Zahl, JavaScript nach oben — deshalb schreibt
+//: `rhythmiaBeatStart` sie aus, und ein Vermerk mit „round" schickte einen
+//: Leser, der die Datei nachrechnet, zur falschen Arithmetik.
+export const RHYTHMIA_LAT_NOTE =
+  'LAT is in ms relative to the beat marker: (activation + c) × 1000/953.674 '
+  + 'with c = floor(BeatOffset/Δt + 0.5) of the map.';
+
+//: Und was sie sagt, wenn die Fläche nichts dazu sagt — wortgleich mit
+//: `openep_export.LAT_UNSTATED_NOTE`. Der Wert reist mit: hier im Viewer ist
+//: eine Karte ohne Vermerk genauso wahrscheinlich eine umgewandelte
+//: CARTO-Karte, deren `lat` echte Millisekunden sind, wie eine vor der
+//: Korrektur umgewandelte Rhythmia-Karte. Wegwerfen leerte die eine so
+//: lautlos, wie Mitschreiben die andere falsch beschriftet.
+export const LAT_UNSTATED_NOTE =
+  "The surface states no unit for 'lat', so what these numbers are could not "
+  + 'be established here: a map converted from CARTO holds milliseconds, and a '
+  + 'Rhythmia surface converted before the LAT fix holds raw sample indices, '
+  + 'which are not milliseconds and are out by an offset and a factor of '
+  + '1.049. Check the source before reading the activation as a time; a '
+  + "Rhythmia study re-converted with 'epcore epview rhythmia <study>.000' "
+  + 'states its unit and needs no checking.';
+
+//: Was der Vermerk ergänzt, wenn die Zeile der Fläche den
+//: Halbabtastungs-Vorbehalt trägt — wortgleich mit
+//: `openep_export.RHYTHMIA_C_AMBIGUOUS_NOTE`.
+export const RHYTHMIA_C_AMBIGUOUS_NOTE =
+  'The beat marker sits on half a sample, so c follows the vendor export\'s '
+  + 'rounding: this LAT may be one sample (1.049 ms) out.';
+
+//: Und was er über eine Fläche sagt, die eine eigene Einheit nennt statt
+//: Rhythmias — wortgleich mit `openep_export.LAT_STATED_NOTE`.
+export const LAT_STATED_NOTE = "The surface states what its 'lat' is: {}";
+
+/** Die Aktivierung für den OpenEP-Export und der Satz, der dazugehört.
+ *
+ * Dieselbe Entscheidung wie `openep_export._lat_if_stated` für eine PLY: `lat`
+ * wird nie stillschweigend als Millisekunden ausgegeben, aber auch nie
+ * stillschweigend weggeworfen. Steht die Entscheidung hier und nicht in
+ * `index.html`, kann ein Test sie stellen — die Aufrufstelle im Viewer war
+ * genau deshalb ungeprüft und gab `sc.lat` ungefragt weiter.
+ */
+export function openEPActivation(mesh) {
+  const lat = mesh && mesh.scalars ? mesh.scalars.lat : null;
+  if (!lat) return { activation: null, latNote: '' };
+  if (!statesLatUnit(mesh)) return { activation: lat, latNote: LAT_UNSTATED_NOTE };
+  // Was die Datei sagt, nicht was wir an ihrer Stelle sagen würden: eine Fläche
+  // mit eigener Einheitsangabe bekommt ihren eigenen Satz wiederholt, eine
+  // Rhythmia-Fläche den von Rhythmia — samt Halbabtastungs-Vorbehalt, wenn ihre
+  // Zeile ihn trägt. Wortgleich mit `openep_export._lat_if_stated`.
+  const stated = mesh.latReference || rhythmiaLatComment(mesh.beatWindow);
+  if (!stated.startsWith(RHYTHMIA_LAT_COMMENT)) {
+    return { activation: lat, latNote: LAT_STATED_NOTE.replace('{}', stated) };
+  }
+  const note = stated === RHYTHMIA_LAT_COMMENT
+    ? RHYTHMIA_LAT_NOTE
+    : `${RHYTHMIA_LAT_NOTE} ${RHYTHMIA_C_AMBIGUOUS_NOTE}`;
+  return { activation: lat, latNote: note };
+}
 
 // MAT-file data types (Level 5).
 const miINT8 = 1, miUINT8 = 2, miINT32 = 5, miUINT32 = 6;
@@ -108,9 +174,39 @@ function logicalColumn(name, rows, values = null) {
 
 function charArray(name, text) {
   const w = new Writer();
-  w.bytes(arrayHead(mxCHAR, [text.length ? 1 : 0, text.length], name));
-  const utf16 = new Uint16Array([...text].map(c => c.charCodeAt(0)));
-  w.bytes(element(miUTF8 === 16 ? 4 : 4, new Uint8Array(utf16.buffer)));  // miUINT16
+  // Die Maße zählen Codepunkte, die Daten sind UTF-8 — so zählt **scipy**, und
+  // scipy ist, was eine OpenEP-Datei liest: `openep_import` lädt sie mit
+  // `loadmat`, ebenso die Python-Portierung von OpenEP.
+  //
+  // Nicht, wie hier früher stand, „so schreibt MATLAB selbst": MATLAB zählt ein
+  // `char`-Array in UTF-16-Codeeinheiten, ein Emoji also zwei, und genau so
+  // liest `epcore.core.matv5` (ADR-0008). Gemessen 2026-09-16 am Kartennamen
+  // „Mappe 🫀 Größe" (13 Codepunkte, 14 UTF-16-Einheiten): eine `.mat` damit —
+  // von diesem Schreiber *und* von `scipy.io.savemat` — verweigert matv5 mit
+  // „14 characters where the dimensions call for 13", den Zahlen dieses
+  // Namens, während scipy beide liest. Für Text außerhalb der
+  // BMP widersprechen die beiden Zählungen einander, eine Datei kann nur einer
+  // folgen, und eine OpenEP-Datei folgt der ihres Lesers. Die Grenze ist in
+  // beide Richtungen angepinnt (test_openep_conformance.py) und im ADR
+  // vermerkt.
+  //
+  // *Codepunkte*, nicht UTF-16-Code-Einheiten: `text.length` zählt ein Emoji im
+  // Kartennamen als zwei (Ersatzpaar), die Nutzlast trägt es als eines. Das
+  // Maß war dann um eins zu groß, und scipy verweigerte die ganze Datei mit
+  // `TypeError: buffer is too small for requested array` — nicht bloß ein falsch
+  // beschriftetes Feld, sondern eine unlesbare Datei. Genau diese Korrektur
+  // hat sie eingeschleppt: davor stand hier UTF-16 unter miUINT16, wo Maß und
+  // Nutzlast beide Code-Einheiten zählten und der Fehler sich aufhob.
+  //
+  // Vorher standen hier nämlich UTF-16-Code-Einheiten unter miUINT16, und
+  // jedes Zeichen über U+007F kam als U+FFFD zurück: aus `×` wurde `?`, aus
+  // `Δt` `?t`, und aus einer Karte „Mappe Größe" eine mit kaputtem Namen.
+  // Reines ASCII überlebte, weshalb es keinem Test auffiel — die
+  // Konformanzprüfung verglich Sätze, in denen keine Umlaute vorkamen.
+  const characters = [...text].length;
+  const utf8 = new TextEncoder().encode(text);
+  w.bytes(arrayHead(mxCHAR, [characters ? 1 : 0, characters], name));
+  w.bytes(element(miUTF8, utf8));
   return element(miMATRIX, w.concat());
 }
 
@@ -156,7 +252,7 @@ const column = (values, n) => (r) => {
 /** The bytes of a .mat file holding one map. */
 export function buildOpenEP(positions, faces, {
   activation = null, bipolar = null, unipolar = null,
-  impedance = null, force = null, name = '', notes = '',
+  impedance = null, force = null, name = '', notes = '', latNote = '',
   points = null, curves = null, pointNames = null,
 } = {}) {
   const n = positions.length / 3;
@@ -164,7 +260,7 @@ export function buildOpenEP(positions, faces, {
   if (!n || !m) throw new Error('Leere Oberfläche: nichts zu schreiben.');
 
   const placed = (points || []).filter(Boolean);
-  const told = notes || (placed.length
+  let told = notes || (placed.length
     ? `Written by EPCore from a vendor export. It holds the surface, its `
       + `per-vertex scalars and ${placed.length} mapping point(s) with their `
       + `electrograms. There are no ablation records in it, and that field is `
@@ -173,6 +269,11 @@ export function buildOpenEP(positions, faces, {
       + 'and its per-vertex scalars; there are no mapping points, electrograms '
       + 'or ablation records in it, and those fields are empty rather than '
       + 'filled with something invented.');
+
+  // Was die Aktivierungsspalte ist, reist *neben* dem übrigen Satz, nicht
+  // an seiner Stelle: „diese Karte hat keine Punkte" und „ihre lat kam ohne
+  // Einheit" sind zwei Dinge, die ein Leser beide braucht.
+  if (latNote) told = `${told} ${latNote}`;
 
   const rim = anatomicalStructures(positions, faces).rimVertices;
 

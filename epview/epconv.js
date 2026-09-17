@@ -12,8 +12,9 @@
  *  Parameter injiziert, damit das Modul ohne Bundler testbar bleibt.
  * ===================================================================== */
 
-import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment } from './epmap.js?v=d646addb4355';
-import { readVisitag, summarise as summariseAblation } from './epablation.js?v=d646addb4355';
+import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment,
+         encodeTagComment } from './epmap.js?v=efadfce5e2dc';
+import { readVisitag, summarise as summariseAblation } from './epablation.js?v=efadfce5e2dc';
 
 const SENTINEL = 1e4;
 
@@ -83,6 +84,12 @@ function* iterTag(el, tag) {
 }
 function firstTag(el, tag) { for (const c of iterTag(el, tag)) return c; return null; }
 
+/* Jeder Nachfahre in Dokumentreihenfolge — für eine Regel, die nach der Art
+ * eines Elements entscheidet, statt nach einem festen Tagnamen zu suchen. */
+function* iterAll(el) {
+  for (const c of el.children) { yield c; yield* iterAll(c); }
+}
+
 // Tolerantes Parsen: erst echtes XML; schlägt das fehl (z. B. unvollständiges
 // Archiv -> nicht geschlossene Tags), wird der HTML-Parser genutzt, der offene
 // Tags automatisch schließt. So bleibt ein früh im Archiv liegendes Mesh nutzbar.
@@ -100,17 +107,90 @@ function parseXmlTolerant(xml) {
  *  Rhythmia
  * ===================================================================== */
 
-const HTML_ENTITIES = {
+/* Warum ein Leser keine Millisekunden hat, oder gar keine Tabelle.
+ *
+ * Eine Schreibweise, von beiden Sprachen benutzt — wortgleich mit
+ * `rhythmia_layout.REASONS`. Ein Vokabular, das auseinanderläuft, ist ein
+ * Unterschied, den niemand sieht: ein vertippter Grund erreicht den Betrachter,
+ * wo `map.reason.<tippfehler>` keinen Katalogeintrag findet und als
+ * `⟦map.reason.<tippfehler>⟧` erscheint — in allen drei Sprachen gleich. Ein
+ * Konformanztest hält beide Listen aneinander. */
+export const RHYTHMIA_REASONS = [
+  'no-engine-output',
+  'engine-output-unreadable',
+  'engine-output-multiple',
+  'mesh-blob-unreadable',
+  'no-beat-window',
+  'window-mismatch',
+  'lat-index-outside-window',
+  'vertex-count-mismatch',
+  'map-source-duplicate',
+  'vertex-outside-window',
+  'layout-mismatch',
+];
+
+/* Hinweise behalten den Wert und sagen etwas dazu. Wortgleich mit
+ * `rhythmia_layout.NOTES`. */
+export const RHYTHMIA_NOTES = ['c-grid-ambiguous', 'voltage-below-grid-floor'];
+
+/** Einer der Gründe, sonst ein Fehler hier statt einer Klammer auf dem Schirm.
+ *
+ * Die Regel und ihr Grund stehen einmal, in `rhythmia_layout.reason`; Python
+ * nennt denselben Absatz.
+ */
+export function rhythmiaReason(name) {
+  if (!RHYTHMIA_REASONS.includes(name)) {
+    throw new Error(`${name} ist keiner der Gründe, die ein Leser nennen darf; `
+      + `bekannt: ${RHYTHMIA_REASONS.join(', ')}`);
+  }
+  return name;
+}
+
+/** Einer der Hinweise, zu denselben Bedingungen. */
+export function rhythmiaNote(name) {
+  if (!RHYTHMIA_NOTES.includes(name)) {
+    throw new Error(`${name} ist keiner der Hinweise; `
+      + `bekannt: ${RHYTHMIA_NOTES.join(', ')}`);
+  }
+  return name;
+}
+
+/* Entities, die ein Rhythmia-Archiv schreibt, obwohl XML sie nicht kennt.
+ *
+ * Dieselbe Tabelle steht in `rhythmia_layout.HTML_ENTITIES`. Sie muss dieselbe
+ * bleiben: Archivleser, Konverter und Browser sollen aus einer Beschriftung
+ * denselben Namen machen und nicht drei (Befund §7); ein Konformanztest hält
+ * beide Seiten aneinander. */
+export const RHYTHMIA_HTML_ENTITIES = {
   '&nbsp;': ' ', '&auml;': 'ä', '&ouml;': 'ö', '&uuml;': 'ü', '&Auml;': 'Ä',
   '&Ouml;': 'Ö', '&Uuml;': 'Ü', '&szlig;': 'ß', '&aacute;': 'á', '&eacute;': 'é',
   '&iacute;': 'í', '&oacute;': 'ó', '&uacute;': 'ú', '&ntilde;': 'ñ', '&copy;': '©',
   '&reg;': '®', '&deg;': '°', '&micro;': 'µ', '&plusmn;': '±',
 };
 
-function sanitizeXml(xml) {
-  for (const [e, r] of Object.entries(HTML_ENTITIES)) xml = xml.split(e).join(r);
+/** Die Entities des Archivs als Zeichen, genau wie der Konverter es tut. */
+export function resolveRhythmiaEntities(text) {
+  for (const [e, r] of Object.entries(RHYTHMIA_HTML_ENTITIES)) text = text.split(e).join(r);
   // restliche undefinierte &wort; entfernen (nicht &amp;&lt;&gt;&quot;&apos;&#..)
-  return xml.replace(/&(?!amp;|lt;|gt;|quot;|apos;|#)(\w+);/g, '$1');
+  return text.replace(/&(?!amp;|lt;|gt;|quot;|apos;|#)(\w+);/g, '$1');
+}
+
+/* Der XML-Text so, wie er geschrieben wurde: UTF-8.
+ *
+ * Gescannt wird das Archiv als latin1 — anders lassen sich Bytes und Markup
+ * nicht in einem Durchgang durchlaufen. Das XML darin ist aber UTF-8, und eine
+ * Beschriftung mit Umlaut kommt so als zwei Zeichen an. Zurückgedreht wird
+ * erst hier, wenn die Blockgrenzen längst feststehen: die Byte-Arithmetik
+ * bleibt unangetastet, und alle drei Leser bekommen denselben Namen.
+ * `rhythmia_points._as_text` macht dasselbe auf der Python-Seite. */
+function utf8FromLatin1(text) {
+  const bytes = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 0xff;
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+function sanitizeXml(xml) {
+  return resolveRhythmiaEntities(utf8FromLatin1(xml));
 }
 
 // Trennt Inline-Binärdaten heraus, OHNE das ganze (oft mehrere 100 MB große,
@@ -193,37 +273,85 @@ function childByTag(el, name) {
   for (const c of el.children) if (c.tagName && c.tagName.toUpperCase() === T) return c;
   return null;
 }
-function childrenByTag(el, name) {
-  const T = name.toUpperCase(), out = [];
-  for (const c of el.children) if (c.tagName && c.tagName.toUpperCase() === T) out.push(c);
-  return out;
-}
 function elText(el) { return el && el.textContent != null ? el.textContent.trim() : ''; }
 
 // Rhythmia tags: manual <AnnotationPointSet>/<AnnotationPoint> groups + ablation
 // <AutoAnnotationPoint>. Returns [{ id, label, category, color:[r,g,b], points:[{position,label}] }].
+/** Ein Annotationspunkt, wie er in der Datei steht — oder nichts. */
+function rhythmiaAnnotationPoint(ap) {
+  const xyzEl = childByTag(ap, 'xyz'); if (!xyzEl) return null;
+  const pos = parseXyz(elText(xyzEl)); if (!pos) return null;
+  const ppr = childByTag(ap, 'Properties');
+  const plabel = (ppr && (elText(childByTag(ppr, 'OverrideLabel')) || elText(childByTag(ppr, 'Label')))) || '';
+  const ts = ppr && (elText(childByTag(ppr, 'Timestamp'))
+                 || elText(childByTag(ppr, 'StartTime')));
+  return { position: pos, label: plabel,
+           time: ts != null && ts !== '' ? Number(ts) : null };
+}
+
+/* Die beiden Tags, unter denen ein Annotationspunkt steht: der vom Untersucher
+ * gesetzte und der, den das System für eine Ablation schreibt. Wortgleich mit
+ * `rhythmia_layout.ANNOTATION_POINT_TAGS`. */
+const RHYTHMIA_ANNOTATION_POINT_TAGS = ['AnnotationPoint', 'AutoAnnotationPoint'];
+
+/** Welche Art von Annotationspunkt dieses Element ist, oder null.
+ *
+ * Die Schreibung entscheidet nichts. Die Regel und ihr Grund stehen einmal, in
+ * `rhythmia_layout.annotation_point_kind`; Python nennt denselben Absatz.
+ *
+ * Die Regel stand dort und wurde von *keiner* Seite aufgerufen: jede hielt ihre
+ * eigene Schreibung des Tags, und die beiden waren sich uneins. Diese Seite
+ * faltet — der tolerante HTML-Parser schreibt jedes Tag klein —, der Archivleser
+ * verglich auf Schreibung. Ein `<ANNOTATIONPOINT>` zeichnete der Browser also,
+ * und in der Liste des Archivlesers fehlte er; das ist die Liste, die in den
+ * OpenEP-Export geht.
+ */
+function rhythmiaAnnotationPointKind(tag) {
+  if (tag == null) return null;
+  const folded = String(tag).trim().toLowerCase();
+  const hit = RHYTHMIA_ANNOTATION_POINT_TAGS.find((name) => name.toLowerCase() === folded);
+  if (!hit) return null;
+  return hit === 'AutoAnnotationPoint' ? 'ablation' : 'annotation';
+}
+
 function extractRhythmiaTags(root) {
   const groups = [];
+  const inSet = new Set();
   for (const set of iterTag(root, 'AnnotationPointSet')) {
     const props = childByTag(set, 'Properties');
     const label = (props && (elText(childByTag(props, 'OverrideLabel')) || elText(childByTag(props, 'Label')))) || 'Annotation';
     const colorHex = props && elText(childByTag(props, 'Color'));
     const color = (colorHex && hexToRgb(colorHex)) || tagCategoryColor('annotation');
     const points = [];
-    for (const ap of childrenByTag(set, 'AnnotationPoint')) {
-      const xyzEl = childByTag(ap, 'xyz'); if (!xyzEl) continue;
-      const pos = parseXyz(elText(xyzEl)); if (!pos) continue;
-      const ppr = childByTag(ap, 'Properties');
-      const plabel = (ppr && (elText(childByTag(ppr, 'OverrideLabel')) || elText(childByTag(ppr, 'Label')))) || '';
-      const ts = ppr && (elText(childByTag(ppr, 'Timestamp'))
-                     || elText(childByTag(ppr, 'StartTime')));
-      points.push({ position: pos, label: plabel,
-                    time: ts != null && ts !== '' ? Number(ts) : null });
+    // Welche Kinder Punkte sind, entscheidet die Regel — nicht ein Tagname.
+    for (const ap of set.children) {
+      if (rhythmiaAnnotationPointKind(ap.tagName) !== 'annotation') continue;
+      inSet.add(ap);
+      const p = rhythmiaAnnotationPoint(ap);
+      if (p) points.push(p);
     }
     if (points.length) groups.push({ id: (set.getAttribute && set.getAttribute('id')) || label, label, category: 'annotation', color, points });
   }
-  const abl = [];
-  for (const ap of iterTag(root, 'AutoAnnotationPoint')) {
+  // Jeder Annotationspunkt des Dokuments, gleich was ihn umschließt: ein
+  // `AnnotationPointSet` gibt einer Gruppe Namen und Farbe, es macht die Punkte
+  // darin nicht erst zu Punkten. Die Regel und ihr Grund stehen einmal, in
+  // `rhythmia_layout.annotation_point_kind`; Python nennt denselben Absatz.
+  //
+  // Ein Durchgang über alle Nachfahren, jeder nach seiner Art gefragt. Vorher
+  // zwei Suchen nach je einem festen Tagnamen: `AutoAnnotationPoint` von
+  // überall, `AnnotationPoint` nur aus einem Set — die beiden Hälften desselben
+  // Lesers waren sich uneins, und der Punkt daneben stand trotzdem im
+  // OpenEP-Export.
+  const loose = [], abl = [];
+  for (const ap of iterAll(root)) {
+    const kind = rhythmiaAnnotationPointKind(ap.tagName);
+    if (!kind) continue;
+    if (kind === 'annotation') {
+      if (inSet.has(ap)) continue;
+      const p = rhythmiaAnnotationPoint(ap);
+      if (p) loose.push(p);
+      continue;
+    }
     const xyzEl = childByTag(ap, 'xyz'); if (!xyzEl) continue;
     const pos = parseXyz(elText(xyzEl)); if (!pos) continue;
     const ppr = childByTag(ap, 'Properties');
@@ -238,6 +366,10 @@ function extractRhythmiaTags(root) {
                // Leistung und Temperatur des Generators.
                ablation: rhythmiaLesion(ppr, pos, seq) });
   }
+  if (loose.length) {
+    groups.push({ id: 'annotation', label: 'Annotation', category: 'annotation',
+                  color: tagCategoryColor('annotation'), points: loose });
+  }
   if (abl.length) groups.unshift({ id: 'ablation', label: 'Ablation', category: 'ablation', color: tagCategoryColor('ablation'), points: abl });
   return groups;
 }
@@ -250,67 +382,611 @@ function extractRhythmiaTags(root) {
  *
  * `Map<n>/surfelec_<id>_all.dat`, Float64, 28 Spalten je Zeile, **zeilenweise**
  * gespeichert — anders als die Signalblöcke, und genau da biegt ein Leser
- * falsch ab. Welche Spalte was trägt, steht in
- * docs/findings/rhythmia-mapping-points.md; die tragenden Punkte sind dort
- * jeweils gegen etwas geprüft.
+ * falsch ab. Welche Spalte was trägt und worauf ihre Zeiten sich beziehen,
+ * wurde an vier Studien und gegen den MATLAB-Export des Herstellers gemessen:
+ * docs/findings/rhythmia-messpunkte-und-lat.md.
+ *
+ * Dieselben Zahlen stehen in `src/epcore/epview/rhythmia_layout.py`, und sie
+ * müssen dieselben bleiben: sonst zeigt der Betrachter etwas anderes als die
+ * umgewandelte Datei, und niemand sieht es der Karte an. Ein Konformanztest
+ * fährt beide Seiten über dieselbe Fixture.
  */
-const SURFELEC_NAME = /surfelec_[0-9a-f]+_all\.dat$/;
+const SURFELEC_NAME = /^surfelec_[0-9a-f]+_all\.dat$/;
 const SURFELEC_COLS = 28;
+
+/** Ob dieser Block heißt, wie eine Punkttabelle heißt.
+ *
+ * Das Verzeichnis ist frei, der Dateiname nicht: `Map1/surfelec_a1_all.dat` und
+ * `surfelec_abc123_all.dat` sind beides Punkttabellen, alles andere nicht.
+ * Geprüft wird der blanke Dateiname, an beiden Enden verankert. Die Regel und
+ * ihr Grund stehen einmal, in `rhythmia_layout.points_fname_ok`; Python nennt
+ * denselben Absatz. Diese Seite prüfte ein unverankertes Muster gegen den
+ * ganzen Pfad, sodass alles vor `surfelec_` trotzdem passte — und zeichnete
+ * eine Tabelle, die der Archivleser nie sah.
+ */
+function rhythmiaPointsFnameOk(fname) {
+  if (fname == null) return false;
+  return SURFELEC_NAME.test(String(fname).replace(/^.*\//, ''));
+}
+
+/* Die 28 Spalten. Die Spalten 9 und 10 sehen aus wie Millivolt und sind es
+ * nicht — sie folgen der echten Spannung um den Faktor 0,21–0,95 und speisen
+ * keine Karte; 13–15 sind immer 0, 16 ist die UniDeriv-Spannung, 17–20 haben
+ * keine belegte Bedeutung. Sie stehen hier benannt, damit der nächste Leser sie
+ * nicht als etwas wiederentdeckt, das sie nicht sind (Befund §2). */
 const SURFELEC = { time: 0, xyz: 1, spline: 4, onSpline: 5, electrode: 6,
-                   latBipolar: 7, latUnipolar: 8, mvBipolar: 9, mvUnipolar: 10,
-                   surface: 21, normal: 24, included: 27 };
+                   latUnipolar: 7, latBipolar: 8, lnUvUnipolar: 11, lnUvBipolar: 12,
+                   lnUvUniDeriv: 16, surface: 21, normal: 24, included: 27 };
 
-async function extractRhythmiaMappingPoints(root, getPayload) {
-  const groups = [];
-  for (const el of iterTag(root, 'inlinedbin')) {
-    const fname = el.getAttribute && el.getAttribute('fname');
-    if (!fname || !SURFELEC_NAME.test(fname)) continue;
-    if (el.getAttribute('type') !== 'Float64') continue;
-    const cols = parseInt(el.getAttribute('cols'), 10);
-    const rows = parseInt(el.getAttribute('rows'), 10);
-    // Eine andere Breite ist eine andere Tabelle. Sie trotzdem so zu lesen
-    // ergibt Zahlen, die wie Koordinaten aussehen und keine sind.
-    if (cols !== SURFELEC_COLS || !rows) continue;
-    const idx = parseInt((el.textContent || '').trim(), 10);
-    if (!Number.isFinite(idx)) continue;
-    const bytes = await getPayload(idx);
-    if (!bytes || bytes.length < rows * cols * 8) continue;
+//: Der Schritt des Exporters, nicht der der Uhr: die Uhren ticken mit
+//: 953,671875 Hz, 2,2 ppm daneben — innerhalb eines Fensters unsichtbar und
+//: genug, um die LAT-Doubles des Herstellerexports um bis zu 4,2e-4 ms zu
+//: verfehlen. LAT folgt dem Exporter, Aufzeichnungsfenster folgen der Uhr.
+export const RHYTHMIA_RATE_HZ = 953.674;
+export const RHYTHMIA_DT_MS = 1000 / RHYTHMIA_RATE_HZ;
+export const RHYTHMIA_CLOCK_RATE_HZ = 953.671875;
+export const RHYTHMIA_CLOCK_DT_MS = 1000 / RHYTHMIA_CLOCK_RATE_HZ;
 
-    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    const at = (row, col) => view.getFloat64((row * cols + col) * 8, true);
-    const map = fname.indexOf('/') > 0 ? fname.slice(0, fname.indexOf('/')) : 'Map';
-    const points = [];
-    for (let r = 0; r < rows; r++) {
-      // Der auf die Anatomie gezogene Ort, nicht der gemessene: der liegt in
-      // der vermessenen Studie im Median 0,50 mm von der Fläche entfernt, und
-      // Marker daneben sehen aus wie ein Registrierungsfehler.
-      const position = [at(r, SURFELEC.surface), at(r, SURFELEC.surface + 1),
-                        at(r, SURFELEC.surface + 2)];
-      if (!position.every(Number.isFinite)) continue;
-      let lat = at(r, SURFELEC.latBipolar);
-      if (!Number.isFinite(lat)) lat = at(r, SURFELEC.latUnipolar);
-      const electrode = at(r, SURFELEC.electrode);
-      points.push({
-        position,
-        label: `${map} · E${Number.isFinite(electrode) ? electrode : '?'}`,
-        time: at(r, SURFELEC.time),
-        // Der gespeicherte Wert ist ein Abtastindex ins Schlagfenster, keine
-        // Millisekunde — 1…271 bei 272 Werten. Die Umrechnung braucht die Rate
-        // und passiert dort, wo die Zeitachse bekannt ist.
-        latSamples: Number.isFinite(lat) ? lat : null,
-        bipolarMv: at(r, SURFELEC.mvBipolar),
-        unipolarMv: at(r, SURFELEC.mvUnipolar),
-        electrode: Number.isFinite(electrode) ? electrode : null,
-        included: at(r, SURFELEC.included) !== 0,
-      });
-    }
-    if (points.length) {
-      groups.push({ id: `mapping-${map}`, label: `${map} · Messpunkte`,
-                    category: 'measurement', color: tagCategoryColor('measurement'),
-                    points });
+//: `Project/Properties/Version` der Archive, an denen die Belegung gemessen
+//: wurde. Herkunft, kein Schalter: dieselben Spalten halten über zwei Stände
+//: rund 2,5 Jahre auseinander, und einen unbekannten Stand zu verweigern
+//: sperrte jede neue Studie ohne gemessenen Grund. Ein unbekannter wird
+//: gekennzeichnet und gegen die Karten geprüft, die aus ihm gebaut wurden.
+export const RHYTHMIA_VALIDATED_VERSIONS = ['22.07.24.00', '25.02.28.00'];
+
+//: Was eine von EPCore geschriebene Fläche über ihre eigene LAT sagt —
+//: wortgleich mit `rhythmia_layout.LAT_COMMENT`. Eine vor dieser Korrektur
+//: umgewandelte PLY trägt rohe Abtastindizes unter demselben Namen, und nur
+//: diese Zeile unterscheidet die beiden.
+export const RHYTHMIA_LAT_COMMENT =
+  'epcore-lat: ms from beat marker, (activation + c) x 1000/953.674';
+
+//: Dieselbe Zeile für eine Karte, deren Schlagbeginn auf einer halben Abtastung
+//: liegt — wortgleich mit `rhythmia_layout.LAT_COMMENT_C_AMBIGUOUS`. Der
+//: Betrachter sagt es am Rand; ohne diesen Zusatz behauptete jede exportierte
+//: Kopie ein glattes „ms from beat marker" für eine Spalte, die um 1,049 ms
+//: danebenliegen kann.
+export const RHYTHMIA_LAT_COMMENT_C_AMBIGUOUS =
+  RHYTHMIA_LAT_COMMENT + '; c on a half sample, may be one sample (1.049 ms) out';
+
+/** Welche der beiden Zeilen eine aus diesem Fenster umgewandelte Fläche trägt.
+ *
+ * Die Entscheidung steht einmal, hier und in `rhythmia_layout.lat_comment`,
+ * damit Kopf und OpenEP-Vermerk nicht auseinanderlaufen.
+ */
+export function rhythmiaLatComment(window) {
+  return (window && window.cGridAmbiguous)
+    ? RHYTHMIA_LAT_COMMENT_C_AMBIGUOUS : RHYTHMIA_LAT_COMMENT;
+}
+
+//: Das Spannungsraster und seine unterste Stufe. Ein gezählter Wert eine halbe
+//: Stufe unter ln 10 ist keine Messung: exp(0)/1000 ist 0,001 mV und sähe aus
+//: wie eine. Genau ln 10 bleibt 0,01 mV (Befund §8.2).
+const LN_UV_STEP = 0.119184;
+const LN_UV_GATE = Math.LN10 - LN_UV_STEP / 2;
+
+//: Die Spaltenprüfung (Befund §8.4): wie viele ganzzahlige Vertices geprüft
+//: werden, gegen wie viele Elektroden je Vertex, und wie deutlich die *falsche*
+//: Spalte gewinnen muss, damit die Belegung als widerlegt gilt.
+//:
+//: Aus der Messung entschieden, nicht aus der runden Zahl: der Korpuslauf legt
+//: die Prüfung allen 19 Karten der vier Studien vor, alle 76 Abstände haben das
+//: richtige Vorzeichen, und der kleinste ist ein bipolarer ln-µV-Abstand von
+//: +0,279. Die alte Schwelle 0,3 lag darüber — eine richtig gelesene Karte
+//: hätte ihre LAT dafür verloren. Die ln-µV-Schwelle ist deshalb eine
+//: Rasterstufe: der kleinste Unterschied, den diese Werte überhaupt ausdrücken
+//: können. Wortgleich mit `rhythmia_layout`, samt Begründung dort.
+const LAYOUT_SAMPLE = 500;
+const LAYOUT_NEAREST = 8;
+const LAYOUT_MARGIN_LAT = 0.2;
+const LAYOUT_MARGIN_LN_UV = LN_UV_STEP;
+
+/** Eine endliche Zahl aus XML-Text, oder null. Nie geraten. */
+function rhythmiaNumber(text) {
+  if (text == null) return null;
+  const trimmed = String(text).trim();
+  if (!trimmed) return null;              // '' ist kein Wert; `Number('')` wäre 0
+  const value = Number(trimmed);
+  return Number.isFinite(value) ? value : null;
+}
+
+/** `c`: auf welcher Abtastung des Schlagfensters der Marker sitzt.
+ *
+ * `floor(x + 0.5)`, nicht `Math.round`: Python rundet die exakte Hälfte zur
+ * geraden Zahl und JavaScript nach oben, und eine Regel, die sich bei .5
+ * zwischen den beiden Lesern unterscheidet, unterscheidet sich eines Tages auf
+ * einer echten Karte. Keine echte Karte liegt genau auf einer Hälfte — die
+ * zentrierten verfehlen sie um 3e-4 —, die Richtung ist also Konvention, und
+ * die Konvention ist nach oben, auf beiden Vorzeichen.
+ */
+export function rhythmiaBeatStart(offsetMs) {
+  return Math.floor(offsetMs / RHYTHMIA_DT_MS + 0.5);
+}
+
+/** Dasselbe auf dem Raster, das die Uhr der Aufzeichnung ergäbe. */
+export function rhythmiaClockStart(offsetMs) {
+  return Math.floor(offsetMs / RHYTHMIA_CLOCK_DT_MS + 0.5);
+}
+
+/** Das Schlagfenster einer Kartenauswertung, oder warum es keines gibt.
+ *
+ * `W` kommt aus der Spaltenzahl der Konfidenzkurve, wenn sie da ist, sonst aus
+ * BeatDuration; beide waren sich auf 19 von 19 echten Karten einig. Sind beide
+ * da und um mehr als eine Abtastung uneins, stimmt etwas an der Rate nicht und
+ * keine Millisekunde aus diesem Fenster ist belastbar.
+ *
+ * Gelesen wird über direkte Kinder, nie über `firstTag`: das ist eine
+ * Nachfahrensuche und fände die Properties einer eingebetteten Auswertung.
+ */
+export function rhythmiaBeatWindow(eo) {
+  const props = childByTag(eo, 'Properties');
+  const offset = rhythmiaNumber(props && elText(childByTag(props, 'BeatOffset')));
+  const duration = rhythmiaNumber(props && elText(childByTag(props, 'BeatDuration')));
+  const node = childByTag(eo, 'SurfaceElectrodesNode');
+  const confwf = node && childByTag(node, 'SurfElectrodesConfidenceWF');
+  const bin = confwf && childByTag(confwf, 'inlinedbin');
+  const raw = bin && bin.getAttribute('cols');
+  const parsed = raw == null ? NaN : parseInt(raw, 10);
+  const columns = Number.isFinite(parsed) ? parsed : null;
+
+  if (offset === null || (duration === null && columns === null)) {
+    return { window: null, reason: rhythmiaReason('no-beat-window') };
+  }
+  if (duration !== null && columns !== null
+      && Math.abs(duration / RHYTHMIA_DT_MS - columns) > 1) {
+    return { window: null, reason: rhythmiaReason('window-mismatch') };
+  }
+  const samples = columns !== null ? columns : Math.floor(duration / RHYTHMIA_DT_MS + 0.5);
+  // Ein Fenster ohne Abtastungen ist keines; jeder Index läge außerhalb.
+  // Gemeldet als Missverhältnis, nicht als Abwesenheit: die Zahlen sind da und
+  // passen nicht zueinander.
+  if (!(samples > 0)) return { window: null, reason: rhythmiaReason('window-mismatch') };
+
+  const startSample = rhythmiaBeatStart(offset);
+  const clockStartSample = rhythmiaClockStart(offset);
+  return {
+    window: {
+      offsetMs: offset, durationMs: duration, samples,
+      startSample, clockStartSample,
+      // Der ungerundete Quotient als Herkunft: er sagt, wie nah an einer Hälfte
+      // eine Karte liegt, und macht eine im unentschiedenen Band wiederfindbar.
+      offsetSamples: offset / RHYTHMIA_DT_MS,
+      cGridAmbiguous: startSample !== clockStartSample,
+    },
+    reason: null,
+  };
+}
+
+/** Ob dieser Softwarestand einer ist, an dem die Belegung gemessen wurde. */
+export function rhythmiaVersionChecked(version) {
+  return Boolean(version) && RHYTHMIA_VALIDATED_VERSIONS.includes(String(version).trim());
+}
+
+/** Der Softwarestand des Archivs. Nur die Version, nie das Label daneben —
+ *  das ist ein Studienname. */
+function rhythmiaSoftwareVersion(root) {
+  const project = (root.tagName && root.tagName.toUpperCase() === 'PROJECT')
+    ? root : firstTag(root, 'Project');
+  const props = project && childByTag(project, 'Properties');
+  return (props && elText(childByTag(props, 'Version'))) || '';
+}
+
+/** Die beiden Arten von Kartenblock einer Auswertung, als ihre Tags.
+ *
+ * Direkte Kinder des `EngineOutput`: eine rekursive Suche fände auch die
+ * Blöcke einer eingebetteten Auswertung. Welche Tags dafür zählen, entscheidet
+ * `rhythmiaMapBlockKind` — nie ein literaler Vergleich mit dieser Liste.
+ */
+const RHYTHMIA_MAP_BLOCK_KINDS = ['Activation', 'Voltage'];
+
+/** Welche Art von Kartenblock dieses Element ist, unter ihrem kanonischen Namen.
+ *
+ * Die Schreibung entscheidet nichts: `Activation`, `ACTIVATION` und
+ * `activation` sind eine Art, und zurück kommt immer die kanonische Schreibung,
+ * damit beide Seiten alles Weitere gleich verschlüsseln. Die Regel und ihr
+ * Grund stehen einmal, in `rhythmia_layout.map_block_kind`; Python nennt
+ * denselben Absatz. Diese Seite faltet ohnehin — der tolerante HTML-Parser für
+ * abgeschnittene Archive schreibt jedes Tag klein —, Python verglich literal,
+ * und die beiden waren sich damit uneins, welche Blöcke eine Auswertung hat.
+ */
+function rhythmiaMapBlockKind(tag) {
+  if (tag == null) return null;
+  const folded = String(tag).trim().toLowerCase();
+  return RHYTHMIA_MAP_BLOCK_KINDS.find((kind) => kind.toLowerCase() === folded) || null;
+}
+
+/** Wie eine Anatomie ohne eigene Beschriftung heißt.
+ *
+ * Jede `Anatomy` des Dokuments wird gelaufen, in Dokumentreihenfolge, gleich
+ * was sie umschließt — und `index` ist diese Stelle, von null an über das ganze
+ * Archiv gezählt. Die Regel und ihr Grund stehen einmal, in
+ * `rhythmia_layout.anatomy_fallback_name`; Python nennt denselben Absatz.
+ * Diese Seite lief schon über `iterTag(root, 'Anatomy')`, der Konverter lief
+ * Patient -> Studie -> Anatomie und sah eine daneben stehende nie.
+ */
+function rhythmiaAnatomyFallbackName(index) {
+  return `anatomy_${index}`;
+}
+
+/** Wie eine Anatomie heißt: ihre Beschriftung ohne Leerraum, sonst ihre Stelle.
+ *
+ * Eine Regel, und die Beschriftung wird beschnitten. Sie stand dreimal da und
+ * die drei waren sich über den Leerraum uneins — der Archivleser beschnitt,
+ * diese Seite und der Konverter nicht. Der Name wird nicht nur gezeigt: der
+ * Archivleser legt seine Karten darunter ab, und eine Beschriftung mit einem
+ * Leerzeichen am Ende ist dann dieselbe Kammer unter zwei Namen, ohne dass ein
+ * Wertevergleich etwas davon merkte. Die Regel und ihr Grund stehen einmal, in
+ * `rhythmia_layout.anatomy_name`; Python nennt denselben Absatz.
+ */
+function rhythmiaAnatomyName(label, index) {
+  const text = label == null ? '' : String(label).trim();
+  return text || rhythmiaAnatomyFallbackName(index);
+}
+
+/** Der Name, unter dem die Quelle eines Kartenblocks verglichen wird.
+ *
+ * `SrcEgmType` ohne Leerraum und klein geschrieben, ohne Angabe `bipolar`.
+ * Klein geschrieben, weil dieser Name nur verglichen und nie gezeigt wird: ein
+ * Leser, der die Schreibung behielte, läse `Bipolar` und `bipolar` als zwei
+ * Quellen, wo ein anderer eine liest. Die Regel steht einmal, in
+ * `rhythmia_layout.map_source_label`.
+ */
+function rhythmiaMapSourceLabel(named) {
+  const text = named == null ? '' : String(named).trim();
+  return text ? text.toLowerCase() : 'bipolar';
+}
+
+/** Ob eine Art von Block dieselbe Quelle zweimal nennt.
+ *
+ * `labels` sind die Quellen der Blöcke einer Art, in Dokumentreihenfolge. Die
+ * Regel und ihr Grund stehen einmal, in `rhythmia_layout.vertex_lat_ms`, Absatz
+ * „One source, one block"; die Python-Seite heißt `map_source_refusal`.
+ */
+function rhythmiaMapSourceRefusal(labels) {
+  const seen = new Set();
+  for (const label of labels) {
+    if (seen.has(label)) return rhythmiaReason('map-source-duplicate');
+    seen.add(label);
+  }
+  return null;
+}
+
+/** Ob dieser Block überhaupt eine Karte dieser Anatomie ist.
+ *
+ * Genau ein Wert je Vertex, sonst verweigert — eingepasst wird nichts. Die
+ * Regel und ihr Grund stehen einmal, in `rhythmia_layout.vertex_lat_ms`,
+ * Absatz „One value per vertex"; die Python-Seite heißt `vertex_map_refusal`.
+ */
+function rhythmiaVertexMapRefusal(values, vertexCount) {
+  return values.length === vertexCount ? null : rhythmiaReason('vertex-count-mismatch');
+}
+
+/** Die Aktivierungswerte einer Karte in ms, oder warum sie zurückgehalten werden.
+ *
+ * Der gespeicherte Wert ist ein Index in das Schlagfenster, das Fenster muss
+ * also bekannt sein; ohne es gibt es weder Nullpunkt noch Schrittweite. Alle 38
+ * gemessenen Aktivierungskarten liegen in [0, W+1) — die dichteste 303,994 bei
+ * W 303 —, ein Wert außerhalb ist deshalb nicht diese Größe, und die Karte
+ * behält ihre Form, statt in einer Einheit beschriftet zu werden, in der sie
+ * nicht steht (Befund §8.1).
+ *
+ * Welche Karten geprüft werden und wessen LAT ein Fehlschlag zurückhält, steht
+ * einmal: `rhythmia_layout.vertex_lat_ms`, Absatz „Which maps are gated".
+ *
+ * Wie lang ein Block sein muss, ebenso: derselbe Docstring, Absatz „One value
+ * per vertex" — die Länge wird vor dem Fenster geprüft.
+ */
+function rhythmiaVertexLatMs(raw, window, vertexCount) {
+  const refusal = rhythmiaVertexMapRefusal(raw, vertexCount);
+  if (refusal) return { values: null, reason: refusal };
+  if (!window) return { values: null, reason: rhythmiaReason('no-beat-window') };
+  const limit = window.samples + 1;
+  for (let i = 0; i < raw.length; i++) {
+    const value = raw[i];
+    if (!Number.isFinite(value)) continue;
+    if (!(value >= 0 && value < limit)) {
+      return { values: null, reason: rhythmiaReason('vertex-outside-window') };
     }
   }
-  return groups;
+  // Float32, weil eine Fläche das trägt; gerechnet wird in Float64, damit genau
+  // einmal gerundet wird, am Ende.
+  const out = new Float32Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = (raw[i] + window.startSample) * RHYTHMIA_DT_MS;
+  return { values: out, reason: null };
+}
+
+//: Woraus ein Mesh-Block besteht: sechs Float32 je Vertex — Ort und Normale —
+//: und drei Int32 je Dreieck. Wortgleich mit `rhythmia_layout`.
+const RHYTHMIA_MESH_VERTEX_STRIDE = 24;
+const RHYTHMIA_MESH_TRIANGLE_STRIDE = 12;
+
+/** Ob dieses `Mesh` überhaupt lesbar ist — gefragt, bevor etwas behalten wird.
+ *
+ * Ein Mesh wird ganz genommen oder gar nicht: beide Blöcke werden gemessen,
+ * bevor einer von ihnen zugewiesen wird, und ein Mesh, das daran scheitert,
+ * wird übersprungen, ohne anzutasten, was ein früheres `Mesh` derselben
+ * Anatomie schon ergeben hat. Die Regel und ihr Grund stehen einmal, in
+ * `rhythmia_layout.mesh_blob_refusal` („A mesh is taken whole or not at all");
+ * Python nennt denselben Absatz. Diese Seite hatte die Form schon — Python wies
+ * Vertices und Normalen zu und las die Dreiecke erst danach, sodass ein zweites,
+ * kaputtes Mesh neben einem heilen dort die ganze Anatomie verschwinden ließ.
+ */
+function rhythmiaMeshBlobRefusal(vertexBytes, triangleBytes) {
+  if (!vertexBytes || vertexBytes % RHYTHMIA_MESH_VERTEX_STRIDE) {
+    return rhythmiaReason('mesh-blob-unreadable');
+  }
+  if (!triangleBytes || triangleBytes % RHYTHMIA_MESH_TRIANGLE_STRIDE) {
+    return rhythmiaReason('mesh-blob-unreadable');
+  }
+  return null;
+}
+
+/** Eine Punkttabelle als Zeilen-/Spaltenzugriff, ohne sie umzukopieren. */
+function surfelecView(bytes, rows) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return { rows, at: (row, col) => view.getFloat64((row * SURFELEC_COLS + col) * 8, true) };
+}
+
+/** Ob die Tabelle selbst sagt, dass sie diese Tabelle nicht ist.
+ *
+ * Dreierlei hält in jeder Zeile aller 19 gemessenen Karten, und jedes davon
+ * scheitert hörbar, wenn eine spätere Fassung eine Spalte verschiebt: die
+ * Breite, die Zählmarke als Marke, und die eigene Nummerierung des Korbs.
+ */
+function surfelecRefusal(table) {
+  for (let row = 0; row < table.rows; row++) {
+    const flag = table.at(row, SURFELEC.included);
+    if (flag !== 0 && flag !== 1) return rhythmiaReason('layout-mismatch');
+    const spline = table.at(row, SURFELEC.spline);
+    const onSpline = table.at(row, SURFELEC.onSpline);
+    const electrode = table.at(row, SURFELEC.electrode);
+    if (Number.isFinite(spline) && Number.isFinite(onSpline) && Number.isFinite(electrode)
+        && electrode !== 8 * spline + onSpline) return rhythmiaReason('layout-mismatch');
+  }
+  return null;
+}
+
+/** Die `count` nächsten Punkte je Ziel, Gleichstand nach Index.
+ *
+ * Roh gerechnet: die Stichprobe ist auf 500 begrenzt und eine Elektrodentabelle
+ * läuft auf 20 000 Zeilen — das sind zehn Millionen Abstände und kein Grund,
+ * dem Browser einen räumlichen Index beizubringen.
+ */
+function nearestRows(points, targets, count) {
+  const k = Math.min(count, points.length);
+  const order = (a, b) => (a.d - b.d) || (a.i - b.i);
+  return targets.map((target) => {
+    const best = [];
+    for (let i = 0; i < points.length; i++) {
+      const dx = points[i][0] - target[0];
+      const dy = points[i][1] - target[1];
+      const dz = points[i][2] - target[2];
+      const d = dx * dx + dy * dy + dz * dz;
+      if (best.length < k) { best.push({ i, d }); best.sort(order); continue; }
+      if (d < best[k - 1].d) { best[k - 1] = { i, d }; best.sort(order); }
+    }
+    return best.map(b => b.i);
+  });
+}
+
+function median(values) {
+  if (!values.length) return NaN;
+  const sorted = [...values].sort((a, b) => a - b);
+  const half = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[half] : (sorted[half - 1] + sorted[half]) / 2;
+}
+
+/** Ob die Spalten der Tabelle die Karten speisen, die diese Anatomie trägt.
+ *
+ * Der Softwarestand ist Herkunft, kein Schalter; ein unbekannter wird deshalb
+ * nicht verweigert, sondern an den Daten geprüft: ein Vertex mit ganzzahliger
+ * Aktivierung trägt den Wert einer Elektrode in seiner Nähe, und die Spannung
+ * eines Vertex ist die der nächsten. Beides wird für die richtige Spalte und
+ * für die gefragt, mit der sie vertauscht wäre (Befund §8.4).
+ *
+ * Ein Falsifikat, kein Gütesiegel — und daraus folgt, was es im Zweifel tut:
+ * nur ein Vergleich, den die *falsche* Spalte mit der Schwelle gewinnt,
+ * widerlegt die Belegung (`ok` false, `refuted` nennt welche). Ein bloß kleiner
+ * Abstand lässt die Frage offen (`decided` false) und verweigert nichts — die
+ * richtige Spalte hat ihn ja gewonnen. Ist zu wenig zu prüfen, gilt dasselbe:
+ * eine glatte Karte ist kein Beleg für eine Vertauschung. Wortgleich mit
+ * `rhythmia_layout.layout_agrees`.
+ */
+export function rhythmiaLayoutAgrees(vertices, raw, table) {
+  const counted = [];
+  for (let row = 0; row < table.rows; row++) {
+    if (table.at(row, SURFELEC.included) === 1) counted.push(row);
+  }
+  const vertexCount = vertices.length / 3;
+  const undecided = { ok: true, decided: false, sampled: 0, margins: {}, shares: {},
+                      medians: {}, refuted: [] };
+  if (!vertexCount || !counted.length) return undecided;
+
+  const electrodes = counted.map(row => [table.at(row, SURFELEC.surface),
+                                         table.at(row, SURFELEC.surface + 1),
+                                         table.at(row, SURFELEC.surface + 2)]);
+  const sampleOf = (values) => {
+    const out = [];
+    for (let v = 0; v < vertexCount && out.length < LAYOUT_SAMPLE; v++) {
+      const value = values[v];
+      if (Number.isFinite(value) && value === Math.floor(value)) out.push(v);
+    }
+    return out;
+  };
+  const bipolarSample = sampleOf(raw.bipolar);
+  const unipolarSample = sampleOf(raw.unipolar);
+  // Weniger Vertices als Nachbarn, gegen die jeder verglichen wird: ein Anteil
+  // darüber ist keine Zahl, nach der jemand handeln sollte.
+  if (bipolarSample.length < LAYOUT_NEAREST || unipolarSample.length < LAYOUT_NEAREST) {
+    return { ...undecided, sampled: bipolarSample.length };
+  }
+
+  const placesOf = (sample) => sample.map(
+    v => [vertices[v * 3], vertices[v * 3 + 1], vertices[v * 3 + 2]]);
+  const shares = (values, sample, same, other) => {
+    const near = nearestRows(electrodes, placesOf(sample), LAYOUT_NEAREST);
+    let hitSame = 0, hitOther = 0;
+    sample.forEach((v, i) => {
+      const value = values[v];
+      let sameHit = false, otherHit = false;
+      for (const e of near[i]) {
+        if (table.at(counted[e], same) === value) sameHit = true;
+        if (table.at(counted[e], other) === value) otherHit = true;
+      }
+      if (sameHit) hitSame++;
+      if (otherHit) hitOther++;
+    });
+    return [hitSame / sample.length, hitOther / sample.length];
+  };
+
+  const [share8, share7] = shares(raw.bipolar, bipolarSample,
+                                  SURFELEC.latBipolar, SURFELEC.latUnipolar);
+  const [uni7, uni8] = shares(raw.unipolar, unipolarSample,
+                              SURFELEC.latUnipolar, SURFELEC.latBipolar);
+
+  const one = nearestRows(electrodes, placesOf(bipolarSample), 1);
+  const medianOf = (values, col) => median(bipolarSample.map(
+    (v, i) => Math.abs(values[v] - table.at(counted[one[i][0]], col))));
+  const median12 = medianOf(raw.lnUvBipolar, SURFELEC.lnUvBipolar);
+  const median11 = medianOf(raw.lnUvBipolar, SURFELEC.lnUvUnipolar);
+  const uniMedian11 = medianOf(raw.lnUvUnipolar, SURFELEC.lnUvUnipolar);
+  const uniMedian12 = medianOf(raw.lnUvUnipolar, SURFELEC.lnUvBipolar);
+
+  const round6 = (x) => Math.round(x * 1e6) / 1e6;
+  const margins = {
+    bipolar_lat: round6(share8 - share7),
+    unipolar_lat: round6(uni7 - uni8),
+    bipolar_ln_uv: round6(median11 - median12),
+    unipolar_ln_uv: round6(uniMedian12 - uniMedian11),
+  };
+  // Eine Schwelle je Vergleich, und dieselbe in beide Richtungen: gewinnt die
+  // falsche Spalte mit ihr, ist die Belegung widerlegt; gewinnt die richtige
+  // mit ihr, ist sie bestätigt; dazwischen hat die Karte die Frage nicht
+  // beantwortet. In diesem Band zu verweigern hat einer richtigen Karte die
+  // LAT genommen (Befund §8.4).
+  const bars = { bipolar_lat: LAYOUT_MARGIN_LAT, unipolar_lat: LAYOUT_MARGIN_LAT,
+                 bipolar_ln_uv: LAYOUT_MARGIN_LN_UV, unipolar_ln_uv: LAYOUT_MARGIN_LN_UV };
+  const refuted = Object.keys(bars).filter(name => margins[name] <= -bars[name]);
+  const settled = Object.keys(bars).every(name => margins[name] >= bars[name]);
+  return {
+    ok: !refuted.length, decided: refuted.length > 0 || settled, refuted,
+    sampled: bipolarSample.length, margins,
+    shares: { bipolar_col8: share8, bipolar_col7: share7,
+              unipolar_col7: uni7, unipolar_col8: uni8 },
+    medians: { bipolar_col12: round6(median12), bipolar_col11: round6(median11),
+               unipolar_col11: round6(uniMedian11), unipolar_col12: round6(uniMedian12) },
+  };
+}
+
+/** Eine Punkttabelle lesen: die Messungen einer Karte, mit ihrer Zeitbasis.
+ *
+ * `beat` ist, was die Auswertung über ihren Schlag sagt — das Fenster, oder der
+ * Grund, warum es keines gibt. Ohne Fenster bleiben Ort, Elektrode und Spannung
+ * (die sind ohne Schlagmarker nicht weniger wahr), und die Millisekunden fehlen
+ * samt Begründung. `check` ist die Spaltenprüfung eines ungeprüften Standes;
+ * sie braucht die Tabelle und läuft deshalb hier, wo sie gelesen ist.
+ */
+async function readRhythmiaPointTable(bin, beat, mapName, anatomyIndex, getPayload,
+                                      software, check) {
+  const fname = (bin.getAttribute && bin.getAttribute('fname')) || '';
+  const rows = parseInt(bin.getAttribute('rows'), 10);
+  const cols = parseInt(bin.getAttribute('cols'), 10);
+  // Eine andere Breite ist eine andere Tabelle. Sie trotzdem so zu lesen ergibt
+  // Zahlen, die wie Koordinaten aussehen und keine sind.
+  if (bin.getAttribute('type') !== 'Float64' || cols !== SURFELEC_COLS || !rows) {
+    return { group: null, refused: 'layout-mismatch' };
+  }
+  const idx = parseInt((bin.textContent || '').trim(), 10);
+  if (!Number.isFinite(idx)) return { group: null, refused: 'layout-mismatch' };
+  const bytes = await getPayload(idx);
+  if (!bytes || bytes.length < rows * cols * 8) return { group: null, refused: 'layout-mismatch' };
+
+  const table = surfelecView(bytes, rows);
+  const refused = surfelecRefusal(table) || (check ? check(table) : null);
+  if (refused) {
+    try { console.warn(`[epconv] Rhythmia-Punkttabelle ${fname} verweigert: ${refused}`); } catch (e) {}
+    return { group: null, refused };
+  }
+
+  const window = beat.window;
+  let latWithheld = beat.reason || null;
+  if (!window) {
+    latWithheld = latWithheld || 'no-beat-window';
+  } else if (!latWithheld) {
+    // Eine schlechte Annotation hält die LAT der ganzen Tabelle zurück, nicht
+    // die einer Zeile: eine Tabelle, deren Indizes nicht in dieses Fenster
+    // passen, wurde gegen das falsche Fenster gelesen, und der Rest ihrer
+    // Zeilen ist um nichts sicherer.
+    for (let row = 0; row < rows && !latWithheld; row++) {
+      if (table.at(row, SURFELEC.included) !== 1) continue;
+      for (const col of [SURFELEC.latBipolar, SURFELEC.latUnipolar]) {
+        const index = table.at(row, col);
+        if (!Number.isFinite(index) || index !== Math.floor(index)
+            || index < 1 || index > window.samples) {
+          latWithheld = 'lat-index-outside-window';
+          break;
+        }
+      }
+    }
+  }
+
+  let belowFloor = 0;
+  const voltage = (lnUv) => {
+    if (!Number.isFinite(lnUv)) return NaN;
+    // Eine ausgeschlossene Zeile trägt dort 0, und exp(0)/1000 = 0,001 mV liest
+    // sich als Messung. Alles unter der Rasteruntergrenze ebenso.
+    if (lnUv < LN_UV_GATE) { belowFloor++; return NaN; }
+    return Math.exp(lnUv) / 1000;
+  };
+
+  const start = window ? window.startSample : 0;
+  const points = [];
+  let excluded = 0;
+  for (let row = 0; row < rows; row++) {
+    // Was das System nicht gezählt hat, ist keine Messung: es wird als Zahl
+    // ausgewiesen und nicht gezeichnet.
+    if (table.at(row, SURFELEC.included) !== 1) { excluded++; continue; }
+    const bipolarMv = voltage(table.at(row, SURFELEC.lnUvBipolar));
+    const unipolarMv = voltage(table.at(row, SURFELEC.lnUvUnipolar));
+    // Der auf die Anatomie gezogene Ort, nicht der gemessene: der liegt in der
+    // vermessenen Studie im Median 0,50 mm von der Fläche entfernt, und Marker
+    // daneben sehen aus wie ein Registrierungsfehler.
+    const position = [table.at(row, SURFELEC.surface), table.at(row, SURFELEC.surface + 1),
+                      table.at(row, SURFELEC.surface + 2)];
+    if (!position.every(Number.isFinite)) continue;
+    const electrode = table.at(row, SURFELEC.electrode);
+    const latBipolarIndex = table.at(row, SURFELEC.latBipolar);
+    const latUnipolarIndex = table.at(row, SURFELEC.latUnipolar);
+    points.push({
+      position,
+      label: `${mapName} · E${Number.isFinite(electrode) ? electrode : '?'}`,
+      time: table.at(row, SURFELEC.time),
+      electrode: Number.isFinite(electrode) ? electrode : null,
+      // Der gespeicherte Index und die Millisekunde: der Index ist, was in der
+      // Datei steht, die Millisekunde, was er bedeutet — beides zu behalten
+      // macht das zweite nachrechenbar.
+      latBipolarIndex, latUnipolarIndex,
+      latBipolarMs: latWithheld ? NaN : (latBipolarIndex - 1 + start) * RHYTHMIA_DT_MS,
+      latUnipolarMs: latWithheld ? NaN : (latUnipolarIndex - 1 + start) * RHYTHMIA_DT_MS,
+      bipolarMv, unipolarMv,
+      latWithheld, software,
+    });
+  }
+  if (!points.length) return { group: null, refused: null };
+
+  const notes = [];
+  if (window && window.cGridAmbiguous) notes.push('c-grid-ambiguous');
+  if (belowFloor) notes.push({ 'voltage-below-grid-floor': belowFloor });
+  return {
+    group: {
+      id: `mapping-${anatomyIndex}`, label: `${mapName} · Messpunkte`,
+      category: 'measurement', color: tagCategoryColor('measurement'),
+      points, excluded, rows, fname,
+      dataset: fname.includes('/') ? fname.slice(0, fname.lastIndexOf('/')) : '',
+      beat: window, latWithheld, notes, software,
+    },
+    refused: null,
+  };
 }
 
 /** Eine Rhythmia-Läsion in derselben Form, die die VisiTag-Auswertung erwartet.
@@ -399,8 +1075,149 @@ export function parseRhythmiaTagsFromXml(xml) {
  */
 const SIG_NAME = /sigblk_[0-9a-f]*_?cardiac_\d+_(.+?)_([BUW])\.dat$/;
 
+//: Die Uhr daneben. Stand als Literal mitten im Blockindex, wo der
+//: Konformanztest sie nicht vergleichen konnte — wortgleich mit
+//: `rhythmia_points.CLOCK_NAME`.
+const RHYTHMIA_CLOCK_NAME = /cardiac_\d+_ts\.dat$/;
+
 //: Wie viel um den Zeitpunkt herum gezeigt wird.
 const SIG_WINDOW_S = 1.0;
+
+//: Wortgleich mit `rhythmia_layout.SIGNAL_FLAVOUR_ORDER`.
+const RHYTHMIA_SIGNAL_FLAVOUR_ORDER = { B: 0, U: 1, W: 2 };
+const RHYTHMIA_SIGNAL_FLAVOUR_LAST = 3;
+const RHYTHMIA_SURFACE_ECG_NAME = /surfaceecg/i;
+
+/* Jede Zahl, jedes Muster und jede Liste, die diese Seite mit
+ * `rhythmia_layout` teilt — an einer Stelle gebündelt, damit ein
+ * Konformanztest sie vergleichen kann.
+ *
+ * Bisher verglich er nur die Entity-Tabelle. Alles andere stand zweimal da und
+ * durfte auseinanderlaufen: die Rate, das Spannungsraster, die Schwellen der
+ * Spaltenprüfung, die geprüften Softwarestände, die Kopfzeile einer PLY. Ein
+ * Unterschied darin ändert keine Zeile Code und macht aus derselben Datei zwei
+ * verschiedene Karten.
+ *
+ * Die Muster reisen als Quelltext mit, verglichen wird aber ihr *Urteil* über
+ * dieselben Namen: die beiden Sprachen schreiben dasselbe Muster nicht
+ * zeichengleich (Python fängt Gruppen ein, die diese Seite nicht braucht), und
+ * verglichen werden soll die Regel, nicht die Schreibweise.
+ */
+export const RHYTHMIA_CONSTANTS = {
+  rateHz: RHYTHMIA_RATE_HZ,
+  clockRateHz: RHYTHMIA_CLOCK_RATE_HZ,
+  validatedVersions: RHYTHMIA_VALIDATED_VERSIONS,
+  latComment: RHYTHMIA_LAT_COMMENT,
+  latCommentCAmbiguous: RHYTHMIA_LAT_COMMENT_C_AMBIGUOUS,
+  pointsColumns: SURFELEC_COLS,
+  surfelecColumns: SURFELEC,
+  lnUvStep: LN_UV_STEP,
+  lnUvGate: LN_UV_GATE,
+  layoutSample: LAYOUT_SAMPLE,
+  layoutNearest: LAYOUT_NEAREST,
+  layoutMarginLat: LAYOUT_MARGIN_LAT,
+  layoutMarginLnUv: LAYOUT_MARGIN_LN_UV,
+  meshVertexStride: RHYTHMIA_MESH_VERTEX_STRIDE,
+  meshTriangleStride: RHYTHMIA_MESH_TRIANGLE_STRIDE,
+  mapBlockKinds: RHYTHMIA_MAP_BLOCK_KINDS,
+  annotationPointTags: RHYTHMIA_ANNOTATION_POINT_TAGS,
+  signalFlavourOrder: RHYTHMIA_SIGNAL_FLAVOUR_ORDER,
+  signalFlavourLast: RHYTHMIA_SIGNAL_FLAVOUR_LAST,
+  defaultMapSource: 'bipolar',
+  windowSeconds: SIG_WINDOW_S,
+  reasons: RHYTHMIA_REASONS,
+  notes: RHYTHMIA_NOTES,
+};
+
+/** Was die Namensmuster über eine Liste von Namen sagen — als Urteil, nicht als
+ *  Quelltext, damit verglichen wird, was die Regel tut. */
+export function rhythmiaNameVerdicts(names) {
+  return names.map((name) => {
+    const bare = String(name).replace(/^.*\//, '');
+    const signal = SIG_NAME.exec(bare);
+    return {
+      name,
+      pointsFnameOk: rhythmiaPointsFnameOk(name),
+      clock: RHYTHMIA_CLOCK_NAME.test(bare),
+      signal: signal ? [signal[1], signal[2]] : null,
+      surfaceEcg: rhythmiaIsSurfaceEcg(name),
+    };
+  });
+}
+
+/** Aus welchem Block das Fenster eines Punktes kommt, das Brauchbarste zuerst.
+ *
+ * Erst die Art, dann die Kanalzahl — als *Paar*, nie in eine Zahl gefaltet.
+ * Genau das stand hier: `Art * 100 + Kanäle`, und ab hundert Kanälen überstimmt
+ * die Kanalzahl die Art, die sie eigentlich nur bei Gleichstand trennen
+ * sollte. Die Regel und ihr Grund stehen einmal, in
+ * `rhythmia_layout.signal_rank`; Python nennt denselben Absatz.
+ */
+function rhythmiaSignalRank(flavour, cols) {
+  const order = RHYTHMIA_SIGNAL_FLAVOUR_ORDER[flavour];
+  return [order === undefined ? RHYTHMIA_SIGNAL_FLAVOUR_LAST : order, cols | 0];
+}
+
+/** Ob dieser Block eine Körperoberflächenableitung ist statt der eines Katheters.
+ *
+ * Eine Oberflächenableitung ist Bezug, nie Gegenstand — auch dann nicht, wenn
+ * sie das Einzige im Archiv ist. „Was hat der Katheter hier gemessen" und „was
+ * zeigte die Körperoberfläche in diesem Moment" sind nicht dieselbe Messung,
+ * und das Fenster ist als das des Punktes beschriftet. Die Regel und ihr Grund
+ * stehen einmal, in `rhythmia_layout.is_surface_ecg`; Python nennt denselben
+ * Absatz und hat sie immer so gehalten.
+ */
+function rhythmiaIsSurfaceEcg(catheter) {
+  return Boolean(catheter) && RHYTHMIA_SURFACE_ECG_NAME.test(String(catheter));
+}
+
+/** Die Rate, die eine Zeitachse angibt, oder null, wenn sie keine angibt.
+ *
+ * Eine Uhr, die keine Rate nennen kann, ergibt kein Fenster. Die Regel und ihre
+ * Belege stehen einmal, in `rhythmia_layout.recording_rate_hz`; Python nennt
+ * denselben Absatz und hat sie immer so gehalten.
+ *
+ * Diese Seite rechnete denselben Quotienten aus und machte damit weiter. An
+ * einem 500-Zeilen-Block gemessen: ein einzelner Zeitstempel ergab Rate 0, eine
+ * halbe Fensterbreite von 1 und ein Fenster über zwei Abtastungen, mit „0 Hz"
+ * beschriftet; eine durchweg gleiche Zeitachse ergab `Infinity`, eine halbe
+ * Fensterbreite von `Infinity` und damit die *ganze* Aufzeichnung, mit
+ * „Infinity Hz" beschriftet. Eine Sekunde um einen Punkt herum und die ganze
+ * Studie unter derselben Beschriftung sind nicht dasselbe Bild.
+ */
+export function rhythmiaRecordingRateHz(first, last, count) {
+  const a = Number(first), b = Number(last), n = Number(count);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(n)) return null;
+  // Ein Zeitstempel nennt einen Augenblick, keine Rate.
+  if (n < 2) return null;
+  const span = b - a;
+  if (!Number.isFinite(span) || span <= 0) return null;
+  const rate = (n - 1) / span;
+  return Number.isFinite(rate) && rate > 0 ? rate : null;
+}
+
+/** Welcher Block als Bezug mitreist — als Index in die Blöcke, wie sie in der
+ *  Datei stehen — oder null.
+ *
+ * Die Dokumentreihenfolge entscheidet, nicht die Reihenfolge, in die ein Leser
+ * schon sortiert hat. Die Regel und ihre Belege stehen einmal, in
+ * `rhythmia_layout.surface_reference`; Python nennt denselben Absatz.
+ *
+ * Diese Seite suchte in der bereits nach `rhythmiaSignalRank` sortierten Liste.
+ * Bei einer einzigen Oberflächenableitung je Gruppe fällt das nicht auf; bei
+ * zwei entscheidet es, und dann hängt der Browser eine andere an als der
+ * Archivleser — beide echt, beide im richtigen Augenblick aufgezeichnet.
+ */
+function rhythmiaSurfaceReference(blocks, clockPrefix, rows) {
+  for (let index = 0; index < blocks.length; index++) {
+    const [catheter, prefix, blockRows] = blocks[index];
+    if (!rhythmiaIsSurfaceEcg(catheter)) continue;
+    if (!String(prefix).startsWith(String(clockPrefix))) continue;
+    if (blockRows !== rows) continue;
+    return index;
+  }
+  return null;
+}
 
 function rhythmiaSignalIndex(root) {
   const blocks = [];
@@ -417,7 +1234,7 @@ function rhythmiaSignalIndex(root) {
     if (named && type === 'Cardiac') {
       blocks.push({ kind: 'signal', catheter: named[1], flavour: named[2],
                     cols, rows, idx, prefix: bare.slice(0, bare.lastIndexOf('_' + named[2] + '.dat')) });
-    } else if (/cardiac_\d+_ts\.dat$/.test(bare) && type === 'Float64') {
+    } else if (RHYTHMIA_CLOCK_NAME.test(bare) && type === 'Float64') {
       blocks.push({ kind: 'time', rows, idx,
                     prefix: bare.slice(0, bare.lastIndexOf('_ts.dat')) });
     }
@@ -432,11 +1249,19 @@ function rhythmiaEgmReader(root, getRange) {
   const times = blocks.filter(b => b.kind === 'time');
   if (!signals.length || !times.length || !getRange) return null;
 
+  // Die Blöcke, wie sie in der Datei stehen. Die Sortierung darunter wählt den
+  // *Gegenstand* eines Fensters; welche Oberflächenableitung als Bezug mitreist,
+  // entscheidet die Dokumentreihenfolge — siehe rhythmiaSurfaceReference.
+  const inFile = signals.slice();
+
   // Bipolar zuerst: das ist, was ein Mapping-Punkt misst. Dann unipolar, dann
   // was übrig ist. Der Korb hat 64 Kanäle, ein Diagnostikkatheter zehn — der
   // mit den wenigsten ist der, dessen Kanäle einzeln etwas bedeuten.
-  const rank = (b) => (b.flavour === 'B' ? 0 : b.flavour === 'U' ? 1 : 2) * 100 + b.cols;
-  signals.sort((a, b) => rank(a) - rank(b));
+  signals.sort((a, b) => {
+    const ra = rhythmiaSignalRank(a.flavour, a.cols);
+    const rb = rhythmiaSignalRank(b.flavour, b.cols);
+    return (ra[0] - rb[0]) || (ra[1] - rb[1]);
+  });
 
   // Typisierte Sichten verlangen Ausrichtung: ein Float64Array braucht einen
   // durch 8 teilbaren Versatz. Der Streaming-Pfad liefert frische Puffer und
@@ -470,9 +1295,14 @@ function rhythmiaEgmReader(root, getRange) {
   // Gegen die gefundene Uhr verglichen, nicht gegen ein zurechtgeschnittenes
   // Präfix: Katheternamen enthalten selbst Unterstriche, und "eine Ebene
   // abschneiden" traf SurfaceECG12_1 nie.
-  const surfaceFor = (sig, clock) => signals.find(
-    b => /surfaceecg/i.test(b.catheter) && b !== sig
-      && b.prefix.startsWith(clock.prefix) && b.rows === sig.rows);
+  //
+  // Gesucht wird in `inFile`, nicht in der sortierten Liste: welcher Bezug es
+  // ist, entscheidet die Dokumentreihenfolge (rhythmiaSurfaceReference).
+  const surfaceFor = (sig, clock) => {
+    const index = rhythmiaSurfaceReference(
+      inFile.map(b => [b.catheter, b.prefix, b.rows]), clock.prefix, sig.rows);
+    return index === null ? null : inFile[index];
+  };
 
   const windowOf = async (block, from, to) => {
     const raw = await getRange(block.idx, from * 4, (to - from) * 4);
@@ -483,7 +1313,8 @@ function rhythmiaEgmReader(root, getRange) {
     if (!point || point.time == null) return null;
 
     for (const sig of signals) {
-      if (/surfaceecg/i.test(sig.catheter) && signals.length > 1) continue;
+      // Bezug, nie Gegenstand — auch als einziger Block nicht.
+      if (rhythmiaIsSurfaceEcg(sig.catheter)) continue;
       const clock = times.find(t => t.prefix === sig.prefix
                                  || sig.prefix.startsWith(t.prefix));
       if (!clock) continue;
@@ -493,7 +1324,11 @@ function rhythmiaEgmReader(root, getRange) {
       // Binäre Suche: die Zeitachse ist monoton.
       let lo = 0, hi = t.length - 1;
       while (lo < hi) { const mid = (lo + hi) >> 1; if (t[mid] < point.time) lo = mid + 1; else hi = mid; }
-      const rate = t.length > 1 ? 1 / ((t[t.length - 1] - t[0]) / (t.length - 1)) : 0;
+      // Eine Uhr, die keine Rate nennen kann, ergibt kein Fenster — nicht eines
+      // über zwei Abtastungen und nicht eines über die ganze Aufzeichnung.
+      // Die Regel steht einmal: rhythmia_layout.recording_rate_hz.
+      const rate = rhythmiaRecordingRateHz(t[0], t[t.length - 1], t.length);
+      if (rate === null) continue;
       const half = Math.max(1, Math.round(rate * SIG_WINDOW_S / 2));
       const from = Math.max(0, lo - half);
       const to = Math.min(sig.rows, lo + half);
@@ -543,14 +1378,26 @@ async function buildRhythmiaMeshes(xml, getPayload, getRange) {
     return await getPayload(idx);
   };
 
+  const version = rhythmiaSoftwareVersion(root);
+  const software = { version, checked: rhythmiaVersionChecked(version) };
+
   const meshes = [];
+  // Je Mesh die Messpunkte seiner eigenen Karte, und die Tabellen, die schon
+  // gelesen wurden: was am Ende übrig bleibt, gehört zu keiner gezeichneten
+  // Karte und wird gezählt statt verschwiegen.
+  const ownGroups = [];
+  const handled = new Set();
+  let unassignedTables = 0;
   let anatIdx = 0;
   for (const anatomy of iterTag(root, 'Anatomy')) {
     anatIdx++;
-    let name = `anatomy_${anatIdx-1}`;
-    const props = firstTag(anatomy, 'Properties');
-    const lbl = props && firstTag(props, 'Label');
-    if (lbl && lbl.textContent) name = lbl.textContent;
+    // Über direkte Kinder: eine Nachfahrensuche fände das Label einer
+    // eingebetteten Auswertung. Dieser Name ist auch der Name, unter dem die
+    // Messpunkte dieser Karte auftauchen — das Verzeichnis `Map<n>/` gibt es
+    // im Stand 25.02 nicht mehr (Befund §7).
+    const props = childByTag(anatomy, 'Properties');
+    const lbl = props && childByTag(props, 'Label');
+    const name = rhythmiaAnatomyName(lbl && lbl.textContent, anatIdx - 1);
 
     let M = null;
     const tEl = firstTag(anatomy, 'Transform');
@@ -562,8 +1409,14 @@ async function buildRhythmiaMeshes(xml, getPayload, getRange) {
       if (!vEl || !triEl) continue;
       const vBytes = await payloadBytes(vEl), tBytes = await payloadBytes(triEl);
       if (!vBytes || !tBytes) continue;
-      if (vBytes.length === 0 || vBytes.length % 24 !== 0) continue;
-      if (tBytes.length === 0 || tBytes.length % 12 !== 0) continue;
+      // Beide Blöcke gemessen, bevor einer zugewiesen wird — und eine
+      // übersprungene Fläche sagt es, statt still zu verschwinden.
+      const meshRefusal = rhythmiaMeshBlobRefusal(vBytes.length, tBytes.length);
+      if (meshRefusal) {
+        try { console.warn(`[epconv] Anatomie „${name}": ein Mesh ist nicht lesbar `
+          + `(${meshRefusal}) — übersprungen.`); } catch (e) {}
+        continue;
+      }
       const vdata = asFloat32(vBytes);
       const nv = vdata.length / 6;
       positions = new Float32Array(nv * 3);
@@ -574,8 +1427,42 @@ async function buildRhythmiaMeshes(xml, getPayload, getRange) {
       }
       faces = new Uint32Array(asInt32(tBytes));
     }
-    if (!positions) continue;
 
+    /* Die Punkttabellen dieser Anatomie, bevor über das Mesh entschieden ist.
+     *
+     * Eine Anatomie ohne Fläche hat trotzdem Messungen, und die zählen dann als
+     * nicht zuzuordnen — es gibt nichts, worauf sie gezeichnet werden könnten.
+     * Python führt dieselbe Tabelle über ihre Datenschnittstelle weiter; der
+     * Unterschied ist erklärt und in einem Konformanztest festgehalten. */
+    const engineOuts = [...iterTag(anatomy, 'EngineOutput')];
+    const tables = [];
+    for (const eo of engineOuts) {
+      const node = childByTag(eo, 'SurfaceElectrodesNode');
+      const surf = node && childByTag(node, 'SurfElectrodes');
+      const bin = surf && childByTag(surf, 'inlinedbin');
+      if (!bin) continue;
+      const tableName = (bin.getAttribute && bin.getAttribute('fname')) || '';
+      if (!rhythmiaPointsFnameOk(tableName)) {
+        // Übergangen, und es wird gesagt: früher passte hier alles, was
+        // irgendwo auf `surfelec_<hex>_all.dat` endete.
+        try { console.warn(`[epconv] Anatomie „${name}": ${tableName || '(ohne Namen)'} `
+          + `heißt nicht wie eine Punkttabelle — nicht als eine gelesen.`); } catch (e) {}
+        continue;
+      }
+      // Eine andere Breite oder ein anderer Typ ist eine andere Tabelle: sie
+      // wird gar nicht erst angefasst, nicht verweigert — so hält es auch der
+      // Archivleser, der sie nicht als Punkttabelle vormerkt.
+      if (bin.getAttribute('type') !== 'Float64') continue;
+      if (parseInt(bin.getAttribute('cols'), 10) !== SURFELEC_COLS) continue;
+      handled.add(bin);
+      tables.push(bin);
+    }
+    if (!positions) { unassignedTables += tables.length; continue; }
+
+    // Für die Spaltenprüfung: die Vertices, wie sie in der Datei stehen. Die
+    // Tabelle nennt ihre Orte im selben Raum, und Python prüft ebenso gegen die
+    // ungedrehten.
+    const untransformed = M ? positions.slice() : positions;
     if (M) {
       const N = inv3T(M);
       for (let i = 0; i < positions.length; i += 3) {
@@ -590,24 +1477,191 @@ async function buildRhythmiaMeshes(xml, getPayload, getRange) {
     }
     const nv = positions.length / 3;
 
+    /* Die elektrischen Karten und die Messungen, aus denen sie gebaut sind.
+     *
+     * Die gespeicherten Aktivierungswerte sind Indizes in das Schlagfenster der
+     * Kartenauswertung, keine Millisekunden: erst BeatOffset/BeatDuration
+     * daneben geben ihnen Nullpunkt und Schrittweite (Befund §4). */
     const scalars = {};
-    for (const eo of iterTag(anatomy, 'EngineOutput')) {
-      const volt = firstTag(eo, 'Voltage');
-      if (volt && !('voltage' in scalars)) {
-        const vEl = firstTag(volt, 'values'); const b = vEl && await payloadBytes(vEl);
-        if (b) {
-          const raw = asFloat32(b); const mv = new Float32Array(raw.length);
-          for (let i = 0; i < raw.length; i++) mv[i] = Math.exp(raw[i]) / 1000;
-          scalars.voltage = cleanScalar(fitToVertexCount(mv, nv));
+    const latNotes = [];
+    /* Jeder gelesene Kartenblock der Auswertung, wie er in der Datei steht:
+     * Art, Quelle, Länge. Beide Leser müssen über dieselbe Menge entscheiden,
+     * nicht nur über die Blöcke, die beide zufällig ansehen — der
+     * Konformanztest vergleicht sie. */
+    const mapBlocks = [];
+    let beat = { window: null, reason: 'no-beat-window' };
+    let latWithheld = null;
+    let activation = null;
+    // Jede Aktivierungskarte der Auswertung, in Lesereihenfolge. Die Liste
+    // steht hier oben, weil das Fenstergatter sie unten braucht und `raw` im
+    // Zweig darüber endet.
+    let activationMaps = [];
+    let check = null;
+    // Ob die Spaltenprüfung eines ungeprüften Standes angeschlagen hat — und
+    // nicht bloß, ob irgendeine Tabelle verweigert wurde. Nur das erste sagt
+    // etwas über die Vertexkarten aus.
+    let columnsDisagree = false;
+    const several = engineOuts.length > 1;
+
+    if (several) {
+      // Welche der Auswertungen datiert diese Anatomie? Nichts im Archiv sagt
+      // es, und zwei können 111 ms auseinanderliegen. 20 von 20 echten
+      // Anatomien tragen genau eine (Befund §8.3).
+      latWithheld = 'engine-output-multiple';
+      beat = { window: null, reason: 'engine-output-multiple' };
+      try { console.warn(`[epconv] Anatomie „${name}" trägt ${engineOuts.length} `
+        + `Kartenauswertungen — EPCore wählt keine aus: keine Vertexwerte, `
+        + `Tabellen verweigert.`); } catch (e) {}
+    } else if (engineOuts.length === 1) {
+      const eo = engineOuts[0];
+      beat = rhythmiaBeatWindow(eo);
+      const raw = {};
+      // Die Länge des ersten Blocks, der nicht einen Wert je Vertex trägt.
+      let mapLengthMismatch = null;
+      // Ob eine Art von Block dieselbe Quelle zweimal nennt.
+      let duplicateSource = null;
+      /* Jeder Aktivierungs- und Spannungsblock der Auswertung, in
+       * Dokumentreihenfolge, und jeder wird nach denselben Regeln gefragt —
+       * nicht eine feste Liste der Quellen, die dieser Leser zeichnen kann.
+       * Die Regel steht einmal, in `rhythmia_layout.vertex_lat_ms`, Absatz
+       * „Which blocks a reader walks"; Python nennt denselben Absatz.
+       *
+       * Vorher holte diese Seite Art × bipolar/unipolar beim Namen. Den dritten
+       * Block einer echten Auswertung (Voltage UniDeriv) sah sie damit nie und
+       * fragte ihn also weder nach seiner Länge noch nach seinem Fenster, wo
+       * Python beides tat: derselbe Block, hier eine Karte und dort eine
+       * Verweigerung, beide Male schweigend. */
+      const byKind = { Activation: [], Voltage: [] };
+      for (const el of eo.children) {
+        // Welche Tags als Kartenblock zählen, steht einmal — siehe
+        // `rhythmia_layout.map_block_kind`, Absatz über die Schreibung.
+        const kind = rhythmiaMapBlockKind(el.tagName);
+        if (!kind) continue;
+        const values = childByTag(el, 'values');
+        const bytes = values && await payloadBytes(values);
+        if (!bytes) continue;
+        const map = asFloat32(bytes);
+        const props = childByTag(el, 'Properties');
+        const source = rhythmiaMapSourceLabel(
+          props ? elText(childByTag(props, 'SrcEgmType')) : '');
+        mapBlocks.push({ kind, source, length: map.length });
+        // Die Länge entscheidet vor allem anderen, ob dies eine Karte dieser
+        // Anatomie ist: `rhythmia_layout.vertex_lat_ms`, Absatz „One value per
+        // vertex". Vorher stand hier `fitToVertexCount`, das den Block schon
+        // auf die Vertexzahl brachte, bevor irgendein Gatter ihn sah — Python
+        // gatterte den Block, wie er in der Datei steht, und dieselbe Anatomie
+        // mit 33 Vertices und 32 Werten kam hier mit 33 und dort mit 32 Werten
+        // heraus, beide Male schweigend.
+        if (rhythmiaVertexMapRefusal(map, nv)) {
+          mapLengthMismatch = map.length;
+          continue;
         }
+        byKind[kind].push({ source, map });
       }
-      const act = firstTag(eo, 'Activation');
-      if (act && !('lat' in scalars)) {
-        const vEl = firstTag(act, 'values'); const b = vEl && await payloadBytes(vEl);
-        if (b) scalars.lat = cleanScalar(fitToVertexCount(asFloat32(b), nv));
+      // Dieselbe Frage wie Python, an dieselbe Liste: nennt eine Art von Block
+      // zweimal dieselbe Quelle, ist keine von beiden die Karte dieser Anatomie
+      // (derselbe Docstring, Absatz „One source, one block"). Vorher gewann
+      // hier der erste Block und in Python der letzte, beide schweigend.
+      for (const kind of RHYTHMIA_MAP_BLOCK_KINDS) {
+        duplicateSource = duplicateSource
+          || rhythmiaMapSourceRefusal(byKind[kind].map((b) => b.source));
+      }
+      const pickMap = (kind, source) => {
+        const hit = byKind[kind].find((b) => b.source === source);
+        return hit ? hit.map : null;
+      };
+      raw.bipolar = pickMap('Activation', 'bipolar');
+      raw.unipolar = pickMap('Activation', 'unipolar');
+      raw.lnUvBipolar = pickMap('Voltage', 'bipolar');
+      raw.lnUvUnipolar = pickMap('Voltage', 'unipolar');
+      if (mapLengthMismatch !== null) latWithheld = 'vertex-count-mismatch';
+      else if (duplicateSource) latWithheld = duplicateSource;
+      // Spannung in mV: exp(ln µV) / 1000, dieselbe Größe wie in der
+      // Punkttabelle und aus demselben Logarithmus. Eine unipolare Karte als
+      // `voltage` zu führen sättigte die klinische Skala und zeigte überall
+      // gesundes Gewebe — sie reist unter eigenem Namen mit.
+      for (const [as, key] of [['voltage', 'lnUvBipolar'], ['unipolar', 'lnUvUnipolar']]) {
+        // Ein Block der falschen Länge nimmt der Anatomie auch die Spannung:
+        // passt eine Karte der Auswertung nicht auf dieses Mesh, ist keine von
+        // ihnen darauf zu legen (derselbe Absatz).
+        if (mapLengthMismatch !== null || duplicateSource || !raw[key]) continue;
+        const mv = new Float32Array(nv);
+        for (let i = 0; i < nv; i++) mv[i] = Math.exp(raw[key][i]) / 1000;
+        scalars[as] = cleanScalar(mv);
+      }
+      activation = raw.bipolar || null;
+      // Jede Aktivierungskarte der Auswertung, nicht nur die beiden, die einen
+      // Namen im Viewer haben: das Fenstergatter unten gilt für jede von ihnen.
+      activationMaps = byKind.Activation.map((b) => b.map);
+      if (!software.checked && raw.bipolar && raw.unipolar && raw.lnUvBipolar && raw.lnUvUnipolar) {
+        check = (table) => {
+          const verdict = rhythmiaLayoutAgrees(untransformed, raw, table);
+          if (!verdict.decided || verdict.ok) return null;
+          columnsDisagree = true;
+          try { console.warn(`[epconv] Rhythmia ${version || 'ohne Versionsangabe'} ist `
+            + `ungeprüft und die Spaltenbelegung passt nicht zur Karte `
+            + `(Abstände ${JSON.stringify(verdict.margins)}) — Messpunkte und LAT `
+            + `nicht übernommen.`); } catch (e) {}
+          return 'layout-mismatch';
+        };
       }
     }
-    meshes.push({ name, positions, normals, faces, scalars, source: 'rhythmia' });
+
+    const groups = [];
+    for (const bin of tables) {
+      // Mehrere Auswertungen: die Tabelle wird gar nicht gelesen, statt mit
+      // einer geratenen Zeitbasis gezeigt zu werden.
+      if (several) continue;
+      const { group, refused } = await readRhythmiaPointTable(
+        bin, beat, name, anatIdx - 1, getPayload, software, check);
+      // Eine *widerlegte* Belegung nimmt auch der Fläche ihre Millisekunden:
+      // die Karte steht dann auf denselben Spalten wie die Tabelle. Die
+      // Spannung bleibt — sie steht nicht auf den Annotationsspalten.
+      //
+      // Eine strukturell verweigerte Tabelle (falsche Breite, Einschlussflagge
+      // keine Flagge, Elektrodennummerierung gebrochen) sagt dagegen nichts
+      // über die Vertexkarten: die liegen in eigenen Blöcken und hängen nur am
+      // Schlagfenster. Sie deshalb zurückzuhalten hieße, eine Karte wegen einer
+      // fremden Tabelle zu verschweigen — Python tut es nicht, und das
+      // Manifest der Fixture (Anatomie „RA_layout") sagt es ebenso.
+      if (refused === 'layout-mismatch' && columnsDisagree) latWithheld = 'layout-mismatch';
+      if (group) groups.push(group);
+    }
+
+    // Ohne Fenster keine Millisekunden. Die Karte behält ihre Form, statt in
+    // einer Einheit beschriftet zu werden, in der sie nicht steht.
+    //
+    // Geprüft wird *jede* Aktivierungskarte der Auswertung, bipolar wie
+    // unipolar, und eine davon außerhalb des Fensters hält die LAT der ganzen
+    // Anatomie zurück — auch die der bipolaren Karte, die allein `lat` wird.
+    // Die Regel und ihre Begründung stehen einmal, in
+    // `rhythmia_layout.vertex_lat_ms` („Which maps are gated"): beide sind
+    // Annotationen desselben Schlags gegen dasselbe Fenster. Vorher prüfte
+    // diese Seite nur `raw.bipolar`, und ein Ausreißer allein in der unipolaren
+    // Karte ergab hier Millisekunden und in Python „vertex-outside-window".
+    if (!latWithheld) {
+      let converted = null;
+      for (const map of activationMaps) {
+        const { values, reason } = rhythmiaVertexLatMs(map, beat.window, nv);
+        if (!values) {
+          latWithheld = beat.reason || reason;
+          converted = null;
+          break;
+        }
+        if (map === activation) converted = values;
+      }
+      if (converted) {
+        scalars.lat = cleanScalar(converted);
+        if (beat.window.cGridAmbiguous) latNotes.push('c-grid-ambiguous');
+      }
+    }
+
+    meshes.push({ name, positions, normals, faces, scalars, source: 'rhythmia',
+                  // Das Fenster reist mit, solange die Karte in ms steht: die
+                  // PLY sagt damit, worauf ihre `lat`-Spalte sich bezieht.
+                  beatWindow: latWithheld ? null : beat.window,
+                  latWithheld, latNotes, mapBlocks, software });
+    ownGroups.push(groups);
   }
   // Tag <xyz> is used in raw-vertex space (the per-anatomy <Transform> M is NOT applied).
   // Points are distributed per-anatomy by nearest mesh vertex — a single Rhythmia group
@@ -616,22 +1670,32 @@ async function buildRhythmiaMeshes(xml, getPayload, getRange) {
   // <Transform> — all three real test studies have identity M, so this aligns. Non-identity
   // transforms remain an unhandled limitation: if markers ever appear misaligned on a study,
   // that study has a non-identity M and the tag <xyz> must be transformed before association.
-  const tagGroups = extractRhythmiaTags(root)
-    .concat(await extractRhythmiaMappingPoints(root, getPayload));
-  if (tagGroups.length && meshes.length) {
-    const per = assignTagsToMeshes(meshes, tagGroups);
-    for (let i = 0; i < meshes.length; i++) {
-      if (!per[i].length) continue;
-      meshes[i].tagGroups = per[i];
-      // Die Läsionen dieser Anatomie, in der Form, die die Auswertung erwartet.
-      // Ohne das stünde bei Rhythmia nur "so viele Punkte" und bei CARTO die
-      // ganze Rechnung — dieselbe Frage, zwei Antworten.
-      const lesions = per[i]
-        .filter(g => g.category === 'ablation')
-        .flatMap(g => g.points.map(p => p.ablation).filter(Boolean));
-      if (lesions.length) meshes[i].ablation = lesions;
-    }
+  const tagGroups = extractRhythmiaTags(root);
+  const per = (tagGroups.length && meshes.length)
+    ? assignTagsToMeshes(meshes, tagGroups) : meshes.map(() => []);
+  for (let i = 0; i < meshes.length; i++) {
+    /* Die Messpunkte gehören der Karte, in deren Auswertung ihre Tabelle steht,
+     * nicht dem nächstgelegenen Mesh: Karten derselben Kammer überlappen im
+     * Raum, und die Antwort „nächster Vertex" legt die Punkte einer Sinuskarte
+     * auf eine Reentry-Karte, 111 ms neben ihrem eigenen Nullpunkt. */
+    const groups = [...per[i], ...(ownGroups[i] || [])];
+    if (groups.length) meshes[i].tagGroups = groups;
+    // Die Läsionen dieser Anatomie, in der Form, die die Auswertung erwartet.
+    // Ohne das stünde bei Rhythmia nur "so viele Punkte" und bei CARTO die
+    // ganze Rechnung — dieselbe Frage, zwei Antworten.
+    const lesions = per[i]
+      .filter(g => g.category === 'ablation')
+      .flatMap(g => g.points.map(p => p.ablation).filter(Boolean));
+    if (lesions.length) meshes[i].ablation = lesions;
   }
+  for (const el of iterTag(root, 'inlinedbin')) {
+    if (handled.has(el)) continue;
+    if (!rhythmiaPointsFnameOk((el.getAttribute && el.getAttribute('fname')) || '')) continue;
+    if (el.getAttribute('type') !== 'Float64') continue;
+    if (parseInt(el.getAttribute('cols'), 10) !== SURFELEC_COLS) continue;
+    unassignedTables++;
+  }
+  meshes.unassignedPointTables = unassignedTables;
   // Ein Punkt zeigt hier keine eigene Aufnahme, sondern das Fenster der
   // laufenden um seinen Zeitstempel — Rhythmia legt Signale je Katheter ab,
   // nicht je Punkt.
@@ -1414,11 +2478,20 @@ export function parsePLY(buffer) {
   let format = 'ascii';
   const elements = [];
   let cur = null;
-  let tagGroups = null;
+  let tagGroups = null, latReference = null;
   for (const ln of lines) {
     const p = ln.trim().split(/\s+/);
     if (p[0] === 'format') format = p[1];
-    else if (p[0] === 'comment') { const g = decodeTagComment(ln.trim().replace(/^comment\s+/, '')); if (g) tagGroups = g; }
+    else if (p[0] === 'comment') {
+      const body = ln.trim().replace(/^comment\s+/, '');
+      const g = decodeTagComment(body);
+      if (g) tagGroups = g;
+      // Worauf sich `lat` bezieht, steht im Kopf. Eine vor der LAT-Korrektur
+      // geschriebene Datei trägt dieselbe Spalte mit rohen Abtastindizes und
+      // sagt nichts dazu — nur diese Zeile unterscheidet die beiden. Sie reist
+      // deshalb weiter, wenn der Betrachter die Karte erneut ausgibt.
+      else if (body.startsWith('epcore-lat:')) latReference = body;
+    }
     else if (p[0] === 'element') { cur = { name: p[1], count: +p[2], props: [] }; elements.push(cur); }
     else if (p[0] === 'property' && cur) {
       if (p[1] === 'list') cur.props.push({ list: true, countType: p[2], itemType: p[3], name: p[4] });
@@ -1499,7 +2572,8 @@ export function parsePLY(buffer) {
     }
   }
 
-  return { positions, normals, colors, scalars, scalarNames, faces: faces.done(), tagGroups };
+  return { positions, normals, colors, scalars, scalarNames, faces: faces.done(),
+           tagGroups, latReference };
 }
 
 /* OBJ (positions, normals, vertex colors, faces) — no scalars */
@@ -1603,6 +2677,44 @@ function plyParts(mesh, colors) {
   const hasN = !!normals, hasC = !!(colors && colors.length === nv * 3);
   const scalarNames = Object.keys(scalars || {}).filter(k => scalars[k] && scalars[k].length === nv);
   return { positions, normals, faces, scalars, nv, nf, hasN, hasC, scalarNames };
+}
+
+/** Die Kopfzeilen, die ein Export dieser Karte tragen muss.
+ *
+ * Zweierlei sagt eine PLY über sich hinaus über ihre Zahlen: welche Marker
+ * mitreisen, und worauf ihre `lat`-Spalte sich bezieht. Das zweite lässt sich
+ * später nicht zurückholen — eine vor der LAT-Korrektur umgewandelte Fläche
+ * trägt rohe Abtastindizes unter demselben Namen, und nur diese Zeile
+ * unterscheidet die beiden (ADR-0007/D10).
+ *
+ * Eine Karte, die selbst aus einer PLY kam, gibt deren Zeile unverändert
+ * weiter, statt unsere zu behaupten: sie weiß, woher ihre Werte stammen, und
+ * wir wissen es nicht besser.
+ */
+/** Ob diese Karte sagt, was ihre `lat`-Spalte ist.
+ *
+ * Entweder die Datei sagt es selbst (`latReference` aus dem PLY-Kopf) oder die
+ * Karte ist gerade hier umgewandelt worden und bringt ihr Schlagfenster mit —
+ * dann rechnet der Leser die Millisekunden selbst aus und weiß es deshalb.
+ * Sagt keines von beidem etwas, sind die Zahlen ungeklärt: eine vor der
+ * Korrektur umgewandelte Rhythmia-PLY trägt rohe Abtastindizes unter demselben
+ * Namen, und eine CARTO-PLY echte Millisekunden.
+ *
+ * Die Frage steht hier einmal, weil sie an zwei Stellen gestellt wird — im
+ * PLY-Kopf beim Export und in `act_bip` beim OpenEP-Export. Zwei Kopien der
+ * Regel laufen genau so auseinander, wie Python und Browser es hier taten.
+ */
+export function statesLatUnit(mesh) {
+  if (!mesh || !mesh.scalars || !mesh.scalars.lat) return false;
+  return Boolean(mesh.latReference || mesh.beatWindow);
+}
+
+export function plyComments(mesh, tagGroups) {
+  const out = [];
+  if (tagGroups && tagGroups.length) out.push(encodeTagComment(tagGroups));
+  if (mesh && mesh.latReference) out.push(mesh.latReference);
+  else if (statesLatUnit(mesh)) out.push(rhythmiaLatComment(mesh.beatWindow));
+  return out;
 }
 
 // binary_little_endian — Default für Export und Teilen: 43x schneller als der

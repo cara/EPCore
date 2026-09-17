@@ -8,10 +8,75 @@
  * over it: a point annotated outside its window belongs to a different beat,
  * and a point off the wall is a measurement of blood.
  */
-import { meshClosure } from './epmetrics.js?v=d646addb4355';
+import { meshClosure } from './epmetrics.js?v=efadfce5e2dc';
 
 /** How far outside the surface a point may sit and still count as on it, mm. */
 export const ON_SURFACE_MM = 3.0;
+
+/** What a point measured, as text, and what has to be said about it.
+ *
+ * Returns `{ bits, notes }`: the measurements, and the sentences that qualify
+ * them. One formatter for every vendor, because two would drift — and because
+ * the rules are the same wherever the numbers came from:
+ *
+ * * only finite values are shown. `!= null` let a NaN through as "NaN mV",
+ *   which is what an excluded Rhythmia row and an unmeasured CARTO point both
+ *   produce, and "NaN mV" reads as a broken viewer rather than as "not
+ *   measured here";
+ * * a Rhythmia measurement point — the ones carrying `latBipolarMs` — shows its
+ *   activation time in ms from the beat marker, or says why it has none. The
+ *   stored value is a sample index into a beat window; without that window it
+ *   is not a time, and the panel says so instead of printing the index;
+ * * a software version nobody has checked the column layout against is named.
+ *   It is provenance, not a defect, and the reader is entitled to know.
+ *
+ * The text is plain: a caller that puts it into a document must insert it as
+ * text, not as markup.
+ */
+export function pointMeasurements(point, T) {
+  const say = (key, fallback, params) => {
+    const text = T ? T(key, params) : null;
+    // The page renders a missing key as ⟦key⟧; a fallback is more use than a
+    // pair of brackets, and the i18n test is what keeps the keys present.
+    return (typeof text === 'string' && text && !text.startsWith('⟦')) ? text : fallback;
+  };
+  const bits = [], notes = [];
+  if (!point) return { bits, notes };
+
+  // Rhythmia voltages are full doubles out of exp(ln µV); CARTO and EnSite
+  // write theirs as the export spelled them, and that spelling stays.
+  const rhythmia = 'latBipolarMs' in point;
+  const mv = (value) => (rhythmia ? Number(value).toPrecision(3) : String(value));
+  if (Number.isFinite(point.bipolarMv)) bits.push(`bipolar ${mv(point.bipolarMv)} mV`);
+  if (Number.isFinite(point.unipolarMv)) bits.push(`unipolar ${mv(point.unipolarMv)} mV`);
+  if (Number.isFinite(point.peakNegativeMv)) bits.push(`peak neg ${point.peakNegativeMv} mV`);
+  if (point.woiMs && point.woiMs.length === 2 && point.woiMs.every(Number.isFinite)) {
+    bits.push(`WOI ${point.woiMs[0]}…${point.woiMs[1]} ms`);
+  }
+  if (Number.isFinite(point.cycleLengthMs)) bits.push(`CL ${point.cycleLengthMs} ms`);
+  if (!rhythmia) return { bits, notes };
+
+  const ms = (value) => (Number.isFinite(value) ? value.toFixed(1) : '—');
+  if (Number.isFinite(point.latBipolarMs) || Number.isFinite(point.latUnipolarMs)) {
+    bits.push(say('map.points.lat',
+                  `LAT bipolar ${ms(point.latBipolarMs)} ms · unipolar ${ms(point.latUnipolarMs)} ms`,
+                  { bipolar: ms(point.latBipolarMs), unipolar: ms(point.latUnipolarMs) }));
+  } else if (point.latWithheld) {
+    const reason = say(`map.reason.${point.latWithheld}`, point.latWithheld);
+    notes.push(say('map.points.latWithheld', `LAT not available: ${reason}`, { reason }));
+  }
+  if (point.software && !point.software.checked) {
+    // The version comes out of the archive. Kept to what a version can look
+    // like, so that a caller which does build markup cannot be handed any.
+    const version = String(point.software.version || '').replace(/[^\w.\-+ ]/g, '').slice(0, 32);
+    notes.push(version
+      ? say('map.points.layoutUnchecked',
+            `Column layout for Rhythmia ${version} not checked against an export`, { version })
+      : say('map.points.versionUnknown',
+            'Rhythmia version unknown — column layout not checked against an export'));
+  }
+  return { bits, notes };
+}
 
 /** The window a point's annotation has to fall in, in ms. */
 export function windowOfInterest(point) {

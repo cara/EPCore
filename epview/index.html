@@ -15,9 +15,9 @@
   } catch (e) { /* Speicher abgeschaltet */ }
 </script>
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/theme.js?v=d646addb4355"></script>
-<script type="module" src="../shared/settings.js?v=d646addb4355"></script>
-<script type="module" src="../shared/i18n.js?v=d646addb4355"></script>
+<script type="module" src="../shared/theme.js?v=efadfce5e2dc"></script>
+<script type="module" src="../shared/settings.js?v=efadfce5e2dc"></script>
+<script type="module" src="../shared/i18n.js?v=efadfce5e2dc"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -413,6 +413,13 @@
     color: var(--muted); line-height: 1.7;
   }
   #stats b { color: var(--text); font-weight: 500; }
+  /* Die Hinweise zur Karte. Umgebrochen und ohne die Sperrung der Zahlen
+     darüber: das sind Sätze, keine Messwerte. */
+  #st-note {
+    margin-top: 8px; max-width: 46ch; margin-left: auto;
+    color: var(--warn); letter-spacing: 0; line-height: 1.45; white-space: normal;
+  }
+  #st-note div + div { margin-top: 4px; }
 
   /* toolbar (top-center actions) */
   #toolbar {
@@ -762,6 +769,11 @@
   <div><b id="st-verts">—</b> <span data-i18n="map.vertices"></span></div>
   <div><b id="st-faces">—</b> <span data-i18n="map.faces"></span></div>
   <div id="st-metrics"></div>
+  <!-- Was an dieser Karte nicht selbstverständlich ist: zurückgehaltene
+       Millisekunden, Messpunkt-Tabellen ohne Karte, Werte unter der
+       Rastergrenze. Keine Meldung zum Wegklicken — es gilt, solange die Karte
+       offen ist. -->
+  <div id="st-note" hidden></div>
 </div>
 
 <div id="toolbar">
@@ -1130,7 +1142,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=d646addb4355",
+    "three": "../vendor/three/three.module.js?v=efadfce5e2dc",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -1140,14 +1152,15 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import epcoreTheme from '../shared/theme.js?v=d646addb4355';
-import * as EP from './epconv.js?v=d646addb4355';
-import * as EPM from './epmetrics.js?v=d646addb4355';
-import * as EPCV from './epconduction.js?v=d646addb4355';
-import * as EPA from './epablation.js?v=d646addb4355';
-import * as EPSave from '../shared/save.js?v=d646addb4355';
-import * as EPO from './epopenep.js?v=d646addb4355';
-import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, encodeTagComment, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=d646addb4355';
+import epcoreTheme from '../shared/theme.js?v=efadfce5e2dc';
+import * as EP from './epconv.js?v=efadfce5e2dc';
+import * as EPM from './epmetrics.js?v=efadfce5e2dc';
+import * as EPCV from './epconduction.js?v=efadfce5e2dc';
+import * as EPA from './epablation.js?v=efadfce5e2dc';
+import * as EPSave from '../shared/save.js?v=efadfce5e2dc';
+import * as EPO from './epopenep.js?v=efadfce5e2dc';
+import * as EPP from './eppoints.js?v=efadfce5e2dc';
+import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=efadfce5e2dc';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1629,6 +1642,9 @@ function buildTagUI() {
     sw.style.cssText = `display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:middle;background:rgb(${g.color[0]},${g.color[1]},${g.color[2]})`;
     chip.appendChild(sw);
     chip.appendChild(document.createTextNode(`${g.label} (${g.points.length})`));
+    // Die Zahl im Chip ist, was gezeichnet wird. Wie viel das System verworfen
+    // hat, gehört daneben — sonst liest sie sich als „so viele Messungen gab es".
+    if (g.excluded) chip.title = T('map.points.excluded', { count: g.excluded });
     chip.onclick = () => { inst.visible = !inst.visible; chip.classList.toggle('on', inst.visible); };
     list.appendChild(chip);
   });
@@ -1661,6 +1677,7 @@ function closeMap() {
   const drop = document.getElementById('drop');
   if (drop) drop.hidden = false;
   updateStats({ positions: new Float32Array(), faces: new Uint32Array() });
+  showMapNotes([]);
   refreshCloseButton();
 }
 
@@ -1817,6 +1834,10 @@ function loadGeometry(data, name) {
   // A new map is a new decision. Carrying the previous one over is how an
   // unscrubbed map inherits permission to be published.
   if (typeof markAnonymised === 'function') markAnonymised(false);
+  // Und die Hinweise der vorigen Karte gelten für diese nicht. Was diese hier
+  // selbst zu sagen hat, steht sofort da — auch wenn sie als einzelne Datei
+  // kam und keine Studie mitbringt, deren Hinweise gleich nachgereicht werden.
+  showMapNotes(mapNotes(null, data));
   currentName = name;
   refreshCloseButton();
   const shown = document.getElementById('open-name');
@@ -2950,6 +2971,95 @@ function bandBar(histogram) {
     + `margin-top:3px;border-radius:2px;overflow:hidden">${parts.join('')}</span>`;
 }
 
+/* Was zu dieser Karte gesagt werden muss, unter ihren Zahlen.
+ *
+ * Eine Karte ohne Millisekunden bleibt eine ohne, solange sie offen ist — das
+ * gehört nicht in eine Meldung, die man wegklickt und danach nicht mehr findet.
+ * Leer heißt versteckt: ein leerer Kasten liest sich wie ein Platzhalter, der
+ * noch gefüllt wird.
+ */
+function showMapNotes(lines) {
+  const box = document.getElementById('st-note');
+  if (!box) return;
+  box.textContent = '';
+  for (const line of (lines || [])) {
+    if (!line) continue;
+    const row = document.createElement('div');
+    // Als Text, nicht als Markup: in diesen Zeilen stehen Namen aus der Datei.
+    row.textContent = line;
+    box.appendChild(row);
+  }
+  box.hidden = !box.childElementCount;
+}
+
+/** Die Hinweise einer Rhythmia-Studie: was zurückgehalten wurde, und warum.
+ *
+ * Je Anatomie, mit ihrem Namen, weil eine Studie mehrere Karten trägt und die
+ * Aussage „keine Millisekunden" für genau eine davon gilt.
+ */
+function rhythmiaNotes(meshes) {
+  const lines = [];
+  for (const mesh of (meshes || [])) {
+    if (mesh.source !== 'rhythmia') continue;
+    const name = mesh.name || '';
+    if (mesh.latWithheld) {
+      // Der Schlüssel wird zusammengesetzt, und zwar als Template-Literal: die
+      // Tripwire in tests/js/epview_i18n.test.js liest jeden Aufruf mit einer
+      // Zeichenkette in Hochkommata wörtlich und suchte sonst nach einem
+      // Schlüssel namens „map.reason." — samt Punkt und ohne Grund.
+      lines.push(T('map.msg.latWithheld',
+                   { name, reason: T(`map.reason.${mesh.latWithheld}`) }));
+    }
+    // Der Schlagbeginn auf einer halben Abtastung: der Wert bleibt, und dass er
+    // um eine Abtastung danebenliegen kann, steht dabei.
+    for (const note of (mesh.latNotes || [])) {
+      if (note === 'c-grid-ambiguous') lines.push(T('map.msg.cGridAmbiguous', { name }));
+    }
+    for (const group of (mesh.tagGroups || [])) {
+      for (const note of (group.notes || [])) {
+        const count = note && note['voltage-below-grid-floor'];
+        if (count) lines.push(T('map.msg.voltageBelowFloor', { name, count }));
+      }
+    }
+  }
+  if (meshes && meshes.unassignedPointTables) {
+    lines.push(T('map.msg.pointsUnassigned', { count: meshes.unassignedPointTables }));
+  }
+  return lines;
+}
+
+/** Was die gezeigte Fläche über die Einheit ihrer `lat` sagt — oder nicht sagt.
+ *
+ * Die Kennzahlen darüber nennen eine Aktivierungszeit in ms, und `epcore epview
+ * metrics` setzt bei derselben Datei einen Vorbehalt daneben, wenn die Datei
+ * das nicht hergibt: eine vor der LAT-Korrektur umgewandelte Rhythmia-Fläche
+ * trägt rohe Abtastindizes unter genau dem Namen, unter dem eine CARTO-Fläche
+ * echte Millisekunden trägt — daneben um den Faktor 1,049 und einen Versatz.
+ * Auf dem Schirm stand dazu bisher nichts, und die Zahl sieht in beiden Fällen
+ * gleich plausibel aus.
+ *
+ * Nur für geladene Dateien: eine gerade selbst umgewandelte Karte kann der
+ * Betrachter einordnen (`source`), eine PLY von der Platte nicht — dort
+ * entscheidet allein die Kopfzeile `epcore-lat:`, und die Frage danach steht
+ * einmal, in `EP.statesLatUnit`.
+ */
+function latUnitNote(shown) {
+  if (!shown || !shown.scalars || !shown.scalars.lat || shown.source) return null;
+  return EP.statesLatUnit(shown) ? null : T('map.msg.latUnitUnstated');
+}
+
+/** Alle Hinweise unter der Karte: die der Studie und die der gezeigten Fläche.
+ *
+ * Ein Kasten, ein Aufruf. Zwei Wege dorthin hätten sich gegenseitig
+ * überschrieben — `showMapNotes` ersetzt den Inhalt.
+ */
+function mapNotes(meshes, shown) {
+  const lines = rhythmiaNotes(meshes);
+  const unit = latUnitNote(shown);
+  if (unit) lines.push(unit);
+  return lines;
+}
+
 function updateStats(data) {
   document.getElementById('st-verts').textContent = (data.positions.length/3).toLocaleString('de-DE');
   document.getElementById('st-faces').textContent = (data.faces.length/3).toLocaleString('de-DE');
@@ -3254,12 +3364,10 @@ async function showEgm(point, readEgm) {
   try { egm = readEgm ? await readEgm(point) : null; }
   catch (err) { failure = err.message || String(err); }
 
-  const bits = [];
-  if (point.bipolarMv != null) bits.push(`bipolar ${point.bipolarMv} mV`);
-  if (point.unipolarMv != null) bits.push(`unipolar ${point.unipolarMv} mV`);
-  if (point.peakNegativeMv != null) bits.push(`peak neg ${point.peakNegativeMv} mV`);
-  if (point.woiMs) bits.push(`WOI ${point.woiMs[0]}…${point.woiMs[1]} ms`);
-  if (point.cycleLengthMs != null) bits.push(`CL ${point.cycleLengthMs} ms`);
+  // Ein Formatierer für alle Hersteller (eppoints.js): NaN ist kein Messwert
+  // und wird nicht als „NaN mV" gezeigt, und ein Rhythmia-Messpunkt nennt seine
+  // LAT in ms ab Schlagmarker — oder sagt, warum er keine hat.
+  const { bits, notes } = EPP.pointMeasurements(point, T);
   let meta = bits.join(' · ') || 'keine Messwerte im Export';
 
   if (failure) {
@@ -3288,6 +3396,14 @@ async function showEgm(point, readEgm) {
     buildChannelChips(egm, point);
   }
   egmMeta.innerHTML = meta;
+  // Als Text angehängt, nicht in `meta` hineingeschrieben: darin steht die
+  // Versionsangabe aus der Datei.
+  for (const note of notes) {
+    const line = document.createElement('div');
+    line.className = 'warn';
+    line.textContent = note;
+    egmMeta.appendChild(line);
+  }
   egmBox.style.display = 'block';
 }
 
@@ -3401,7 +3517,20 @@ function loadParsedMesh(m) {
     // every mapping point reporting that it had no electrogram.
     points: m.points || null, readEgm: m.readEgm || null,
     ablation: m.ablation || null, ablationNote: m.ablationNote || null,
+    // Rhythmia: worauf die Millisekunden sich beziehen, was zurückgehalten
+    // wurde und welcher Softwarestand die Karte geschrieben hat. Das erste
+    // schreibt der Export in den Kopf der PLY, das zweite steht am Rand.
+    beatWindow: m.beatWindow || null, latWithheld: m.latWithheld || null,
+    latNotes: m.latNotes || null, software: m.software || null,
   }, m.name || 'Mesh');
+  // Die Hinweise der Studie gelten auch nach einem Wechsel im Auswahlfeld.
+  // `loadGeometry` setzt den Kasten auf das zurück, was die gezeigte Fläche
+  // allein sagt — ohne Studie also auf leer. Ohne diese Zeile stand eine
+  // Anatomie, deren LAT zurückgehalten wurde, nach dem Umschalten ohne
+  // Aktivierung und ohne den Satz, der sagt warum: genau die stille
+  // Abwesenheit, gegen die der Kasten da ist. Ein Kasten, ein Aufruf — deshalb
+  // steht er hier und nicht noch einmal an jeder Ladestelle.
+  showMapNotes(mapNotes(rawMeshes, current));
 }
 
 /* Was in einem geöffneten Ordner steckt, und welche Studie daraus wird.
@@ -3543,7 +3672,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=d646addb4355'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=efadfce5e2dc'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -3611,13 +3740,20 @@ async function download(name, data, mime) {
 }
 async function exportMesh(fmt) {
   if (!current) { alert(T('map.msg.load.first')); return; }
-  const m = { positions: current.positions, normals: current.normals || null, faces: current.faces, scalars: current.scalars || {} };
+  const m = { positions: current.positions, normals: current.normals || null, faces: current.faces,
+              scalars: current.scalars || {},
+              // Worauf `lat` sich bezieht, reist mit: eine vor der Korrektur
+              // umgewandelte Datei trägt dieselbe Spalte mit rohen
+              // Abtastindizes und sagt nichts dazu.
+              beatWindow: current.beatWindow || null,
+              latReference: current.latReference || null };
+  const comments = EP.plyComments(m, null);
   const base = (currentName || 'epview').replace(/\.[^.]+$/, '').replace(/[^\w\-.]/g, '_');
   // Binäres PLY ist Default (P-8): 43x schneller zu schreiben, rund halb so
   // groß, und der eigene Parser liest es. ASCII bleibt als Menüpunkt, falls
   // ein Empfängerwerkzeug es braucht.
-  if (fmt === 'ply') download(base + '.ply', EP.exportPLYBinary(m, bakeColorsU8()), 'application/octet-stream');
-  else if (fmt === 'ply-ascii') download(base + '.ply', EP.exportPLY(m, bakeColorsU8()), 'text/plain');
+  if (fmt === 'ply') download(base + '.ply', EP.exportPLYBinary(m, bakeColorsU8(), comments), 'application/octet-stream');
+  else if (fmt === 'ply-ascii') download(base + '.ply', EP.exportPLY(m, bakeColorsU8(), comments), 'text/plain');
   else if (fmt === 'obj') download(base + '.obj', EP.exportOBJ(m, bakeColorsU8()), 'text/plain');
   else if (fmt === 'stl') download(base + '.stl', EP.exportSTL(m), 'application/octet-stream');
   else if (fmt === 'openep') {
@@ -3641,10 +3777,18 @@ async function exportMesh(fmt) {
                        : String(p.id ?? p.label ?? ''));
       }
     }
+    // Was `lat` ist, entscheidet `openEPActivation` — dieselbe Frage, die
+    // `plyComments` zwei Zeilen weiter oben für den PLY-Kopf stellt, und
+    // dieselbe, die `epcore epview openep` stellt. In `act_bip` liest jeder
+    // Leser Millisekunden; eine vor der Korrektur umgewandelte Rhythmia-Karte
+    // trägt dort rohe Abtastindizes. Weggeworfen wird deshalb nichts — eine
+    // umgewandelte CARTO-Karte sieht hier genauso aus und hat echte
+    // Millisekunden —, aber die Datei sagt in `notes`, was ungeklärt ist.
+    const { activation, latNote } = EPO.openEPActivation(m);
     download(base + '.mat',
              EPO.buildOpenEP(m.positions, m.faces, {
-               activation: sc.lat, bipolar: sc.voltage, unipolar: sc.unipolar,
-               impedance: sc.impedance, force: sc.force, name: base,
+               activation, bipolar: sc.voltage, unipolar: sc.unipolar,
+               impedance: sc.impedance, force: sc.force, name: base, latNote,
                points, curves, pointNames: names }),
              'application/octet-stream');
   }
@@ -3768,10 +3912,14 @@ async function doShare() {
   document.getElementById('share-busy').style.display = '';
   showShareBox();
   try {
-    const m = { positions: current.positions, normals: current.normals || null, faces: current.faces, scalars: current.scalars || {} };
+    const m = { positions: current.positions, normals: current.normals || null, faces: current.faces,
+                scalars: current.scalars || {},
+                beatWindow: current.beatWindow || null,
+                latReference: current.latReference || null };
     // binäres PLY (P-8): halbes Upload-Volumen, und das Schreiben blockiert die
-    // Oberfläche nicht mehr sekundenlang.
-    const ply = EP.exportPLYBinary(m, bakeColorsU8(), current.tagGroups && current.tagGroups.length ? [encodeTagComment(current.tagGroups)] : []);
+    // Oberfläche nicht mehr sekundenlang. Marker und der LAT-Bezug reisen als
+    // Kopfzeilen mit — dieselben, die der Betrachter beim Öffnen wieder liest.
+    const ply = EP.exportPLYBinary(m, bakeColorsU8(), EP.plyComments(m, current.tagGroups));
     const headers = {
       'Content-Type': 'application/octet-stream',
       // What the server records rather than verifies. It says who claimed
@@ -3823,7 +3971,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=d646addb4355');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=efadfce5e2dc');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -5638,7 +5786,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=d646addb4355');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=efadfce5e2dc');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -5686,7 +5834,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=d646addb4355';
+import '../shared/bridge.js?v=efadfce5e2dc';
 
 /* In der Schale steht "Öffnen" auch oben in der Leiste, für beide Module. Das
  * Menü hier daneben wäre eine zweite Antwort auf dieselbe Frage — die Knöpfe
