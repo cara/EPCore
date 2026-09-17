@@ -15,9 +15,9 @@
   } catch (e) { /* Speicher abgeschaltet */ }
 </script>
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/theme.js?v=f52a215207f7"></script>
-<script type="module" src="../shared/settings.js?v=f52a215207f7"></script>
-<script type="module" src="../shared/i18n.js?v=f52a215207f7"></script>
+<script type="module" src="../shared/theme.js?v=cff65c11417e"></script>
+<script type="module" src="../shared/settings.js?v=cff65c11417e"></script>
+<script type="module" src="../shared/i18n.js?v=cff65c11417e"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -1052,6 +1052,30 @@
       <div class="toggles" id="trim-list" style="margin-top:6px"></div>
     </div>
   </details>
+  <details class="sec" id="sec-points" data-sec="points">
+    <summary data-i18n="map.annot.section"></summary>
+    <div class="grp" id="grp-annot" style="display:none">
+      <div class="field"><small id="annot-counts" style="color:var(--accent-dim)"></small></div>
+      <div class="toggles" style="margin-top:6px">
+        <button class="chip" id="annot-filter" data-i18n="map.annot.filter.changed"></button>
+        <button class="chip" id="annot-clear" data-i18n="map.annot.selection.clear"></button>
+      </div>
+      <!-- Nie alle Zeilen: eine gemessene Rhythmia-Studie trägt 19 615 Punkte,
+           und die im DOM zu halten macht die Seite unbedienbar. Gefiltert auf
+           das, was angefasst wurde, plus die Auswahl. -->
+      <div id="annot-list" style="margin-top:6px;max-height:260px;overflow:auto"></div>
+      <div class="toggles" style="margin-top:6px">
+        <button class="chip" id="annot-undo" data-i18n="map.annot.undo"></button>
+        <button class="chip" id="annot-reset" data-i18n="map.annot.reset.all"></button>
+      </div>
+      <div class="toggles" style="margin-top:6px">
+        <button class="chip" id="annot-save" data-i18n="map.annot.save"></button>
+        <button class="chip" id="annot-load" data-i18n="map.annot.load"></button>
+        <input type="file" id="annot-file" accept=".json" hidden>
+      </div>
+      <div class="field"><small id="annot-note" style="color:var(--accent-dim)"></small></div>
+    </div>
+  </details>
   <details class="sec" id="sec-tags" data-sec="tags">
     <summary data-i18n="map.sec.points"></summary>
   <div class="grp" id="grp-tags" style="display:none">
@@ -1142,7 +1166,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=f52a215207f7",
+    "three": "../vendor/three/three.module.js?v=cff65c11417e",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -1152,15 +1176,16 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import epcoreTheme from '../shared/theme.js?v=f52a215207f7';
-import * as EP from './epconv.js?v=f52a215207f7';
-import * as EPM from './epmetrics.js?v=f52a215207f7';
-import * as EPCV from './epconduction.js?v=f52a215207f7';
-import * as EPA from './epablation.js?v=f52a215207f7';
-import * as EPSave from '../shared/save.js?v=f52a215207f7';
-import * as EPO from './epopenep.js?v=f52a215207f7';
-import * as EPP from './eppoints.js?v=f52a215207f7';
-import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=f52a215207f7';
+import epcoreTheme from '../shared/theme.js?v=cff65c11417e';
+import * as EP from './epconv.js?v=cff65c11417e';
+import * as EPM from './epmetrics.js?v=cff65c11417e';
+import * as EPCV from './epconduction.js?v=cff65c11417e';
+import * as EPA from './epablation.js?v=cff65c11417e';
+import * as EPSave from '../shared/save.js?v=cff65c11417e';
+import * as EPO from './epopenep.js?v=cff65c11417e';
+import * as EPP from './eppoints.js?v=cff65c11417e';
+import * as EPAN from './epannot.js?v=cff65c11417e';
+import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=cff65c11417e';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1404,6 +1429,19 @@ let mesh = null, wire = null, current = null, currentName = null;
  * Studie kennt. `currentName` ist der des Meshes und wechselt mit der
  * Anatomie-Auswahl. */
 let studyName = '';
+/* Die Annotationen der geöffneten Studie, oder null.
+ *
+ * Studienweit und nicht je Anatomie: `fp_study` trägt keine Geometrie, also
+ * übersteht der Satz einen Wechsel im Anatomie-Auswahlfeld (ADR-0009). Geleert
+ * wird er in `closeMap` und beim Öffnen einer anderen Studie.
+ */
+let annot = null;
+let annotKeys = null;      // Schlüssel in Aufzählungsreihenfolge, parallel zu den Punkten
+let annotLocked = null;    // Grund, falls für diese Studie nicht annotiert werden darf
+let annotSelection = new Set();
+let annotFilter = 'changed';
+let annotSaved = 0;        // Länge des Verlaufs beim letzten Sichern
+let annotLockedCount = 0;  // wie viele Punkte den Grund ausgelöst haben
 const group = new THREE.Group();
 scene.add(group);
 
@@ -1570,10 +1608,307 @@ const _tagM = new THREE.Matrix4();
 const _tagP = new THREE.Vector3();
 const _tagQ = new THREE.Quaternion();
 const _tagS = new THREE.Vector3();
+// Ausgeblendet = Größe null. Eigener Vektor, weil `_tagS` die eingestellte
+// Markergröße hält und in derselben Schleife gebraucht wird.
+const _tagZero = new THREE.Vector3(0, 0, 0);
+/* Den Annotationssatz für die geladene Karte übernehmen.
+ *
+ * Aufgerufen bei jedem `loadGeometry`, also auch bei jedem Anatomiewechsel. Der
+ * Satz gehört der *Studie*, nicht der Anatomie: `fp_study` trägt keine Geometrie,
+ * und derselbe Fingerabdruck heißt dieselbe Studie. Deshalb wird er behalten und
+ * nicht neu gebaut, solange die Punktmenge dieselbe ist — sonst verlöre ein
+ * Wechsel im Auswahlfeld jede Bearbeitung.
+ */
+function annotAdopt(data) {
+  const points = (data && data.points) || null;
+  // Welcher Hersteller, welche Schlüssel, welcher Sperrgrund: das steht in
+  // `epannot.js`, weil `node --test` es dort anfassen kann und hier nicht.
+  const locked = EPAN.lockReason(data && data.source, points);
+  annotLocked = locked ? locked.reason : null;
+  annotLockedCount = locked ? locked.count : 0;
+
+  const vendor = EPAN.vendorOf(data && data.source);
+  if (locked || !vendor) {
+    annot = null; annotKeys = null;
+    annotRefresh();
+    return;
+  }
+
+  const keys = EPAN.keysOf(points);
+  const fingerprint = EPAN.studyFingerprint(vendor, keys);
+  if (annot && annot.studyFp === fingerprint) {
+    annotKeys = keys;          // dieselbe Studie, andere Anatomie: alles bleibt
+    annotRefresh();
+    return;
+  }
+  annot = new EPAN.AnnotationSet(vendor, fingerprint);
+  annotKeys = keys;
+  annotSelection = new Set();
+  annotSaved = 0;
+  annotRefresh();
+}
+
+/** Die Annotationen der geschlossenen Studie hergeben. */
+function annotForget() {
+  annot = null; annotKeys = null; annotLocked = null; annotLockedCount = 0;
+  annotSelection = new Set();
+  annotSaved = 0;
+  annotRefresh();
+}
+
+/** Welche Zeilen die Liste zeigt — gefiltert und gefenstert in `epannot.js`. */
+function annotRows() {
+  return EPAN.listRows(annot, annotKeys, current && current.points,
+                       { filter: annotFilter, selection: annotSelection });
+}
+
+/* Die Liste, die Zählzeile und der Sperrgrund neu zeichnen.
+ *
+ * Ein Aufruf für alles, was den Zustand sichtbar macht — sonst driften Zahl und
+ * Liste auseinander, und die Zahl ist das, was jemand liest.
+ */
+function annotRefresh() {
+  const grp = document.getElementById('grp-annot');
+  const counts = document.getElementById('annot-counts');
+  const list = document.getElementById('annot-list');
+  const note = document.getElementById('annot-note');
+  if (!grp || !counts || !list || !note) return;   // Seite noch nicht aufgebaut
+
+  if (!annot) {
+    grp.style.display = annotLocked ? '' : 'none';
+    list.textContent = '';
+    counts.textContent = '';
+    note.textContent = annotLocked
+      ? T(annotLocked, { n: annotLockedCount }) : '';
+    if (typeof refreshSections === 'function') refreshSections();
+    return;
+  }
+
+  grp.style.display = '';
+  const state = annot.materialise();
+  const values = Object.values(state);
+  counts.textContent = T('map.annot.counts', {
+    edited: values.filter(v => v.lat).length,
+    hidden: values.filter(v => v.hidden).length,
+    excluded: values.filter(v => v.excluded).length,
+  });
+
+  const unsaved = annot.log.length - annotSaved;
+  note.textContent = unsaved > 0 ? T('map.annot.unsaved', { n: unsaved }) : '';
+
+  list.textContent = '';
+  for (const row of annotRows()) {
+    const line = document.createElement('div');
+    line.className = 'field';
+    line.style.cssText = 'display:flex;gap:6px;align-items:center;padding:2px 0';
+    line.dataset.key = row.key;
+    line.dataset.state = row.placed ? (row.excluded ? 'excluded' : 'placed') : 'unplaced';
+    line.dataset.signal = row.signal ? 'yes' : 'none';
+    line.setAttribute('aria-selected', row.selected ? 'true' : 'false');
+    if (row.selected) line.style.background = 'rgba(255,255,255,0.06)';
+
+    const name = document.createElement('span');
+    name.style.cssText = 'flex:1;font-size:11px'
+      + (row.excluded ? ';text-decoration:line-through;opacity:0.6' : '');
+    // Beschriftungen kommen aus einer geladenen Datei: über textContent, nie
+    // über innerHTML.
+    name.textContent = row.key;
+    name.onclick = () => { annotToggleSelection(row.key); };
+    line.appendChild(name);
+
+    if (!row.placed) {
+      const mark = document.createElement('small');
+      mark.style.color = 'var(--accent-dim)';
+      mark.textContent = T('map.annot.noposition');
+      mark.title = T('map.annot.noposition');
+      line.appendChild(mark);
+    }
+    if (!row.signal) {
+      const mark = document.createElement('small');
+      mark.style.color = 'var(--accent-dim)';
+      mark.textContent = T('map.annot.nosignal');
+      line.appendChild(mark);
+    }
+
+    const hide = document.createElement('button');
+    hide.className = 'chip' + (row.hidden ? ' on' : '');
+    hide.textContent = T(row.hidden ? 'map.annot.show' : 'map.annot.hide');
+    hide.title = T('map.annot.hidden.note');
+    hide.onclick = () => annotDo(row.hidden ? 'show' : 'hide', row.key);
+    line.appendChild(hide);
+
+    const drop = document.createElement('button');
+    drop.className = 'chip' + (row.excluded ? ' on' : '');
+    drop.textContent = T(row.excluded ? 'map.annot.include' : 'map.annot.exclude');
+    drop.title = T('map.annot.exclude.title');
+    drop.onclick = () => annotDo(row.excluded ? 'include' : 'exclude', row.key);
+    line.appendChild(drop);
+
+    list.appendChild(line);
+  }
+
+  if (typeof refreshSections === 'function') refreshSections();
+}
+
+/* Eine Operation auf einen Punkt anwenden.
+ *
+ * Der erste Eintrag zu einem Schlüssel trägt den Schnappschuss der
+ * Herstellerwerte, gegen die gearbeitet wurde — dieselben Größen, die der
+ * Fingerabdruck auf der Python-Seite bekommt, in derselben Reihenfolge.
+ */
+function annotDo(op, key) {
+  if (!annot || !annotKeys) return;
+  const index = annotKeys.indexOf(key);
+  const point = index < 0 ? null : current.points[index];
+  const known = annot.log.some(entry => entry.key === key);
+  const fields = known ? {} : {
+    fp: EPAN.vendorFingerprint(point),
+    vendor: point ? {
+      map_annotation: point.mapAnnotation ?? null,
+      reference_annotation: point.referenceAnnotation ?? null,
+    } : {},
+  };
+  annot.apply(op, key, fields);
+  applyTagMarkerSettings();     // ein ausgeblendeter Punkt verschwindet sofort
+  annotRefresh();
+}
+
+/* Die Knöpfe des Abschnitts.
+ *
+ * Erst hier, nicht in der Auszeichnung: `onclick`-Attribute im HTML wären
+ * Nutzertext im Markup und würden am i18n-Wächter vorbeigehen.
+ */
+function annotWireControls() {
+  const filter = document.getElementById('annot-filter');
+  if (filter) filter.onclick = () => {
+    annotFilter = annotFilter === 'changed' ? 'all' : 'changed';
+    filter.textContent = T(annotFilter === 'changed'
+      ? 'map.annot.filter.changed' : 'map.annot.filter.all');
+    annotRefresh();
+  };
+
+  const clear = document.getElementById('annot-clear');
+  if (clear) clear.onclick = () => { annotSelection = new Set(); annotRefresh(); };
+
+  const undo = document.getElementById('annot-undo');
+  if (undo) undo.onclick = () => {
+    if (!annot) return;
+    annot.undo();
+    applyTagMarkerSettings();
+    annotRefresh();
+  };
+
+  const reset = document.getElementById('annot-reset');
+  if (reset) reset.onclick = () => {
+    if (!annot || !annot.log.length) return;
+    // Der eine Schritt, der sich unumkehrbar anfühlt — also gefragt. Ausblenden
+    // und Verwerfen sind es nicht und fragen deshalb auch nicht.
+    if (!confirm(T('map.annot.reset.all.confirm'))) return;
+    annot.log.length = 0;
+    annotSelection = new Set();
+    applyTagMarkerSettings();
+    annotRefresh();
+  };
+
+  const save = document.getElementById('annot-save');
+  if (save) save.onclick = async () => {
+    if (!annot) return;
+    const text = JSON.stringify(annot.toJson(), null, 1);
+    const name = (studyName || currentName || 'studie').replace(/\.[^.]+$/, '')
+      + '.epannot.json';
+    // `saveBytes` gibt {ok, path} oder {ok:false, cancelled} zurück — kein
+    // Wahrheitswert. Das Objekt allein zu prüfen hieße: ein abgebrochener
+    // Speichern-Dialog gilt als gesichert, und der Zähler ungesicherter
+    // Änderungen fiele auf null. Dieselbe Form lesen die anderen Aufrufer
+    // (:4204, viewer.html:3735).
+    const done = await EPSave.saveBytes(
+      name, new Blob([text], { type: 'application/json' }));
+    if (done && done.ok) { annotSaved = annot.log.length; annotRefresh(); }
+    else if (done && !done.cancelled) {
+      console.warn('[epview] Annotationen speichern:', done.error);
+    }
+  };
+
+  const load = document.getElementById('annot-load');
+  const chooser = document.getElementById('annot-file');
+  if (load && chooser) {
+    load.onclick = () => chooser.click();
+    chooser.onchange = async () => {
+      const file = chooser.files && chooser.files[0];
+      chooser.value = '';
+      if (file) await annotLoadFile(file);
+    };
+  }
+}
+
+/* Eine Annotationsdatei übernehmen — oder benannt ablehnen.
+ *
+ * Jede Ablehnung sagt, was sie gesehen hat, und lässt die Datei unangetastet.
+ * Ein Stand, der halb übernommen wird, wäre schlimmer als keiner: er sähe aus
+ * wie der gespeicherte.
+ */
+async function annotLoadFile(file) {
+  if (!annot) { alert(T('map.annot.needstudy')); return; }
+  let loaded;
+  try {
+    loaded = EPAN.AnnotationSet.fromJson(JSON.parse(await file.text()));
+  } catch (err) {
+    alert(T('map.annot.inconsistent') + '\n\n' + err.message);
+    return;
+  }
+  if (loaded.studyFp !== annot.studyFp) {
+    alert(T('map.annot.wrongstudy', {
+      vendor: loaded.vendor, points: Object.keys(loaded.materialise()).length }));
+    return;
+  }
+
+  // Was nicht mehr passt, wird nicht übernommen — und gezählt, nicht verschwiegen.
+  const fingerprints = {};
+  annotKeys.forEach((key, index) => {
+    fingerprints[key] = EPAN.vendorFingerprint(current.points[index]);
+  });
+  const found = loaded.verify(annotKeys, fingerprints);
+
+  annot = loaded;
+  annotSaved = loaded.log.length;
+  annotSelection = new Set();
+  applyTagMarkerSettings();
+  annotRefresh();
+
+  const said = [];
+  if (found.stale.length) said.push(T('map.annot.stale', { n: found.stale.length }));
+  if (found.unknown.length) said.push(T('map.annot.unknownkey', { n: found.unknown.length }));
+  if (said.length) showMapNotes(said);
+}
+
+function annotToggleSelection(key) {
+  if (annotSelection.has(key)) annotSelection.delete(key);
+  else annotSelection.add(key);
+  annotRefresh();
+}
+
+/** Der Schlüssel eines Punktes, oder null, wenn diese Studie keine trägt. */
+function annotKeyOf(point) {
+  if (!annot || !annotKeys || !point) return null;
+  const index = current && current.points ? current.points.indexOf(point) : -1;
+  return index < 0 ? null : annotKeys[index];
+}
+
+/** Ist dieser Punkt ausgeblendet? Nur Mapping-Punkte kennen die Frage. */
+function annotHidden(group, index) {
+  if (!annot || !group || group.category !== 'mapping') return false;
+  const point = group.points && group.points[index];
+  const key = point && annotKeyOf(point.egm);
+  if (!key) return false;
+  const state = annot.state(key);
+  return Boolean(state && state.hidden);
+}
+
 function applyTagMarkerSettings() {
   if (tagOpts.project) ensureProjectedPositions();
   const s = tagOpts.sizeMul;
   _tagS.set(s, s, s);
+  _tagZero.set(0, 0, 0);
   for (const t of tagMeshes) {
     const pts = t.group.points;
     const surf = tagOpts.project ? t.surface : null;
@@ -1582,7 +1917,10 @@ function applyTagMarkerSettings() {
       if (surf) { x = surf[i * 3]; y = surf[i * 3 + 1]; z = surf[i * 3 + 2]; }
       else { const p = pts[i].position; x = p[0]; y = p[1]; z = p[2]; }
       _tagP.set(x, y, z);
-      _tagM.compose(_tagP, _tagQ, _tagS);
+      // Ausgeblendet heißt: nicht gezeichnet, und sonst nichts. `InstancedMesh`
+      // kennt keine Sichtbarkeit je Instanz, aber diese Schleife setzt ohnehin
+      // jede Matrix neu — Größe null kostet also keine neue Mechanik.
+      _tagM.compose(_tagP, _tagQ, annotHidden(t.group, i) ? _tagZero : _tagS);
       t.inst.setMatrixAt(i, _tagM);
     }
     t.inst.instanceMatrix.needsUpdate = true;
@@ -1667,6 +2005,7 @@ function closeMap() {
   if (typeof markAnonymised === 'function') markAnonymised(false);
   cutState.shapes = [];
   trimState.chosen.clear();
+  annotForget();
   buildTagMarkers([], 50);
   const shown = document.getElementById('open-name');
   if (shown) { shown.textContent = ''; shown.hidden = true; }
@@ -1848,6 +2187,7 @@ function loadGeometry(data, name) {
   state.windows = {};
   _smoothCache = null;
   _visibleCache = null;
+  annotAdopt(data);
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
@@ -3459,6 +3799,10 @@ renderer.domElement.addEventListener('click', (e) => {
   const g = hit.object.userData.group;
   const marker = g && g.points && g.points[hit.instanceId];
   if (!marker || !marker.egm) return;      // ein Tag ohne Signal bleibt ein Tag
+  // Ein ausgeblendeter Punkt wird mit Größe null gezeichnet. Dass eine entartete
+  // Kugel nicht getroffen wird, ist keine Zusicherung, auf die man ein Verhalten
+  // stützt — also wird hier ausdrücklich übersprungen.
+  if (annotHidden(g, hit.instanceId)) return;
   showEgm(marker.egm, current && current.readEgm)
     .catch(err => console.error('[epview] Elektrogramm:', err));
 });
@@ -3472,6 +3816,7 @@ function tagHover() {
   const hit = ray.intersectObjects(objs, false)[0];
   if (!hit) return false;
   const g = hit.object.userData.group;
+  if (annotHidden(g, hit.instanceId)) return false;   // wie beim Klick, aus demselben Grund
   const pt = g.points[hit.instanceId];
   // labels come from a loaded file (untrusted) -> build with safe DOM, not innerHTML
   readout.textContent = '';
@@ -3700,6 +4045,14 @@ async function loadFiles(fileList) {
   if (!files.length) return;
   showLoading('Lade…');
   try {
+    // Eine Annotationsdatei ist keine Studie: sie gehört zu der, die offen ist.
+    // Vor der Rohexport-Erkennung, sonst landet eine .json dort als unbekanntes
+    // Format — und „unbekanntes Format" ist die falsche Auskunft für eine Datei,
+    // die diese Seite selbst geschrieben hat.
+    if (files.length === 1 && /\.epannot\.json$/i.test(files[0].name)) {
+      await annotLoadFile(files[0]);
+      return;
+    }
     // Einzelnes fertiges Mesh?
     if (files.length === 1 && /\.(ply|obj|stl)$/i.test(files[0].name)) {
       rawMeshes = []; populateMeshSelector([]);
@@ -3710,7 +4063,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=f52a215207f7'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=cff65c11417e'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -4005,7 +4358,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=f52a215207f7');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=cff65c11417e');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -5358,6 +5711,27 @@ renderer.domElement.addEventListener('pointermove', (event) => {
  * gezeichnet wird. */
 window.epcoreScene = () => scene;
 
+/* Die Größen der Marker einer Gruppe, in Punktreihenfolge.
+ *
+ * Ein Prüfhaken wie `epcoreShownValues`: Ausblenden heißt, mit Größe null zu
+ * komponieren, und ob das geschehen ist, kann ein Browsertest sonst nur an
+ * Pixeln ablesen — also gar nicht verlässlich. Die Alternative wäre ein Test,
+ * der in die Interna rät und dabei immer grün ist.
+ */
+window.epcoreMarkerScales = (groupId) => {
+  const found = tagMeshes.find(t => t.group && t.group.id === groupId);
+  if (!found) return null;
+  const matrix = new THREE.Matrix4();
+  const scale = new THREE.Vector3();
+  const out = [];
+  for (let i = 0; i < found.inst.count; i++) {
+    found.inst.getMatrixAt(i, matrix);
+    matrix.decompose(new THREE.Vector3(), new THREE.Quaternion(), scale);
+    out.push(scale.x);
+  }
+  return out;
+};
+
 /* Was auf der Karte steht, in Zahlen: die gerade sichtbaren Werte und die
  * Farben, die daraus werden. Dieselbe Bäckerei wie der Export, damit ein Test
  * über die Farbe zugleich prüft, dass das exportierte Modell so aussieht. */
@@ -5619,6 +5993,8 @@ document.querySelectorAll('.sec > summary').forEach(summary => {
 })();
 
 document.getElementById('t-swap').onclick = () => swapComparison();
+annotWireControls();
+
 document.getElementById('t-close').onclick = () => {
   // Gefragt, nicht getan: eine offene Studie zuzuklappen nimmt Schnitte,
   // Vergleich und Fenster mit, und der Weg zurück ist, sie neu zu öffnen.
@@ -5819,7 +6195,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=f52a215207f7');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=cff65c11417e');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -5867,7 +6243,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=f52a215207f7';
+import '../shared/bridge.js?v=cff65c11417e';
 
 /* In der Schale steht "Öffnen" auch oben in der Leiste, für beide Module. Das
  * Menü hier daneben wäre eine zweite Antwort auf dieselbe Frage — die Knöpfe

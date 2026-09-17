@@ -373,3 +373,105 @@ export class AnnotationSet {
     return out;
   }
 }
+
+
+/* --- was die Seite braucht, hier, weil es hier geprüft werden kann ---------
+ *
+ * Diese drei Entscheidungen lagen zuerst in `index.html`. Dort kann `node --test`
+ * sie nicht anfassen: jede andere JS-Testdatei importiert ein Modul, nur der
+ * i18n-Wächter liest die Seite als Text. Eine Regel, die nur ein Browsertest
+ * prüfen kann, ist in einem opt-in-Lauf geprüft — und der lief hier nicht einmal,
+ * weil Playwright nicht installiert ist. Also stehen sie hier und die Seite ruft
+ * sie auf.
+ */
+
+/** Welcher Schlüsselraum gilt für eine Studie — und gilt überhaupt einer?
+ *
+ * Nur CARTO ist freigegeben: seine Aufzählung ist durch einen Konformanztest
+ * gebunden. Die anderen werden benannt gesperrt, statt auf einer Reihenfolge zu
+ * annotieren, die nichts festhält.
+ */
+export function vendorOf(source) {
+  return source === 'carto' ? 'carto' : null;
+}
+
+/** Die Schlüssel einer CARTO-Studie, in Aufzählungsreihenfolge. */
+export function keysOf(points) {
+  return (points || []).map((point, index) => cartoKey(index, String(point.id)));
+}
+
+/** Warum für diese Studie nicht annotiert werden kann — oder null.
+ *
+ * Gibt `{ reason, count }` zurück: der i18n-Schlüssel und die Zahl, die in ihm
+ * steht. Ein Grund ohne Zahl hat `count: 0`.
+ */
+export function lockReason(source, points) {
+  if (!points || !points.length) {
+    return points ? { reason: 'map.annot.nopoints', count: 0 } : null;
+  }
+  if (!vendorOf(source)) {
+    if (source === 'rhythmia') return { reason: 'map.annot.rhythmia.later', count: 0 };
+    if (source === 'ensite') return { reason: 'map.annot.ensite.later', count: 0 };
+    return null;
+  }
+  try {
+    keysOf(points);
+  } catch (err) {
+    return { reason: 'map.annot.carto.badnames', count: 0 };
+  }
+  // Hier wird **nicht** auf doppelte Schlüssel geprüft, und das ist gemessen:
+  // der erste Teil eines CARTO-Schlüssels ist die Stelle in der Aufzählung, also
+  // sind zwei davon konstruktionsbedingt verschieden — zwei Karten mit derselben
+  // `Point ID` ergeben `carto:0:1` und `carto:2:1`. Ein Zweig dafür wäre toter
+  // Code, der aussieht wie ein Schutz.
+  //
+  // `AnnotationSet.verify` prüft es trotzdem, und zu Recht: dort kommen die
+  // Schlüssel aus einer *Datei*, nicht aus dieser Aufzählung, und was eine Datei
+  // behauptet, ist keine Eigenschaft dieser Studie.
+  return null;
+}
+
+/** Welche Zeilen die Liste zeigt: angefasste Punkte plus die Auswahl, gefenstert.
+ *
+ * Nie alle. Eine gemessene Rhythmia-Studie trägt 19 615 Punkte, und so viele
+ * Zeilen im DOM machen die Seite unbedienbar.
+ */
+export const LIST_WINDOW = 200;
+
+export function listRows(set, keys, points, { filter = 'changed', selection = new Set(),
+                                              limit = LIST_WINDOW } = {}) {
+  if (!set || !keys) return [];
+  const state = set.materialise();
+  const rows = [];
+  for (let index = 0; index < keys.length && rows.length < limit; index++) {
+    const key = keys[index];
+    const point = (points || [])[index] || null;
+    const touched = state[key];
+    const selected = selection.has(key);
+    if (filter === 'changed' && !touched && !selected) continue;
+    rows.push({
+      key, point, selected,
+      hidden: Boolean(touched && touched.hidden),
+      excluded: Boolean(touched && touched.excluded),
+      lat: touched && touched.lat ? touched.lat : null,
+      placed: Boolean(point && point.xyz),
+      signal: Boolean(point && point.egmName),
+    });
+  }
+  return rows;
+}
+
+/** Die Herstellerwerte eines Punktes als Fingerabdruck.
+ *
+ * Dieselben Größen in derselben Reihenfolge wie auf der Python-Seite
+ * (`annotations._fingerprints`), sonst ist der Abgleich beim Laden wertlos.
+ */
+export function vendorFingerprint(point) {
+  const xyz = (point && point.xyz) || [null, null, null];
+  return pointFingerprint([
+    xyz[0] ?? null, xyz[1] ?? null, xyz[2] ?? null,
+    point ? (point.mapAnnotation ?? null) : null,
+    point ? (point.referenceAnnotation ?? null) : null,
+    point ? (point.bipolarMv ?? null) : null,
+  ]);
+}
