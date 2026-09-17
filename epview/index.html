@@ -15,9 +15,9 @@
   } catch (e) { /* Speicher abgeschaltet */ }
 </script>
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/theme.js?v=c4070c955fb4"></script>
-<script type="module" src="../shared/settings.js?v=c4070c955fb4"></script>
-<script type="module" src="../shared/i18n.js?v=c4070c955fb4"></script>
+<script type="module" src="../shared/theme.js?v=4496055f0c0e"></script>
+<script type="module" src="../shared/settings.js?v=4496055f0c0e"></script>
+<script type="module" src="../shared/i18n.js?v=4496055f0c0e"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -1069,6 +1069,7 @@
            das, was angefasst wurde, plus die Auswahl. -->
       <div id="annot-list" style="margin-top:6px;max-height:260px;overflow:auto"></div>
       <div class="toggles" style="margin-top:6px">
+        <button class="chip" id="annot-recompute" data-i18n="map.annot.recompute"></button>
         <button class="chip" id="annot-undo" data-i18n="map.annot.undo"></button>
         <button class="chip" id="annot-reset" data-i18n="map.annot.reset.all"></button>
       </div>
@@ -1177,7 +1178,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=c4070c955fb4",
+    "three": "../vendor/three/three.module.js?v=4496055f0c0e",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -1187,16 +1188,17 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import epcoreTheme from '../shared/theme.js?v=c4070c955fb4';
-import * as EP from './epconv.js?v=c4070c955fb4';
-import * as EPM from './epmetrics.js?v=c4070c955fb4';
-import * as EPCV from './epconduction.js?v=c4070c955fb4';
-import * as EPA from './epablation.js?v=c4070c955fb4';
-import * as EPSave from '../shared/save.js?v=c4070c955fb4';
-import * as EPO from './epopenep.js?v=c4070c955fb4';
-import * as EPP from './eppoints.js?v=c4070c955fb4';
-import * as EPAN from './epannot.js?v=c4070c955fb4';
-import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=c4070c955fb4';
+import epcoreTheme from '../shared/theme.js?v=4496055f0c0e';
+import * as EP from './epconv.js?v=4496055f0c0e';
+import * as EPM from './epmetrics.js?v=4496055f0c0e';
+import * as EPCV from './epconduction.js?v=4496055f0c0e';
+import * as EPA from './epablation.js?v=4496055f0c0e';
+import * as EPSave from '../shared/save.js?v=4496055f0c0e';
+import * as EPO from './epopenep.js?v=4496055f0c0e';
+import * as EPP from './eppoints.js?v=4496055f0c0e';
+import * as EPAN from './epannot.js?v=4496055f0c0e';
+import * as EPInterp from './epinterp.js?v=4496055f0c0e';
+import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=4496055f0c0e';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1453,6 +1455,7 @@ let annotSelection = new Set();
 let annotFilter = 'changed';
 let annotSaved = 0;        // Länge des Verlaufs beim letzten Sichern
 let annotLockedCount = 0;  // wie viele Punkte den Grund ausgelöst haben
+let annotDerived = null;   // was die abgeleitete Karte zuletzt kostete
 const group = new THREE.Group();
 scene.add(group);
 
@@ -1659,6 +1662,58 @@ function annotAdopt(data) {
   annotRefresh();
 }
 
+/* Die abgeleitete Karte aus den bearbeiteten Punkten rechnen.
+ *
+ * Ausdrücklich und nicht fortlaufend: nach einer Bearbeitung wird das Feld als
+ * „nicht mehr aktuell" markiert und die Karte zeigt weiter, was sie zeigte.
+ * Fortlaufend neu zu rechnen hieße, die Karte unter der Hand zu ändern, während
+ * jemand sie liest.
+ *
+ * Welche Punkte einfließen: jeder mit Ort und brauchbarer Annotation — bearbeitet
+ * oder vom Hersteller —, ohne die verworfenen. Eine Karte mit drei Bearbeitungen
+ * ist die ganze Punktwolke mit drei geänderten Zahlen, nicht eine aus drei Punkten.
+ */
+function annotRecompute() {
+  if (!annot || !annotKeys || !current || !current.points) return null;
+  const state = annot.materialise();
+  const xyz = [], values = [];
+  let excluded = 0;
+  annotKeys.forEach((key, index) => {
+    const point = current.points[index];
+    const touched = state[key];
+    if (touched && touched.excluded) { excluded++; return; }
+    if (!point || !point.xyz) return;
+    const edited = touched && touched.lat ? touched.lat.value : null;
+    const vendor = point.mapAnnotation;
+    const value = edited != null ? edited : vendor;
+    if (value == null || !Number.isFinite(value)) return;
+    // Millisekunden relativ zur Referenz — dieselbe Achse, auf der die
+    // Herstellerkarte ihre Zahlen hat.
+    const reference = point.referenceAnnotation ?? 0;
+    xyz.push(point.xyz[0], point.xyz[1], point.xyz[2]);
+    values.push(value - reference);
+  });
+
+  if (!values.length) { annotDerived = null; annotRefresh(); return null; }
+
+  const found = EPInterp.interpolate(current.positions, current.faces,
+                                     new Float64Array(xyz), values);
+  current.scalars.lat_epcore = found.values;
+  if (!current.scalarNames.includes('lat_epcore')) {
+    current.scalarNames = [...current.scalarNames, 'lat_epcore'];
+    // Das abgeleitete Feld kommt *neben* die Herstellerkarte und wird nicht von
+    // selbst gezeigt: wer die Herstellerkarte ansieht, sieht sie danach weiter.
+    buildModeOptions(current, { keepMode: true });
+  }
+  annotDerived = {
+    sources: found.sources, excluded, coverage: found.coverage,
+    radiusMm: found.radiusMm, revision: annot.log.length,
+  };
+  annotRefresh();
+  if (activeLatField() === 'lat_epcore') updateMetrics(current);
+  return annotDerived;
+}
+
 /** Die Annotationen der geschlossenen Studie hergeben. */
 function annotForget() {
   annot = null; annotKeys = null; annotLocked = null; annotLockedCount = 0;
@@ -1705,7 +1760,23 @@ function annotRefresh() {
   });
 
   const unsaved = annot.log.length - annotSaved;
-  note.textContent = unsaved > 0 ? T('map.annot.unsaved', { n: unsaved }) : '';
+  const lines = [];
+  if (unsaved > 0) lines.push(T('map.annot.unsaved', { n: unsaved }));
+  if (annotDerived) {
+    lines.push(T('map.annot.derived.note', {
+      n: annotDerived.sources, m: annotDerived.excluded,
+      c: (annotDerived.coverage * 100).toFixed(0),
+    }));
+    if (annotDerived.coverage < 0.5) {
+      lines.push(T('map.annot.derived.thin', { mm: annotDerived.radiusMm }));
+    }
+    // Stale heißt: die Karte zeigt eine Ableitung von vorhin. Das gehört gesagt,
+    // nicht stillschweigend behoben — neu zu rechnen ist eine Entscheidung.
+    if (annotDerived.revision !== annot.log.length) {
+      lines.push(T('map.annot.stale.field'));
+    }
+  }
+  note.textContent = lines.join(' ');
 
   list.textContent = '';
   for (const row of annotRows()) {
@@ -1800,6 +1871,16 @@ function annotWireControls() {
 
   const clear = document.getElementById('annot-clear');
   if (clear) clear.onclick = () => { annotSelection = new Set(); annotRefresh(); };
+
+  const recompute = document.getElementById('annot-recompute');
+  if (recompute) recompute.onclick = () => {
+    if (!annot || !annot.log.length) {
+      const note = document.getElementById('annot-note');
+      if (note) note.textContent = T('map.annot.nopointsyet');
+      return;
+    }
+    annotRecompute();
+  };
 
   const undo = document.getElementById('annot-undo');
   if (undo) undo.onclick = () => {
@@ -2269,11 +2350,14 @@ const FIELD_META = {
   voltage:   { label: 'Bipolar Voltage', unit: 'mV', cmap: 'rhythmia_voltage', range: [0.05, 1.5] },
   unipolar:  { label: 'Unipolar Voltage', unit: 'mV', cmap: 'rhythmia_voltage', range: [0.1, 8.3] },
   lat:       { label: 'LAT', unit: 'ms', cmap: 'rhythmia_lat', range: null },
+  // Neben der Herstellerkarte, nie an ihrer Stelle. Der Name trägt die Herkunft,
+  // damit keine Zahl „Aktivierungszeit" heißt, ohne zu sagen, wessen.
+  lat_epcore:{ label: 'LAT (EPCore)', unit: 'ms', cmap: 'rhythmia_lat', range: null },
   activation:{ label: 'Activation (LAT)', unit: 'ms', cmap: 'rhythmia_lat', range: null },
   map_data:  { label: 'Map Data', unit: '', cmap: 'rhythmia_voltage', range: null },
 };
 
-function buildModeOptions(data) {
+function buildModeOptions(data, { keepMode = false } = {}) {
   const sel = document.getElementById('mode');
   sel.innerHTML = '';
   const add = (val, label) => { const o = document.createElement('option'); o.value = val; o.textContent = label; sel.appendChild(o); };
@@ -2287,9 +2371,15 @@ function buildModeOptions(data) {
   if (data.colors) add('vertex', 'Vertex Colors');
   add('tissue', 'Tissue (uniform)');
 
-  if (firstScalar) selectMode('scalar:' + firstScalar, data);
-  else if (data.colors) selectMode('vertex', data);
-  else selectMode('tissue', data);
+  // `keepMode`, wenn die Liste nur ein Feld dazubekommen hat: sonst fällt die
+  // Anzeige auf das erste Skalarfeld zurück und wirft das aus, was jemand gerade
+  // ansieht. Die Zeile darunter setzte bisher nur das Auswahlfeld zurecht — den
+  // Zustand hatte `selectMode` da längst überschrieben.
+  if (!keepMode) {
+    if (firstScalar) selectMode('scalar:' + firstScalar, data);
+    else if (data.colors) selectMode('vertex', data);
+    else selectMode('tissue', data);
+  }
   sel.value = state.mode;
 }
 
@@ -2346,6 +2436,10 @@ function selectMode(mode, data = current) {
     updateActivationUI(null);
   }
   recomputeArea();
+  // Gemessen: `selectMode` endete hier, und der Kennzahlenkasten beschrieb nach
+  // einem Feldwechsel weiter das zuletzt Geladene — eine Zahl auf dem Schirm, die
+  // zu einer anderen Karte gehört als das Bild daneben.
+  if (current) updateMetrics(current);
 }
 
 // Surface-area quantification for the active scalar field, bucketed by the color window.
@@ -2468,7 +2562,36 @@ function buildPresets(field) {
   }
 }
 
-function isLatField(field) { const f = (field || '').toLowerCase(); return f === 'lat' || f === 'activation'; }
+function isLatField(field) {
+  const f = (field || '').toLowerCase();
+  // `lat_epcore` gehört dazu, damit das abgeleitete Feld den Fensterregler, die
+  // OUTSIDE_WINDOW-Farbe, die Animation, die Konfidenzmaske und den Legendenring
+  // erbt — sonst wäre es ein Feld zweiter Klasse mit eigenen Regeln.
+  return f === 'lat' || f === 'activation' || f === 'lat_epcore';
+}
+
+/** Welches Aktivierungsfeld gerade gezeigt wird, oder null.
+ *
+ * Die Entscheidung steht in `epannot.js`, damit `node --test` sie anfassen kann;
+ * hier bleibt der Nachschlag.
+ */
+function activeLatField() {
+  return EPAN.activeLatField(state.mode, isLatField);
+}
+
+/* Die **rohen** Werte des gezeigten Aktivierungsfeldes.
+ *
+ * Roh und nicht `visibleScalar`: das glättet (Vorgabe 10) und maskiert über die
+ * *Spannung* (`visibleScalar`, dort steht es ausdrücklich). Eine Aktivierungszeit
+ * über die maskierte Fläche wäre „Zeit der als sicher geltenden Fläche" — eine
+ * andere Zahl, die sich bewegt, wenn jemand einen Regler zieht. Die Flächen in
+ * cm² folgen weiter dem Bild, weil ihre Frage „wie viel von dem, was ich sehe"
+ * lautet; die Aktivierungszeit fragt, wie lange die Welle gebraucht hat.
+ */
+function activeLat() {
+  const field = activeLatField();
+  return field && current && current.scalars ? current.scalars[field] : null;
+}
 
 /* Die Aktivierungskurve zeichnen: Fläche über Zeit.
  *
@@ -3433,7 +3556,9 @@ function updateMetrics(data) {
   try {
     m = EPM.summarise(data.positions, data.faces, {
       voltage: data.scalars && data.scalars.voltage,
-      lat: data.scalars && data.scalars.lat,
+      // Das gezeigte Aktivierungsfeld, nicht immer das des Herstellers: sonst
+      // beschriebe die Aktivierungszeit eine andere Karte als die auf dem Schirm.
+      lat: (data === current ? activeLat() : null) || (data.scalars && data.scalars.lat),
     });
   } catch (err) { console.warn('[epview] Kennzahlen:', err); return; }
 
@@ -3462,8 +3587,13 @@ function updateMetrics(data) {
   if (m.activation && m.activation.totalActivationTimeMs != null) {
     const a = m.activation;
     const cover = a.coverage < 0.999 ? ` (${N(a.coverage * 100, 0)} %)` : '';
-    rows.push([T('map.metrics.tat'),
-               `${N(a.totalActivationTimeMs, 0)} ms${cover}`]);
+    // Welches Feld gemessen wurde, steht im Namen der Zeile. „Aktivierungszeit"
+    // allein ließe die abgeleitete Zahl wie die des Herstellers aussehen.
+    const derived = activeLatField() === 'lat_epcore';
+    const row = document.createElement('span');
+    row.textContent = T(derived ? 'map.annot.tat.epcore' : 'map.annot.tat.vendor');
+    row.title = T('map.annot.tat.title');
+    rows.push([row.outerHTML, `${N(a.totalActivationTimeMs, 0)} ms${cover}`]);
   }
 
   // Öffnungen: Klappenringe, Venenostien, der transseptale Schnitt. Sie werden
@@ -3479,9 +3609,11 @@ function updateMetrics(data) {
   // Leitungsgeschwindigkeit. Der Median, nicht der Mittelwert: die verworfenen
   // Ausreißer sind einseitig (fast gleichzeitige Knoten ergeben unplausibel
   // hohe Werte), und ein Mittelwert darüber wäre nach oben gezogen.
-  if (m.activation && data.scalars && data.scalars.lat) {
+  const latField = (data === current ? activeLat() : null)
+                || (data.scalars && data.scalars.lat);
+  if (m.activation && latField) {
     try {
-      const cv = EPCV.conductionVelocity(data.positions, data.faces, data.scalars.lat);
+      const cv = EPCV.conductionVelocity(data.positions, data.faces, latField);
       const finite = [];
       for (const v of cv.speedMmS) if (Number.isFinite(v)) finite.push(v);
       if (finite.length) {
@@ -4321,7 +4453,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=c4070c955fb4'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=4496055f0c0e'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -4616,7 +4748,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=c4070c955fb4');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=4496055f0c0e');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -6456,7 +6588,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=c4070c955fb4');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=4496055f0c0e');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -6504,7 +6636,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=c4070c955fb4';
+import '../shared/bridge.js?v=4496055f0c0e';
 
 /* In der Schale steht "Öffnen" auch oben in der Leiste, für beide Module. Das
  * Menü hier daneben wäre eine zweite Antwort auf dieselbe Frage — die Knöpfe

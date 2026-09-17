@@ -44,19 +44,26 @@ export function interpolate(positions, faces, xyz, values,
   }
 
   const take = Math.min(neighbours, px.length);
+  // Ein Gitter über die *Punkte*, Zellenkante = Radius: eine Abfrage sieht 27
+  // Zellen an, statt das ganze Punktfeld je Vertex zu sortieren. Vorher waren
+  // das bei einer gemessenen Studie ~20 000 x 19 615 log 19 615 Vergleiche —
+  // und gebraucht werden davon fünf Werte.
+  const grid = buildPointGrid(px, radiusMm);
   let covered = 0;
-  const distances = new Array(px.length);
+  const near = [];
   for (let v = 0; v < n; v++) {
     const vx = positions[v * 3], vy = positions[v * 3 + 1], vz = positions[v * 3 + 2];
-    for (let p = 0; p < px.length; p++) {
-      distances[p] = [Math.hypot(vx - px[p][0], vy - px[p][1], vz - px[p][2]), p];
+    near.length = 0;
+    for (const p of pointsWithinCells(grid, vx, vy, vz)) {
+      const d = Math.hypot(vx - px[p][0], vy - px[p][1], vz - px[p][2]);
+      if (d <= radiusMm) near.push([d, p]);
     }
-    distances.sort((a, b) => a[0] - b[0]);
+    if (!near.length) continue;
+    near.sort((a, b) => a[0] - b[0]);
 
     let weighted = 0, total = 0;
-    for (let k = 0; k < take; k++) {
-      const [d, p] = distances[k];
-      if (d > radiusMm) break;
+    for (let k = 0; k < Math.min(take, near.length); k++) {
+      const [d, p] = near[k];
       const w = 1 / Math.max(d, 1e-9) ** 2;
       weighted += w * pv[p];
       total += w;
@@ -71,4 +78,44 @@ export function interpolate(positions, faces, xyz, values,
       + `than ${radiusMm} mm from any of them`);
   }
   return { values: field, coverage, sources: px.length, radiusMm, geodesic: false };
+}
+
+/* Ein gleichmäßiges Gitter über die Punkte, Zellenkante = Radius.
+ *
+ * `epmap.buildVertexGrid` ist das nicht und kann es nicht sein: es indiziert
+ * Mesh-Knoten und liefert den einen nächsten. Hier werden Punkte indiziert, und
+ * gebraucht wird die Nachbarschaft.
+ */
+function buildPointGrid(points, cell) {
+  const size = cell > 0 ? cell : 1;
+  const cells = new Map();
+  for (let i = 0; i < points.length; i++) {
+    const key = cellKey(points[i][0], points[i][1], points[i][2], size);
+    const found = cells.get(key);
+    if (found) found.push(i); else cells.set(key, [i]);
+  }
+  return { cells, size };
+}
+
+function cellKey(x, y, z, size) {
+  return `${Math.floor(x / size)},${Math.floor(y / size)},${Math.floor(z / size)}`;
+}
+
+/* Die Punkte der 27 Zellen um eine Stelle.
+ *
+ * 27 und nicht 8: die Zellenkante ist der Radius, also kann ein Punkt innerhalb
+ * des Radius in jeder angrenzenden Zelle liegen — auch diagonal.
+ */
+function* pointsWithinCells(grid, x, y, z) {
+  const cx = Math.floor(x / grid.size);
+  const cy = Math.floor(y / grid.size);
+  const cz = Math.floor(z / grid.size);
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const found = grid.cells.get(`${cx + dx},${cy + dy},${cz + dz}`);
+        if (found) yield* found;
+      }
+    }
+  }
 }

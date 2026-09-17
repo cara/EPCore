@@ -495,3 +495,19 @@ export function sampleAtX(x, width, n) {
 export function xOfSample(sample, width, n) {
   return (n > 1 ? sample / (n - 1) : 0) * width;
 }
+
+/** Das gezeigte Skalarfeld, falls es ein Aktivierungsfeld ist — sonst null.
+ *
+ * Die Entscheidung steht hier und nicht in der Seite, weil sie entscheidbar ist:
+ * welcher Name gerade gezeigt wird, ist eine Zeichenkette, und ob er ein
+ * Aktivierungsfeld benennt, sagt der Aufrufer. In `index.html` könnte
+ * `node --test` sie nicht anfassen — und eine Regel, an der hängt, welches Feld
+ * jede Kennzahl beschreibt, gehört nicht in einen Browsertest allein.
+ *
+ * `isLat` wird hereingereicht statt hier nachgebaut: die Liste der
+ * Aktivierungsfelder gehört der Seite, die sie anzeigt.
+ */
+export function activeLatField(mode, isLat) {
+  const field = mode && mode.startsWith('scalar:') ? mode.slice(7) : null;
+  return field && isLat(field) ? field : null;
+}
