@@ -15,9 +15,9 @@
   } catch (e) { /* Speicher abgeschaltet */ }
 </script>
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/theme.js?v=39988850ca0e"></script>
-<script type="module" src="../shared/settings.js?v=39988850ca0e"></script>
-<script type="module" src="../shared/i18n.js?v=39988850ca0e"></script>
+<script type="module" src="../shared/theme.js?v=4b3d0b3d9885"></script>
+<script type="module" src="../shared/settings.js?v=4b3d0b3d9885"></script>
+<script type="module" src="../shared/i18n.js?v=4b3d0b3d9885"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -1142,7 +1142,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=39988850ca0e",
+    "three": "../vendor/three/three.module.js?v=4b3d0b3d9885",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -1152,15 +1152,15 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import epcoreTheme from '../shared/theme.js?v=39988850ca0e';
-import * as EP from './epconv.js?v=39988850ca0e';
-import * as EPM from './epmetrics.js?v=39988850ca0e';
-import * as EPCV from './epconduction.js?v=39988850ca0e';
-import * as EPA from './epablation.js?v=39988850ca0e';
-import * as EPSave from '../shared/save.js?v=39988850ca0e';
-import * as EPO from './epopenep.js?v=39988850ca0e';
-import * as EPP from './eppoints.js?v=39988850ca0e';
-import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=39988850ca0e';
+import epcoreTheme from '../shared/theme.js?v=4b3d0b3d9885';
+import * as EP from './epconv.js?v=4b3d0b3d9885';
+import * as EPM from './epmetrics.js?v=4b3d0b3d9885';
+import * as EPCV from './epconduction.js?v=4b3d0b3d9885';
+import * as EPA from './epablation.js?v=4b3d0b3d9885';
+import * as EPSave from '../shared/save.js?v=4b3d0b3d9885';
+import * as EPO from './epopenep.js?v=4b3d0b3d9885';
+import * as EPP from './eppoints.js?v=4b3d0b3d9885';
+import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=4b3d0b3d9885';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1541,7 +1541,7 @@ function buildAblationColorUI() {
   // ganz verschiedene Beträge, und dieselbe Farbe hieße sonst zweierlei.
   note.textContent = tagOpts.ablationColor === 'drop'
     ? `0–${DROP_FULL_OHM} Ω · ${local === drops.length
-        ? T('map.ablation.local') || 'lokal' : T('map.ablation.generator') || 'Generator'}`
+        ? T('map.ablation.local') : T('map.ablation.generator')}`
     : '';
 }
 
@@ -1781,7 +1781,7 @@ function refreshCompareUI() {
   if (comparison) {
     const live = document.getElementById('ctag-live');
     const held = document.getElementById('ctag-held');
-    const active = T('map.compare.active') || 'aktiv';
+    const active = T('map.compare.active');
     if (live) live.textContent = `${studyName || currentName || '—'} · ${active}`;
     if (held) held.textContent = comparison.name || '—';
   }
@@ -2950,8 +2950,8 @@ function bandLabel(histogram) {
   const share = slow && slow.fraction != null ? Math.round(slow.fraction * 100) : null;
   const edge = histogram.edgesMmS[0];
   return share == null
-    ? (T('map.metrics.cv.bands') || 'Leitung nach Bändern')
-    : `${T('map.metrics.cv.slow') || 'davon langsam'} (< ${edge} mm/s)`;
+    ? T('map.metrics.cv.bands')
+    : `${T('map.metrics.cv.slow')} (< ${edge} mm/s)`;
 }
 
 function bandBar(histogram) {
@@ -3087,31 +3087,31 @@ function updateMetrics(data) {
   } catch (err) { console.warn('[epview] Kennzahlen:', err); return; }
 
   const rows = [];
-  rows.push([T('map.metrics.area') || 'Oberfläche', `${N(m.surfaceAreaMm2 / 100)} cm²`]);
+  rows.push([T('map.metrics.area'), `${N(m.surfaceAreaMm2 / 100)} cm²`]);
   if (m.volumeMm3 != null) {
-    rows.push([T('map.metrics.volume') || 'Volumen', `${N(m.volumeMm3 / 1000)} ml`]);
+    rows.push([T('map.metrics.volume'), `${N(m.volumeMm3 / 1000)} ml`]);
   } else {
     // Ein offenes Netz umschließt nichts. Eine Zahl zu zeigen, die die Formel
     // trotzdem liefert, wäre eine erfundene.
-    rows.push([T('map.metrics.volume') || 'Volumen',
-               `<span class="muted">${T('map.metrics.open') || 'offene Fläche'}</span>`]);
+    rows.push([T('map.metrics.volume'),
+               `<span class="muted">${T('map.metrics.open')}</span>`]);
   }
   if (m.lowVoltage && m.lowVoltage.fraction != null) {
     rows.push([`&lt; ${N(m.lowVoltage.thresholdMv, 1)} mV`,
                `${N(m.lowVoltage.areaMm2 / 100)} cm² (${N(m.lowVoltage.fraction * 100)} %)`]);
-    rows.push([T('map.metrics.mean') || 'Mittlere Spannung', `${N(m.meanVoltageMv, 2)} mV`]);
+    rows.push([T('map.metrics.mean'), `${N(m.meanVoltageMv, 2)} mV`]);
     if (m.lowVoltage.unmeasuredMm2 > 0) {
       // Der Anteil bezieht sich auf die gemessene Fläche. Wie viel nicht
       // gemessen wurde, gehört daneben, sonst liest sich der Anteil als
       // Aussage über die ganze Karte.
-      rows.push([T('map.metrics.unmeasured') || 'ungemessen',
+      rows.push([T('map.metrics.unmeasured'),
                  `${N(m.lowVoltage.unmeasuredMm2 / 100)} cm²`]);
     }
   }
   if (m.activation && m.activation.totalActivationTimeMs != null) {
     const a = m.activation;
     const cover = a.coverage < 0.999 ? ` (${N(a.coverage * 100, 0)} %)` : '';
-    rows.push([T('map.metrics.tat') || 'Aktivierungszeit',
+    rows.push([T('map.metrics.tat'),
                `${N(a.totalActivationTimeMs, 0)} ms${cover}`]);
   }
 
@@ -3119,10 +3119,10 @@ function updateMetrics(data) {
   // gezeigt, auch wenn es keine gibt — Schweigen läse sich als „nicht geprüft",
   // und jede Flächenangabe darüber misst das Gewebe zwischen ihnen.
   if (m.openings) {
-    rows.push([T('map.metrics.openings') || 'Öffnungen',
+    rows.push([T('map.metrics.openings'),
                m.openings.count
                  ? `${m.openings.count}`
-                 : `<span class="muted">${T('map.metrics.none') || 'keine'}</span>`]);
+                 : `<span class="muted">${T('map.metrics.none')}</span>`]);
   }
 
   // Leitungsgeschwindigkeit. Der Median, nicht der Mittelwert: die verworfenen
@@ -3136,7 +3136,7 @@ function updateMetrics(data) {
       if (finite.length) {
         finite.sort((x, y) => x - y);
         const median = finite[finite.length >> 1];
-        rows.push([T('map.metrics.cv') || 'Leitung (Median)', `${N(median, 0)} mm/s`]);
+        rows.push([T('map.metrics.cv'), `${N(median, 0)} mm/s`]);
         /* Ein Median über eine ganze Kammer sagt wenig: eine Karte mit einem
          * langsamen Isthmus und schnellem Rest hat denselben Median wie eine
          * gleichmäßig mittelschnelle. Die Bänder sagen, wieviel *Fläche*
@@ -3152,9 +3152,9 @@ function updateMetrics(data) {
         if (cv.implausibleVertices) {
           // Verworfen, nicht geklemmt — geklemmte Werte häufen sich am Rand des
           // plausiblen Bereichs und sehen dort wie ein Befund aus.
-          rows.push([T('map.metrics.cv.rejected') || 'davon unplausibel',
+          rows.push([T('map.metrics.cv.rejected'),
                      `<span class="muted">${N(cv.implausibleVertices, 0)} ${
-                       T('map.metrics.vertices') || 'Knoten'}</span>`]);
+                       T('map.metrics.vertices')}</span>`]);
         }
       }
     } catch (err) { console.warn('[epview] Leitungsgeschwindigkeit:', err); }
@@ -3166,10 +3166,10 @@ function updateMetrics(data) {
   // einzigen Marker und schlösse daraus, es habe keine Ablation gegeben.
   if (data.ablation && data.ablation.length) {
     const summary = EPA.summarise(data.ablation);
-    rows.push([T('map.metrics.ablation') || 'Ablationsstellen',
+    rows.push([T('map.metrics.ablation'),
                `${N(summary.sites, 0)}`]);
     if (summary.totalDeliveryS != null) {
-      rows.push([T('map.metrics.ablation.time') || 'Abgabedauer',
+      rows.push([T('map.metrics.ablation.time'),
                  `${N(summary.totalDeliveryS, 0)} s`]);
     }
     /* Wo abgegeben wurde, sagt die Zahl der Stellen. Ob es gewirkt hat, sagt
@@ -3178,38 +3178,38 @@ function updateMetrics(data) {
     if (summary.impedanceDrop) {
       const drop = summary.impedanceDrop;
       const where = drop.source === 'directsense'
-        ? (T('map.ablation.local') || 'lokal') : (T('map.ablation.generator') || 'Generator');
-      rows.push([`${T('map.metrics.ablation.drop') || 'Impedanzabfall (Median)'} · ${where}`,
+        ? T('map.ablation.local') : T('map.ablation.generator');
+      rows.push([`${T('map.metrics.ablation.drop')} · ${where}`,
                  `${N(drop.ohm.median, 1)} Ω`]);
       if (drop.weak) {
-        rows.push([`${T('map.metrics.ablation.weak') || 'davon schwach'} (< ${drop.weakOhm} Ω)`,
+        rows.push([`${T('map.metrics.ablation.weak')} (< ${drop.weakOhm} Ω)`,
                    `<span class="warn-text">${N(drop.weak, 0)}</span>`]);
       }
     }
     if (summary.powerW && summary.powerW.mean != null) {
-      rows.push([T('map.metrics.ablation.power') || 'Leistung (Mittel)',
+      rows.push([T('map.metrics.ablation.power'),
                  `${N(summary.powerW.mean, 1)} W`]);
     }
     if (!summary.placed) {
-      rows.push([T('map.metrics.ablation.unplaced') || 'davon verortet',
-                 `<span class="muted">${T('map.metrics.none') || 'keine'}</span>`]);
+      rows.push([T('map.metrics.ablation.unplaced'),
+                 `<span class="muted">${T('map.metrics.none')}</span>`]);
     } else {
       /* Ob aus den Stellen eine Linie geworden ist. Dauer und Leistung sagen,
        * wie kräftig abgegeben wurde — eine Kette mit einer Lücke leitet
        * trotzdem weiter, und das steht in keiner der beiden Zahlen. */
       if (summary.spacingMm && summary.spacingMm.median != null) {
-        rows.push([T('map.metrics.ablation.spacing') || 'Abstand (Median)',
+        rows.push([T('map.metrics.ablation.spacing'),
                    `${N(summary.spacingMm.median, 1)} mm`]);
       }
       if (summary.segments > 1) {
-        rows.push([T('map.metrics.ablation.segments') || 'Ketten',
+        rows.push([T('map.metrics.ablation.segments'),
                    `<span class="warn-text">${N(summary.segments, 0)}</span>`]);
         if (summary.largestGapMm != null) {
-          rows.push([T('map.metrics.ablation.gap') || 'größte Lücke',
+          rows.push([T('map.metrics.ablation.gap'),
                      `<span class="warn-text">${N(summary.largestGapMm, 1)} mm</span>`]);
         }
       } else {
-        rows.push([T('map.metrics.ablation.segments') || 'Ketten', '1']);
+        rows.push([T('map.metrics.ablation.segments'), '1']);
       }
     }
   }
@@ -3710,7 +3710,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=39988850ca0e'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=4b3d0b3d9885'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -3934,17 +3934,15 @@ async function markAnonymised(yes) {
 async function doShare() {
   if (!current) { alert(T('map.msg.load.first')); return; }
   if (!_anonymised) {
-    alert('Diese Karte wurde nicht anonymisiert. Geteilte Karten bekommen eine '
-        + 'öffentliche Adresse — erst anonymisieren, dann teilen.');
+    alert(T('map.msg.share.notanon'));
     return;
   }
   if (!(await shareBackendAvailable())) {
-    alert('Diese Ausgabe des Kartenviewers hat keinen Teilen-Dienst.\n\n'
-        + 'Zum Teilen dieselbe Karte auf https://epcore.app/epview/ öffnen.');
+    alert(T('map.msg.share.noservice'));
     return;
   }
   const { url, tok } = shareConfig();
-  if (!url) { alert('Keine Adresse für den Teilen-Dienst hinterlegt.'); return; }
+  if (!url) { alert(T('map.msg.share.noaddress')); return; }
   document.getElementById('share-result').style.display = 'none';
   document.getElementById('share-err').style.display = 'none';
   document.getElementById('share-busy').style.display = '';
@@ -3989,10 +3987,8 @@ async function doShare() {
          * several, so every real share fails while the service's own limit
          * (25 MB) looks perfectly generous. Say which server said no. */
         if (res.status === 413) {
-          detail = `Die Karte (${(ply.byteLength / 1048576).toFixed(1)} MB) wurde von `
-                 + 'einem vorgelagerten Server abgewiesen, nicht vom Teilen-Dienst. '
-                 + 'Dort ist die maximale Upload-Größe zu klein eingestellt '
-                 + '(siehe docs/DEPLOY.md, client_max_body_size).';
+          detail = T('map.msg.upload.toolarge')
+            .replace('{mb}', (ply.byteLength / 1048576).toFixed(1));
         }
       }
       shareError(T('map.msg.upload.failed') + ' ' + detail);
@@ -4009,7 +4005,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=39988850ca0e');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=4b3d0b3d9885');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -4180,7 +4176,7 @@ function startRecording(spec) {
   compositeFrame();
   let recorder;
   try { recorder = new MediaRecorder(recCanvas.captureStream(recOpts.fps), { mimeType: mime, videoBitsPerSecond: 12_000_000 }); }
-  catch (e) { alert('Recorder-Fehler: ' + e.message); return; }
+  catch (e) { alert(T('map.msg.rec.error') + ' ' + e.message); return; }
   const chunks = [];
   recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
   recorder.onstop = () => download(`epview-${spec.label}.${mimeExt(mime)}`, new Blob(chunks, { type: mime }), mime);
@@ -5028,8 +5024,7 @@ function rebuildCuts() {
                  (cutState.shapes[cutState.shapes.length - 1] || {}).side);
     cutState.shapes.pop();
     if (typeof epcoreNotify === 'function') {
-      epcoreNotify(T('map.cut.everything') || 'Der Schnitt hätte die ganze Karte '
-                   + 'genommen und wurde verworfen.');
+      epcoreNotify(T('map.cut.everything'));
     }
     rebuildCuts();
     return;
@@ -5627,7 +5622,7 @@ document.getElementById('t-swap').onclick = () => swapComparison();
 document.getElementById('t-close').onclick = () => {
   // Gefragt, nicht getan: eine offene Studie zuzuklappen nimmt Schnitte,
   // Vergleich und Fenster mit, und der Weg zurück ist, sie neu zu öffnen.
-  if (confirm(T('map.close.confirm') || 'Studie schließen?')) closeMap();
+  if (confirm(T('map.close.confirm'))) closeMap();
 };
 document.getElementById('t-compare').onclick = () => {
   if (comparison) clearComparison(); else rememberComparison();
@@ -5635,7 +5630,7 @@ document.getElementById('t-compare').onclick = () => {
 document.getElementById('t-theme').onclick = () => epcoreTheme.toggle();
 document.getElementById('t-anonymise').onclick = (e) => {
   e.stopPropagation();
-  if (!current) { alert('Erst eine Karte laden.'); return; }
+  if (!current) { alert(T('map.msg.load.first')); return; }
   const groups = current.tagGroups || [];
   const before = groups.filter(g => isIdentifyingLabel(g.label)).length;
   current.tagGroups = scrubTagGroups(groups);
@@ -5824,7 +5819,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=39988850ca0e');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=4b3d0b3d9885');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -5836,7 +5831,7 @@ async function loadURL(url) {
     populateMeshSelector(meshes);
     loadParsedMesh(meshes[0]);
   } catch (err) {
-    alert('Laden fehlgeschlagen:\n' + err.message);
+    alert(T('map.msg.load.failed') + '\n' + err.message);
     console.error(err);
   } finally {
     hideLoading();
@@ -5872,7 +5867,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=39988850ca0e';
+import '../shared/bridge.js?v=4b3d0b3d9885';
 
 /* In der Schale steht "Öffnen" auch oben in der Leiste, für beide Module. Das
  * Menü hier daneben wäre eine zweite Antwort auf dieselbe Frage — die Knöpfe

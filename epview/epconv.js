@@ -13,8 +13,8 @@
  * ===================================================================== */
 
 import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment,
-         encodeTagComment } from './epmap.js?v=39988850ca0e';
-import { readVisitag, summarise as summariseAblation } from './epablation.js?v=39988850ca0e';
+         encodeTagComment } from './epmap.js?v=4b3d0b3d9885';
+import { readVisitag, summarise as summariseAblation } from './epablation.js?v=4b3d0b3d9885';
 
 const SENTINEL = 1e4;
 

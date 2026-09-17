@@ -8,7 +8,7 @@
  * over it: a point annotated outside its window belongs to a different beat,
  * and a point off the wall is a measurement of blood.
  */
-import { meshClosure } from './epmetrics.js?v=39988850ca0e';
+import { meshClosure } from './epmetrics.js?v=4b3d0b3d9885';
 
 /** How far outside the surface a point may sit and still count as on it, mm. */
 export const ON_SURFACE_MM = 3.0;
@@ -95,7 +95,28 @@ function annotationOf(point, reader) {
   return value === undefined || value === null ? null : Number(value);
 }
 
+/** The origin a point's window is measured from.
+ *
+ * Zero where the vendor exports no reference: that is the absolute comparison
+ * this file did everywhere before, kept for systems that export a window
+ * without one rather than turned into a refusal.
+ */
+function referenceOf(point) {
+  const raw = point && (point.referenceAnnotation !== undefined
+    ? point.referenceAnnotation : point.reference_annotation);
+  if (raw === undefined || raw === null) return 0;
+  const value = Number(raw);
+  return Number.isNaN(value) ? 0 : value;
+}
+
 /** Which points have their annotation inside their own window.
+ *
+ * The comparison is on the window's own origin. `windowOfInterest` returns the
+ * window as the vendor stores it — relative to the reference annotation — so
+ * the annotation is brought onto that origin before it is compared, or a point
+ * sitting squarely inside its window is reported outside it: reference 2000
+ * with an annotation of 2100 is 100 ms after its reference and belongs in a
+ * window of 20 to 180, while comparing 2100 against 180 says it does not.
  *
  * A point with no window is kept: absence of the constraint is not evidence it
  * was violated. A filter that rejects everything is warned about rather than
@@ -112,7 +133,8 @@ export function withinWindow(points, reader = null) {
     const value = annotationOf(point, reader);
     if (value === null) return;
     considered++;
-    keep[i] = value >= window[0] && value <= window[1];
+    const relative = value - referenceOf(point);
+    keep[i] = relative >= window[0] && relative <= window[1];
   });
   if (considered && !keep.some(Boolean)) {
     console.warn(`[epview] every one of the ${considered} point(s) with both a `
