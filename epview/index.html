@@ -15,9 +15,9 @@
   } catch (e) { /* Speicher abgeschaltet */ }
 </script>
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/theme.js?v=efadfce5e2dc"></script>
-<script type="module" src="../shared/settings.js?v=efadfce5e2dc"></script>
-<script type="module" src="../shared/i18n.js?v=efadfce5e2dc"></script>
+<script type="module" src="../shared/theme.js?v=39988850ca0e"></script>
+<script type="module" src="../shared/settings.js?v=39988850ca0e"></script>
+<script type="module" src="../shared/i18n.js?v=39988850ca0e"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -1142,7 +1142,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=efadfce5e2dc",
+    "three": "../vendor/three/three.module.js?v=39988850ca0e",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -1152,15 +1152,15 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import epcoreTheme from '../shared/theme.js?v=efadfce5e2dc';
-import * as EP from './epconv.js?v=efadfce5e2dc';
-import * as EPM from './epmetrics.js?v=efadfce5e2dc';
-import * as EPCV from './epconduction.js?v=efadfce5e2dc';
-import * as EPA from './epablation.js?v=efadfce5e2dc';
-import * as EPSave from '../shared/save.js?v=efadfce5e2dc';
-import * as EPO from './epopenep.js?v=efadfce5e2dc';
-import * as EPP from './eppoints.js?v=efadfce5e2dc';
-import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=efadfce5e2dc';
+import epcoreTheme from '../shared/theme.js?v=39988850ca0e';
+import * as EP from './epconv.js?v=39988850ca0e';
+import * as EPM from './epmetrics.js?v=39988850ca0e';
+import * as EPCV from './epconduction.js?v=39988850ca0e';
+import * as EPA from './epablation.js?v=39988850ca0e';
+import * as EPSave from '../shared/save.js?v=39988850ca0e';
+import * as EPO from './epopenep.js?v=39988850ca0e';
+import * as EPP from './eppoints.js?v=39988850ca0e';
+import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=39988850ca0e';
 
 /* =====================================================================
  *  Color lookup tables
@@ -3360,8 +3360,18 @@ async function showEgm(point, readEgm) {
   egmMeta.textContent = 'Lade Signal…';
   egmBox.style.display = 'block';
 
-  let egm = null, failure = null;
-  try { egm = readEgm ? await readEgm(point) : null; }
+  let egm = null, failure = null, answer = null;
+  try {
+    // Rhythmia sagt, *warum* ein Punkt kein Fenster hat; CARTO und EnSite
+    // liefern `egm | null`. Beides geht durch denselben Aufruf, damit der
+    // Vertrag `egm | null` bleibt und nur der Grund dazukommt, wo es einen gibt.
+    if (readEgm && readEgm.withReason) {
+      answer = await readEgm.withReason(point);
+      egm = answer.egm;
+    } else {
+      egm = readEgm ? await readEgm(point) : null;
+    }
+  }
   catch (err) { failure = err.message || String(err); }
 
   // Ein Formatierer für alle Hersteller (eppoints.js): NaN ist kein Messwert
@@ -3370,10 +3380,31 @@ async function showEgm(point, readEgm) {
   const { bits, notes } = EPP.pointMeasurements(point, T);
   let meta = bits.join(' · ') || 'keine Messwerte im Export';
 
+  // Die Katalogfassung, oder der Rückfall — ein fehlender Schlüssel rendert
+  // sonst als ⟦…⟧ auf dem Schirm (derselbe Griff wie in eppoints.js).
+  const say = (key, params, fallback) => {
+    const text = T(key, params);
+    return (typeof text === 'string' && text && !text.startsWith('⟦')) ? text : fallback;
+  };
+  // Sätze, die Namen aus der Datei tragen, werden als Text angehängt und nicht
+  // in `meta` hineingeschrieben: dort steht innerHTML, und ein Katheter- oder
+  // Grundlagenname kommt aus einer geladenen Datei.
+  const lines = [];
+  const version = (current && current.software && current.software.version) || '';
+
   if (failure) {
     meta += `<br><span class="warn">Signal nicht lesbar: ${failure}</span>`;
   } else if (!egm) {
-    meta += '<br><span class="warn">Dieser Punkt trägt kein Elektrogramm.</span>';
+    // Warum es kein Fenster gibt, statt „trägt kein Elektrogramm" zu jedem der
+    // sechs Fälle — die Aufzeichnung ist in den meisten davon vorhanden.
+    const said = EP.rhythmiaWindowMessage(answer, point, { version });
+    if (said) {
+      lines.push(say(said.key, said.params,
+                     say(said.fallbackKey, said.params,
+                         `Kein Fenster: ${said.basis || answer.reason}.`)));
+    } else {
+      lines.push('Dieser Punkt trägt kein Elektrogramm.');
+    }
   } else {
     const seconds = egm.samples[0].length / egm.sampleRateHz;
     meta += `<br>${egm.channels.length} Kanäle · ${seconds.toFixed(2)} s`;
@@ -3392,13 +3423,20 @@ async function showEgm(point, readEgm) {
       meta += '<br>Fenster aus der laufenden Aufzeichnung um den Zeitpunkt '
             + 'dieses Punktes, nicht seine eigene Messung.';
     }
+    // Was das Fenster über sich sagt: welcher Katheter und warum er es ist,
+    // ob die Ablage nur angenommen wurde, dass B und W gefilterte Fassungen je
+    // Elektrode sind — und bei einem Messpunkt, welche Korbelektrode das ist.
+    for (const said of EP.rhythmiaWindowNotes(egm, point, { version })) {
+      const text = say(said.key, said.params, '');
+      if (text) lines.push(text);
+    }
     drawTraces(egm);
     buildChannelChips(egm, point);
   }
   egmMeta.innerHTML = meta;
-  // Als Text angehängt, nicht in `meta` hineingeschrieben: darin steht die
-  // Versionsangabe aus der Datei.
-  for (const note of notes) {
+  // Als Text angehängt, nicht in `meta` hineingeschrieben: darin stehen die
+  // Versionsangabe und die Katheternamen aus der Datei.
+  for (const note of notes.concat(lines)) {
     const line = document.createElement('div');
     line.className = 'warn';
     line.textContent = note;
@@ -3672,7 +3710,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=efadfce5e2dc'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=39988850ca0e'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -3971,7 +4009,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=efadfce5e2dc');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=39988850ca0e');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -5786,7 +5824,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=efadfce5e2dc');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=39988850ca0e');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -5834,7 +5872,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=efadfce5e2dc';
+import '../shared/bridge.js?v=39988850ca0e';
 
 /* In der Schale steht "Öffnen" auch oben in der Leiste, für beide Module. Das
  * Menü hier daneben wäre eine zweite Antwort auf dieselbe Frage — die Knöpfe

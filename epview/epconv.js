@@ -13,8 +13,8 @@
  * ===================================================================== */
 
 import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment,
-         encodeTagComment } from './epmap.js?v=efadfce5e2dc';
-import { readVisitag, summarise as summariseAblation } from './epablation.js?v=efadfce5e2dc';
+         encodeTagComment } from './epmap.js?v=39988850ca0e';
+import { readVisitag, summarise as summariseAblation } from './epablation.js?v=39988850ca0e';
 
 const SENTINEL = 1e4;
 
@@ -275,6 +275,32 @@ function childByTag(el, name) {
 }
 function elText(el) { return el && el.textContent != null ? el.textContent.trim() : ''; }
 
+/** Ein Attribut, in welcher Schreibung es auch dasteht — `rhythmia_layout.attribute`.
+ *
+ * Gemessen statt angenommen: `DOMParser` mit `'application/xml'` — der Modus,
+ * den `parseXmlTolerant` zuerst nimmt und den ein vollständiges Archiv nie
+ * verlässt — behält die Schreibung der Attributnamen, in Chromium **und** in
+ * WebKit: für `FNAME="a.dat"` gibt `getAttribute('fname')` dort `null` zurück
+ * und `getAttribute('FNAME')` den Wert. Nur der HTML-Rückfall, den ein
+ * abgeschnittenes Archiv auslöst, schreibt sie klein.
+ *
+ * Der Archivleser faltet die Schreibung (`layout.attribute_in_tag`). Ohne
+ * dieselbe Faltung hier stand die Regel nur zur Hälfte: ein Block mit `FNAME=`
+ * war dort eine Aufzeichnung und hier keine — kein *anderes* Fenster, sondern
+ * ein Leser, der stillschweigend weniger Blöcke führt als der andere, und ein
+ * Punkt, dem „keine Aufzeichnung deckt diesen Zeitpunkt" geantwortet wird.
+ */
+export function rhythmiaAttribute(el, name) {
+  if (!el) return null;
+  const direct = el.getAttribute && el.getAttribute(name);
+  if (direct != null) return direct;
+  const wanted = String(name).trim().toLowerCase();
+  for (const attribute of (el.attributes || [])) {
+    if (String(attribute.name).trim().toLowerCase() === wanted) return attribute.value;
+  }
+  return null;
+}
+
 // Rhythmia tags: manual <AnnotationPointSet>/<AnnotationPoint> groups + ablation
 // <AutoAnnotationPoint>. Returns [{ id, label, category, color:[r,g,b], points:[{position,label}] }].
 /** Ein Annotationspunkt, wie er in der Datei steht — oder nichts. */
@@ -286,6 +312,9 @@ function rhythmiaAnnotationPoint(ap) {
   const ts = ppr && (elText(childByTag(ppr, 'Timestamp'))
                  || elText(childByTag(ppr, 'StartTime')));
   return { position: pos, label: plabel,
+           // Welche Art von Punkt das ist, entscheidet, welcher Katheter neben
+           // ihm steht — ein Ablationspunkt nennt seinen, ein gesetzter nicht.
+           kind: 'annotation',
            time: ts != null && ts !== '' ? Number(ts) : null };
 }
 
@@ -359,6 +388,7 @@ function extractRhythmiaTags(root) {
     const ats = ppr && (elText(childByTag(ppr, 'Timestamp'))
                     || elText(childByTag(ppr, 'StartTime')));
     abl.push({ position: pos, label: seq ? ('Abl ' + seq) : 'Abl',
+               kind: 'ablation',
                time: ats != null && ats !== '' ? Number(ats) : null,
                // Was an dieser Stelle gemessen wurde. Bisher wurde nur der Ort
                // gelesen und der Rest weggeworfen — dabei steht hier alles, was
@@ -525,7 +555,7 @@ export function rhythmiaBeatWindow(eo) {
   const node = childByTag(eo, 'SurfaceElectrodesNode');
   const confwf = node && childByTag(node, 'SurfElectrodesConfidenceWF');
   const bin = confwf && childByTag(confwf, 'inlinedbin');
-  const raw = bin && bin.getAttribute('cols');
+  const raw = bin && rhythmiaAttribute(bin, 'cols');
   const parsed = raw == null ? NaN : parseInt(raw, 10);
   const columns = Number.isFinite(parsed) ? parsed : null;
 
@@ -888,12 +918,12 @@ export function rhythmiaLayoutAgrees(vertices, raw, table) {
  */
 async function readRhythmiaPointTable(bin, beat, mapName, anatomyIndex, getPayload,
                                       software, check) {
-  const fname = (bin.getAttribute && bin.getAttribute('fname')) || '';
-  const rows = parseInt(bin.getAttribute('rows'), 10);
-  const cols = parseInt(bin.getAttribute('cols'), 10);
+  const fname = rhythmiaAttribute(bin, 'fname') || '';
+  const rows = parseInt(rhythmiaAttribute(bin, 'rows'), 10);
+  const cols = parseInt(rhythmiaAttribute(bin, 'cols'), 10);
   // Eine andere Breite ist eine andere Tabelle. Sie trotzdem so zu lesen ergibt
   // Zahlen, die wie Koordinaten aussehen und keine sind.
-  if (bin.getAttribute('type') !== 'Float64' || cols !== SURFELEC_COLS || !rows) {
+  if (rhythmiaAttribute(bin, 'type') !== 'Float64' || cols !== SURFELEC_COLS || !rows) {
     return { group: null, refused: 'layout-mismatch' };
   }
   const idx = parseInt((bin.textContent || '').trim(), 10);
@@ -962,6 +992,12 @@ async function readRhythmiaPointTable(bin, beat, mapName, anatomyIndex, getPaylo
       label: `${mapName} · E${Number.isFinite(electrode) ? electrode : '?'}`,
       time: table.at(row, SURFELEC.time),
       electrode: Number.isFinite(electrode) ? electrode : null,
+      // Was dieser Punkt ist, und das Schlagfenster seiner eigenen Karte: ohne
+      // beides kann das Fenster daneben nicht prüfen, ob die Aufzeichnung zu
+      // ihm gehört. Beides bleibt im Speicher — `epmap.scrubTagGroups` gibt nur
+      // Ort und Beschriftung in eine PLY weiter.
+      kind: 'measurement',
+      beat: window,
       // Der gespeicherte Index und die Millisekunde: der Index ist, was in der
       // Datei steht, die Millisekunde, was er bedeutet — beides zu behalten
       // macht das zweite nachrechenbar.
@@ -1088,6 +1124,480 @@ const RHYTHMIA_SIGNAL_FLAVOUR_ORDER = { B: 0, U: 1, W: 2 };
 const RHYTHMIA_SIGNAL_FLAVOUR_LAST = 3;
 const RHYTHMIA_SURFACE_ECG_NAME = /surfaceecg/i;
 
+/* Wie ein Aufzeichnungsblock abgelegt ist, was B/U/W bedeuten, und welcher
+ * Katheter neben einem Punkt steht. Jede Regel hier ist der Spiegel einer
+ * Regel in `rhythmia_layout`; die Belege stehen dort, einmal, und der
+ * Konformanztest fährt beide Seiten über dieselbe Fixture.
+ *
+ * **Ein mehrkanaliger Cardiac-Block liegt zeilenweise**: eine Abtastung aller
+ * Kanäle, dann die nächste des ersten — Kanal k der Zeilen [s, s+n) steht als
+ * float32 LE bei at + (s*C + k)*4. Diese Seite las spaltenweise, und damit war
+ * jedes neben einem Punkt gezeigte Fenster ein echtes Signal aus den falschen
+ * Stellen der Aufzeichnung, ohne dass etwas daran verkehrt aussah.
+ */
+const RHYTHMIA_SIGNAL_ROW_MAJOR = [
+  'RTMD<n>|64', 'SurfaceECG<n>_<n>|12', 'Inquiry_Deca<n>_<n>|10',
+  'Inquiry_Ten_Ten_Duo_Deca<n>|20', 'INAV<n>|4', 'Freezer<n>|4',
+  'Woven_Quadpolar_Catheter<n>|4', 'Woven_Quadpolar_Catheter<n>_<n>|4',
+];
+const RHYTHMIA_LAYOUT_ROW_MAJOR = 'row-major';
+
+//: U ist unipolar; B und W sind gefilterte Fassungen *einer* Elektrode, keine
+//: Differenz zweier (ARX-Residuum 0,0013–0,0055 gegen die eigene U-Ableitung,
+//: gegen 0,16–0,56 für eine Differenz). Bipolar heißt nur das Paar, das ein
+//: Leser selbst bildet — `RHYTHMIA_PAIR_FLAVOUR`.
+const RHYTHMIA_BLOCK_FLAVOURS = ['U', 'B', 'W'];
+const RHYTHMIA_PAIR_FLAVOUR = 'B-pair';
+const RHYTHMIA_CHANNEL_FLAVOURS = RHYTHMIA_BLOCK_FLAVOURS.concat([RHYTHMIA_PAIR_FLAVOUR]);
+const RHYTHMIA_UNIPOLAR_FLAVOUR = 'U';
+const RHYTHMIA_FILTERED_FLAVOUR = 'B';
+
+const RHYTHMIA_ECG_FAMILY = 'SurfaceECG<n>_<n>';
+const RHYTHMIA_ECG_FLAVOUR = 'U';
+const RHYTHMIA_ECG_CHANNELS = 12;
+const RHYTHMIA_ECG_LIMB_INDEX = { I: 0, II: 1, III: 2, aVR: 3, aVL: 4, aVF: 5 };
+const RHYTHMIA_ECG_IDENTITY_MAX = 0.15;
+const RHYTHMIA_ECG_ORDER_IDENTITIES = [['aVL', 'I - II/2'], ['aVF', 'II - I/2'],
+                                       ['aVR', '-(I + II)/2']];
+const RHYTHMIA_ECG_ORDER_MAX = 0.15;
+
+const RHYTHMIA_ABLATION_PORT = 'AblPort';
+const RHYTHMIA_MAPPING_PORT = 'RTMD';
+const RHYTHMIA_MAPPING_FAMILIES = ['RTMD<n>|64'];
+const RHYTHMIA_SPLINE_POSITIONS = 8;
+
+const RHYTHMIA_WINDOW_REASONS = [
+  'no-time', 'no-recording', 'channel-order-unverified',
+  'no-ablation-catheter-recording', 'no-mapping-catheter-recording',
+  'mapping-electrode-unconfirmed',
+];
+const RHYTHMIA_WINDOW_NOTES = ['layout-assumed-from-ecg', 'subject-by-ranking'];
+const RHYTHMIA_WINDOW_SUBJECTS = ['ablation-port', 'ranking', 'mapping-electrode'];
+const RHYTHMIA_WINDOW_BASES = [
+  'unknown-layout', 'version-unchecked-no-ecg', 'version-unchecked-ecg-mismatch',
+  'no-wiring', 'not-in-group', 'several-in-group', 'electrode-outside-catheter',
+  'no-beat-window', 'beat-outside-recording', 'no-table-amplitude',
+  'no-filtered-block', 'amplitude-mismatch',
+];
+
+/** Die Familie eines Katheternamens: seine Ziffernfolgen ersetzt.
+ *  Wortgleich mit `rhythmia_layout.signal_family` — sonst nichts. */
+export function rhythmiaSignalFamily(catheter) {
+  return String(catheter == null ? '' : catheter).replace(/\d+/g, '<n>');
+}
+
+/** Ob die Verschränkung dieses Blocks eine der gemessenen ist.
+ *
+ * Ein einkanaliger Block hat keine Verschränkung, die man falsch lesen könnte,
+ * und gilt deshalb immer als geprüft. Alles andere muss in der Menge stehen —
+ * ein Paar außerhalb wird *nicht* unter der anderen Ablage gelesen, „um zu
+ * sehen, was herauskommt": ein verschränktes Fenster zeichnet wie jedes andere.
+ */
+export function rhythmiaLayoutVerified(family, cols) {
+  const channels = Number(cols);
+  if (!Number.isFinite(channels)) return false;
+  return channels === 1
+      || RHYTHMIA_SIGNAL_ROW_MAJOR.indexOf(`${family}|${channels}`) >= 0;
+}
+
+/** Ob ein Cardiac-Block genau die Abtastungen trägt, die er angibt.
+ *  Wortgleich mit `rhythmia_layout.signal_length_ok`. */
+export function rhythmiaSignalLengthOk(length, rows, cols) {
+  const declared = Number(length), r = Number(rows), c = Number(cols);
+  if (!Number.isFinite(declared) || !Number.isFinite(r) || !Number.isFinite(c)) return false;
+  return declared === r * c * 4;
+}
+
+/** Der Zeitpunkt eines Punktes als endliche Zahl — oder nichts.
+ *
+ * Gefragt **vor** jedem Blick auf eine Uhr. Gemessen an der ausgelieferten
+ * Fassung: ein Zeitstempel, den ein Anonymisierer ersetzt hat (`1900-01-01`,
+ * oder ein wörtliches `nan`), kam als `NaN` durch die Prüfung auf `!= null`,
+ * verglich sich gegen beide Enden jeder Uhr zu `false`, ließ die binäre Suche
+ * bei 0 stehen und ergab ein **477 Werte langes Fenster ab Zeile 0** mit
+ * `atSeconds` NaN — ein falscher Kurvenzug unter *jedem* Annotations- und
+ * Ablationsmarker einer anonymisierten Studie, in 1.4.0 wie in 1.5.0.
+ *
+ * Ein *zurückgehaltener* Zeitpunkt (eine endliche Zahl, die der Anonymisierer
+ * schreibt, weil das Original außerhalb der Aufzeichnung lag) ist ein
+ * Zeitpunkt: keine Uhr deckt ihn, also lautet die Antwort weiter unten „keine
+ * Aufzeichnung". Diese Regel kennt die Konstante nicht und darf sie nicht
+ * kennen. Wortgleich mit `rhythmia_layout.time_of`.
+ */
+export function rhythmiaTimeOf(value) {
+  return rhythmiaNumber(value);
+}
+
+/** Die Elektrode, gegen die ein bipolares Paar gebildet wird: die nächste auf
+ *  dem Spline, an dessen letzter Position die vorige.
+ *  Wortgleich mit `rhythmia_layout.spline_neighbour`. */
+export function rhythmiaSplineNeighbour(electrode) {
+  const index = Number(electrode) | 0;
+  return index % RHYTHMIA_SPLINE_POSITIONS < RHYTHMIA_SPLINE_POSITIONS - 1
+    ? index + 1 : index - 1;
+}
+
+/** Wie weit eine gemessene Spitze-Tal-Amplitude von der abweicht, die die
+ *  Tabelle angibt — in ln µV, der Einheit, in der die Tabelle sie hält. */
+export function rhythmiaAmplitudeDistance(ptpVolts, tableMv) {
+  const measured = Number(ptpVolts), stated = Number(tableMv);
+  if (!Number.isFinite(measured) || !Number.isFinite(stated)) return null;
+  if (measured <= 0 || stated <= 0) return null;
+  return Math.abs(Math.log(measured * 1e6) - Math.log(stated * 1e3));
+}
+
+/** Ob die Aufzeichnung die Amplitude wiedergibt, die der Punkt selbst angibt.
+ *  Eine halbe Rasterstufe, weil der Wert auf dieses Raster quantisiert ist. */
+export function rhythmiaAmplitudeHit(ptpVolts, tableMv) {
+  const distance = rhythmiaAmplitudeDistance(ptpVolts, tableMv);
+  return distance !== null && distance < LN_UV_STEP / 2;
+}
+
+/** Die Kanäle aus *einer* Zeilenspanne: k Float32Array in gespeicherten Volt.
+ *
+ * `raw` ist, was `getRange` über die Zeilen geliefert hat — Abtastung für
+ * Abtastung —, `channels` eine Liste von Spaltenindizes oder null für alle.
+ * Eine Liste und keine Anzahl, weil ein Messpunkt eine Elektrode und ihren
+ * Spline-Nachbarn braucht, was eine Anzahl nicht sagen könnte.
+ * Wortgleich mit `rhythmia_layout.channels_of_row_span`.
+ */
+export function rhythmiaChannels(raw, cols, channels) {
+  const width = Number(cols) | 0;
+  const values = raw instanceof Float32Array ? raw : new Float32Array(raw);
+  if (width <= 0 || values.length % width) {
+    throw new Error(`Zeilenspanne von ${values.length} Abtastungen sind keine `
+                  + `ganzen Zeilen zu ${width} Kanälen`);
+  }
+  const rows = values.length / width;
+  const wanted = channels == null
+    ? Array.from({ length: width }, (_unused, index) => index)
+    : Array.from(channels, Number);
+  for (const channel of wanted) {
+    if (!(channel >= 0 && channel < width)) {
+      throw new Error(`Kanal ${channel} außerhalb eines Blocks mit ${width}`);
+    }
+  }
+  return wanted.map((channel) => {
+    const out = new Float32Array(rows);
+    for (let row = 0; row < rows; row++) out[row] = values[row * width + channel];
+    return out;
+  });
+}
+
+function rhythmiaLimbLeads(channels) {
+  if (!channels || channels.length < RHYTHMIA_ECG_CHANNELS) {
+    throw new Error(`${channels ? channels.length : 0} Kanäle: die `
+                  + `Extremitätenableitungen brauchen die ${RHYTHMIA_ECG_CHANNELS} `
+                  + `eines ${RHYTHMIA_ECG_FAMILY}-Blocks, kanalweise`);
+  }
+  const out = {};
+  for (const name of Object.keys(RHYTHMIA_ECG_LIMB_INDEX)) {
+    out[name] = channels[RHYTHMIA_ECG_LIMB_INDEX[name]];
+  }
+  return out;
+}
+
+/** `rms(Rest) / max(rms(Bezug))`, oder NaN, wenn das nichts aussagt.
+ *
+ * NaN statt 0 bei einer flachen Ableitung: ein Nenner von null heißt, die
+ * Aufzeichnung sagt nichts über ihre eigene Ablage, und ein Gatter, das das
+ * als perfekte Übereinstimmung läse, ließe jeden Nullblock durch. In float64
+ * summiert, damit beide Sprachen dieselbe Zahl bekommen.
+ */
+function rhythmiaRelRms(residual, references) {
+  const rms = (values) => {
+    if (!values || !values.length) return NaN;
+    let sum = 0;
+    for (let i = 0; i < values.length; i++) {
+      const value = values[i];
+      if (!Number.isFinite(value)) return NaN;
+      sum += value * value;
+    }
+    return Math.sqrt(sum / values.length);
+  };
+  let denominator = NaN;
+  for (const reference of references) {
+    const size = rms(reference);
+    if (!Number.isFinite(size)) return NaN;
+    if (!(denominator >= size)) denominator = size;
+  }
+  if (!Number.isFinite(denominator) || denominator <= 0) return NaN;
+  return rms(residual) / denominator;
+}
+
+function rhythmiaCombine(parts) {
+  const length = parts[0][1].length;
+  const out = new Float64Array(length);
+  for (const [factor, values] of parts) {
+    for (let i = 0; i < length; i++) out[i] += factor * values[i];
+  }
+  return out;
+}
+
+/** `(Einthoven, Goldberger)` als relatives rms über ein kanalweises Fenster.
+ *
+ * `I + III - II` und `aVR + aVL + aVF` sind in einer Körperoberflächen-
+ * ableitung null, weil die Ableitungen so gebildet werden — gleich, was das
+ * Herz tut. Das macht sie an einem Archiv brauchbar, das niemand vermessen hat.
+ * Wortgleich mit `rhythmia_layout.ecg_identity`.
+ */
+export function rhythmiaEcgIdentity(channels) {
+  const lead = rhythmiaLimbLeads(channels);
+  return [
+    rhythmiaRelRms(rhythmiaCombine([[1, lead.I], [1, lead.III], [-1, lead.II]]),
+                   [lead.I, lead.II, lead.III]),
+    rhythmiaRelRms(rhythmiaCombine([[1, lead.aVR], [1, lead.aVL], [1, lead.aVF]]),
+                   [lead.aVR, lead.aVL, lead.aVF]),
+  ];
+}
+
+/** Ob beide Summen bei `RHYTHMIA_ECG_IDENTITY_MAX` halten. NaN fällt durch. */
+export function rhythmiaEcgIdentityHolds(channels) {
+  return rhythmiaEcgIdentity(channels)
+    .every((value) => Number.isFinite(value) && value <= RHYTHMIA_ECG_IDENTITY_MAX);
+}
+
+/** Die drei reihenfolgeempfindlichen Identitäten — Fixture und Korpus, nie das
+ *  Laufzeitgatter (`rhythmia_layout.ecg_lead_order`). */
+export function rhythmiaEcgLeadOrder(channels) {
+  const lead = rhythmiaLimbLeads(channels);
+  return [
+    rhythmiaRelRms(rhythmiaCombine([[1, lead.aVL], [-1, lead.I], [0.5, lead.II]]),
+                   [lead.I, lead.II, lead.aVL]),
+    rhythmiaRelRms(rhythmiaCombine([[1, lead.aVF], [-1, lead.II], [0.5, lead.I]]),
+                   [lead.I, lead.II, lead.aVF]),
+    rhythmiaRelRms(rhythmiaCombine([[1, lead.aVR], [0.5, lead.I], [0.5, lead.II]]),
+                   [lead.I, lead.II, lead.aVR]),
+  ];
+}
+
+export function rhythmiaEcgLeadOrderHolds(channels) {
+  return rhythmiaEcgLeadOrder(channels)
+    .every((value) => Number.isFinite(value) && value <= RHYTHMIA_ECG_ORDER_MAX);
+}
+
+/** Ob die Kanäle dieses Blocks überhaupt herausgegeben werden dürfen.
+ *
+ * Drei Antworten, in dieser Reihenfolge: das Paar steht nicht in der gemessenen
+ * Menge — verweigert; der Softwarestand ist einer, an dem gemessen wurde —
+ * gezeigt; der Stand ist ungeprüft — dann muss die Aufzeichnung etwas über
+ * *sich* sagen, nämlich beide Summenidentitäten ihres eigenen
+ * Oberflächenblocks. Sie besteht mit einem Vermerk, fällt mit einer Begründung
+ * durch, und ohne Oberflächenblock ist sie nicht zu prüfen.
+ *
+ * Was das EKG belegt: dass der 12-Kanal-Block *dieser* Aufzeichnung zeilenweise
+ * liegt. Nicht, welche Spalte welche ist, und nicht die Ablage des
+ * Gegenstandsblocks — daher der Vermerk „angenommen, nicht geprüft".
+ * Wortgleich mit `rhythmia_layout.layout_decision`.
+ */
+export function rhythmiaLayoutDecision(family, cols, versionChecked, ecgChannels) {
+  if (!rhythmiaLayoutVerified(family, cols)) {
+    return { ok: false, basis: 'unknown-layout', note: null };
+  }
+  if (versionChecked) return { ok: true, basis: null, note: null };
+  if (!ecgChannels) return { ok: false, basis: 'version-unchecked-no-ecg', note: null };
+  if (!rhythmiaEcgIdentityHolds(ecgChannels)) {
+    return { ok: false, basis: 'version-unchecked-ecg-mismatch', note: null };
+  }
+  return { ok: true, basis: null, note: 'layout-assumed-from-ecg' };
+}
+
+/** Wie ein Kanal heißt: Katheter, Spalte, Fassung — `INAV1 1 B`.
+ *  Die Zahl ist die Spalte, keine Ableitung; der Buchstabe die Fassung, wie die
+ *  Datei sie schreibt. Die alten Endungen ` bi` und ` uni` behaupteten eine
+ *  Ableitung, die nicht in der Datei steht. */
+export function rhythmiaFlavourChannelName(catheter, channel, flavour) {
+  if (flavour === RHYTHMIA_PAIR_FLAVOUR) {
+    throw new Error(`${RHYTHMIA_PAIR_FLAVOUR} entsteht aus zwei Kanälen`);
+  }
+  return `${catheter} ${(Number(channel) | 0) + 1} ${flavour}`;
+}
+
+/** Die eigene Elektrode eines Messpunktes: `RTMD1 E12 U` — die Nummer, wie die
+ *  Tabelle sie hält, damit Kanal und Marker dasselbe sagen. */
+export function rhythmiaElectrodeChannelName(catheter, electrode) {
+  return `${catheter} E${Number(electrode) | 0} U`;
+}
+
+/** Das gebildete Paar: `RTMD1 E12-E13 B` — der einzige bipolare Kurvenzug. */
+export function rhythmiaPairChannelName(catheter, electrode, neighbour) {
+  return `${catheter} E${Number(electrode) | 0}-E${Number(neighbour) | 0} B`;
+}
+
+/** Der Katheter, aus dessen Namen die Kanäle dieses Fensters gebaut wurden.
+ *
+ * Alle drei Namensbauer oben setzen `<Katheter> <…> <Fassung>` zusammen, und
+ * ein Katheter ist ein Blockname ohne Leerzeichen — die letzten beiden Felder
+ * abzuschneiden gibt ihn zurück. Gelesen wird er aus dem Fenster und nicht als
+ * neues Feld mitgeführt: das Fenster wird Feld für Feld zwischen Python und
+ * Browser verglichen, und ein Feld, das nur eine Seite kennt, wäre genau die
+ * Abweichung, die dieser Zweig beseitigt.
+ */
+export function rhythmiaWindowCatheter(egm) {
+  const name = egm && egm.channels && egm.channels[0];
+  if (!name) return '';
+  const parts = String(name).split(' ');
+  return parts.length > 2 ? parts.slice(0, parts.length - 2).join(' ') : parts[0];
+}
+
+/** `no-beat-window` → `noBeatWindow`: wie ein Wert zum Schlüssel wird. */
+function rhythmiaCamel(name) {
+  return String(name || '').replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
+}
+
+/** Warum dieser Punkt kein Fenster zeigt — als Katalogschlüssel mit Werten.
+ *
+ * Das Panel sagte zu jedem zurückgehaltenen Fenster denselben Satz: „Dieser
+ * Punkt trägt kein Elektrogramm." Er stimmte für keinen der Fälle. Ein Punkt,
+ * dessen Katheter gar nicht mitlief, ein Punkt unter einer ungeprüften
+ * Softwarefassung und ein Messpunkt, dessen Aufzeichnung seine eigenen
+ * Amplituden nicht wiedergibt, sind drei verschiedene Auskünfte — und keine
+ * davon ist „trägt kein Elektrogramm", denn die Aufzeichnung ist da.
+ *
+ * **Je Grundlage ein Satz, und nie ein falscher.** Ein Messpunkt ohne
+ * Schlagfenster bekam sonst zu hören, die Aufzeichnung gebe seine Amplituden
+ * nicht wieder — verglichen wurde nie eine. Das schickt den Leser zur
+ * Aufzeichnung statt zur Tabelle, und ein falscher Grund ist schlimmer als ein
+ * vager. Fehlt für eine künftige Grundlage ein Satz, fällt das Panel auf den
+ * grundlagenneutralen zurück, der die Grundlage beim Namen nennt.
+ *
+ * Gibt `null` zurück, wo es ein Fenster gibt — die Regel entscheidet nicht, ob
+ * gezeichnet wird, sie benennt nur, was der Leser schon entschieden hat.
+ */
+export function rhythmiaWindowMessage(answer, point, options) {
+  if (!answer || answer.egm || !answer.reason) return null;
+  const reason = answer.reason;
+  const detail = (answer.detail && answer.detail[0]) || {};
+  const basis = detail.basis || null;
+  const version = (options && options.version) || '';
+  const electrode = Number(point && point.electrode);
+  const at = Number.isInteger(electrode) ? electrode : '';
+
+  if (reason === 'channel-order-unverified') {
+    // Zwei Gründe, eine Antwort: der Block ist nicht gemessen, oder die
+    // Softwarefassung ist es nicht und das EKG bestätigt sie nicht.
+    if (basis === 'version-unchecked-no-ecg' || basis === 'version-unchecked-ecg-mismatch') {
+      return { key: 'map.egm.withheld.channelOrderVersion', basis, params: { version } };
+    }
+    return { key: 'map.egm.withheld.channelOrder', basis,
+             params: { catheter: detail.family || '', channels: detail.channels ?? '' } };
+  }
+  if (reason === 'mapping-electrode-unconfirmed') {
+    const params = { electrode: at, basis: basis || '' };
+    if (basis === 'amplitude-mismatch') {
+      params.du = detail.du ?? '';
+      params.db = detail.db ?? '';
+    }
+    return { key: `map.egm.withheld.mappingUnconfirmed.${rhythmiaCamel(basis)}`,
+             fallbackKey: 'map.egm.withheld.mappingUnconfirmed', basis, params };
+  }
+  const plain = {
+    'no-time': 'map.egm.withheld.noTime',
+    'no-recording': 'map.egm.withheld.noRecording',
+    'no-ablation-catheter-recording': 'map.egm.withheld.noAblationCatheter',
+    'no-mapping-catheter-recording': 'map.egm.withheld.noMappingCatheter',
+  }[reason];
+  return plain ? { key: plain, basis, params: {} } : null;
+}
+
+/** Was ein gezeigtes Fenster über sich sagt — Schlüssel mit Werten, in Reihe.
+ *
+ * Der Rangfolge-Hinweis und die EKG-Annahme standen schon als Werte im Fenster
+ * und wurden nirgends ausgesprochen. Dazu zwei, die aus dem Fenster selbst
+ * folgen: dass B und W gefilterte Fassungen je Elektrode sind und keine
+ * bipolaren Ableitungen (der Name `… B` sagt das nicht von allein), und welche
+ * Korbelektrode ein Messpunkt zeigt, samt dem Nachbarn, gegen den sein Paar
+ * gebildet ist.
+ */
+export function rhythmiaWindowNotes(egm, point, options) {
+  if (!egm) return [];
+  const version = (options && options.version) || '';
+  const catheter = rhythmiaWindowCatheter(egm);
+  const out = [];
+  for (const note of (egm.notes || [])) {
+    if (note === 'layout-assumed-from-ecg') {
+      out.push({ key: 'map.egm.note.ecgAssumed', note, params: { version, catheter } });
+    } else if (note === 'subject-by-ranking') {
+      out.push({ key: 'map.egm.note.byRanking', note, params: { catheter } });
+    }
+  }
+  if (egm.subject === 'mapping-electrode') {
+    const electrode = Number(point && point.electrode) | 0;
+    out.push({ key: 'map.egm.note.mappingElectrode', note: null,
+               params: { catheter, electrode,
+                         neighbour: rhythmiaSplineNeighbour(electrode) } });
+  }
+  // Nur für gespeicherte Fassungen. Das gebildete Paar ist die eine Ausnahme:
+  // es *ist* bipolar, und der Satz daneben würde ihm widersprechen.
+  if ((egm.flavours || []).some(f => f === RHYTHMIA_FILTERED_FLAVOUR || f === 'W')) {
+    out.push({ key: 'map.egm.note.flavours', note: null, params: {} });
+  }
+  return out;
+}
+
+/** Welcher Katheter auf welchem Port aufzeichnet: `{Port: {Block: Elektroden}}`.
+ *
+ * Aus der Verkabelung der Studie selbst. Jeder aufgezeichnete Katheter nennt
+ * ein *aktuelles* Modell; dessen `CatheterConfig/SignalBlock` ist der Block, in
+ * den er schreibt, und jede Elektrode seines `CatheterSetup` trägt den Port als
+ * `PIUSigBlk`. So gemessen in 9 von 9 Familien in vier Archiven.
+ *
+ * `null`, wenn das Archiv keine lesbare Verkabelung nennt — und das ist eine
+ * andere Antwort als `{}`: ohne Verkabelung hat ein Messpunkt überhaupt keinen
+ * Gegenstand, während eine Tabelle ohne Katheter am Ablationsport sagt, dass
+ * der Ablationskatheter nicht aufgezeichnet wurde.
+ *
+ * **Welches Modell das aktuelle ist, stand falsch da, bis ein echter Export
+ * gelesen wurde.** `CurrModel` ist eine GUID, und das Modell trägt sie als
+ * eigenes `id`-Attribut (`<RhythmiaCatheterModel id="…">` in
+ * `<CatheterModels>`). Ein `Properties/Name` gibt es unter einem Katheter
+ * nirgends: in 4 von 4 Korpus-Archiven kam so `{}` heraus, und damit bekam kein
+ * Ablationspunkt und kein Messpunkt ein Fenster. Beide Schreibweisen werden
+ * akzeptiert — die GUID (echte Archive) und der Name (die synthetische
+ * Fixture); geraten wird keine.
+ *
+ * Das Modell wird unter *allen* Nachfahren gesucht und nicht in fester Tiefe:
+ * die Schachtelung zwischen Katheter und Modellliste wechselt.
+ */
+export function rhythmiaCatheterPorts(root) {
+  const catheters = firstTag(root, 'Catheters');
+  if (!catheters) return null;
+  const ports = Object.create(null);
+  for (const catheter of catheters.children) {
+    const properties = childByTag(catheter, 'Properties');
+    const current = properties ? elText(childByTag(properties, 'CurrModel')) : '';
+    if (!current) continue;
+    for (const model of [catheter].concat([...iterAll(catheter)])) {
+      // Die GUID am Modell selbst (jedes gemessene Archiv) oder ein benanntes
+      // Modell (die Fixture). Nennt es keines von beidem, ist es nicht das
+      // aktuelle Modell dieses Katheters.
+      const own = childByTag(model, 'Properties');
+      const name = own ? elText(childByTag(own, 'Name')) : '';
+      const identifier = rhythmiaAttribute(model, 'id') || '';
+      if (identifier.trim() !== current && name !== current) continue;
+      const config = childByTag(model, 'CatheterConfig');
+      const block = config ? elText(childByTag(config, 'SignalBlock')) : '';
+      const setup = childByTag(model, 'CatheterSetup');
+      const electrodes = setup ? childByTag(setup, 'Electrodes') : null;
+      if (!block || !electrodes) continue;
+      const wired = new Set();
+      let count = 0;
+      for (const electrode of electrodes.children) {
+        wired.add(rhythmiaAttribute(electrode, 'PIUSigBlk'));
+        count++;
+      }
+      // Ein Modell, dessen Elektroden auf zwei Ports sitzen, nennt keinen Port.
+      if (!count || wired.size !== 1) continue;
+      const port = [...wired][0];
+      if (!port) continue;
+      if (!ports[port]) ports[port] = Object.create(null);
+      ports[port][block] = count;
+      break;
+    }
+  }
+  return ports;
+}
+
 /* Jede Zahl, jedes Muster und jede Liste, die diese Seite mit
  * `rhythmia_layout` teilt — an einer Stelle gebündelt, damit ein
  * Konformanztest sie vergleichen kann.
@@ -1127,6 +1637,30 @@ export const RHYTHMIA_CONSTANTS = {
   windowSeconds: SIG_WINDOW_S,
   reasons: RHYTHMIA_REASONS,
   notes: RHYTHMIA_NOTES,
+  // Eine *Menge*, keine Reihenfolge: beide Seiten geben sie sortiert heraus,
+  // damit der Vergleich über den Inhalt geht und nicht über die Schreibfolge.
+  signalRowMajor: [...RHYTHMIA_SIGNAL_ROW_MAJOR].sort(),
+  layoutRowMajor: RHYTHMIA_LAYOUT_ROW_MAJOR,
+  blockFlavours: RHYTHMIA_BLOCK_FLAVOURS,
+  pairFlavour: RHYTHMIA_PAIR_FLAVOUR,
+  channelFlavours: RHYTHMIA_CHANNEL_FLAVOURS,
+  unipolarFlavour: RHYTHMIA_UNIPOLAR_FLAVOUR,
+  filteredFlavour: RHYTHMIA_FILTERED_FLAVOUR,
+  ecgFamily: RHYTHMIA_ECG_FAMILY,
+  ecgFlavour: RHYTHMIA_ECG_FLAVOUR,
+  ecgChannels: RHYTHMIA_ECG_CHANNELS,
+  ecgLimbIndex: RHYTHMIA_ECG_LIMB_INDEX,
+  ecgIdentityMax: RHYTHMIA_ECG_IDENTITY_MAX,
+  ecgOrderIdentities: RHYTHMIA_ECG_ORDER_IDENTITIES,
+  ecgOrderMax: RHYTHMIA_ECG_ORDER_MAX,
+  ablationPort: RHYTHMIA_ABLATION_PORT,
+  mappingPort: RHYTHMIA_MAPPING_PORT,
+  mappingFamilies: RHYTHMIA_MAPPING_FAMILIES,
+  splinePositions: RHYTHMIA_SPLINE_POSITIONS,
+  windowReasons: RHYTHMIA_WINDOW_REASONS,
+  windowNotes: RHYTHMIA_WINDOW_NOTES,
+  windowSubjects: RHYTHMIA_WINDOW_SUBJECTS,
+  windowBases: RHYTHMIA_WINDOW_BASES,
 };
 
 /** Was die Namensmuster über eine Liste von Namen sagen — als Urteil, nicht als
@@ -1222,16 +1756,28 @@ function rhythmiaSurfaceReference(blocks, clockPrefix, rows) {
 function rhythmiaSignalIndex(root) {
   const blocks = [];
   for (const el of iterTag(root, 'inlinedbin')) {
-    const fname = el.getAttribute && el.getAttribute('fname');
+    const fname = rhythmiaAttribute(el, 'fname');
     if (!fname) continue;
     const idx = parseInt((el.textContent || '').trim(), 10);
     if (!Number.isFinite(idx)) continue;
     const bare = fname.replace(/^.*\//, '');
     const named = SIG_NAME.exec(bare);
-    const cols = parseInt(el.getAttribute('cols'), 10);
-    const rows = parseInt(el.getAttribute('rows'), 10);
-    const type = el.getAttribute('type');
+    const cols = parseInt(rhythmiaAttribute(el, 'cols'), 10);
+    const rows = parseInt(rhythmiaAttribute(el, 'rows'), 10);
+    const type = rhythmiaAttribute(el, 'type');
     if (named && type === 'Cardiac') {
+      // Ein Block, der weniger Bytes angibt, als seine eigene Ablage braucht,
+      // ist keine Aufzeichnung: zeilenweise gelesen läuft er in das Markup
+      // dahinter und gibt es als Abtastungen aus. Die Länge steht als `BIN` im
+      // Tag — beide Bauer schreiben sie gequotet ins XML —, also braucht diese
+      // Prüfung keinen von ihnen zu ändern (`rhythmia_layout.signal_length_ok`).
+      const declared = parseInt(rhythmiaAttribute(el, 'BIN'), 10);
+      if (!rhythmiaSignalLengthOk(declared, rows, cols)) {
+        try { console.warn(`[epconv] Cardiac-Block ${rhythmiaSignalFamily(named[1])} `
+          + `(${named[2]}, ${rows} Zeilen x ${cols} Kanäle) gibt ${declared} Bytes an `
+          + `statt ${rows * cols * 4} — nicht als Aufzeichnung geführt.`); } catch (e) {}
+        continue;
+      }
       blocks.push({ kind: 'signal', catheter: named[1], flavour: named[2],
                     cols, rows, idx, prefix: bare.slice(0, bare.lastIndexOf('_' + named[2] + '.dat')) });
     } else if (RHYTHMIA_CLOCK_NAME.test(bare) && type === 'Float64') {
@@ -1298,72 +1844,295 @@ function rhythmiaEgmReader(root, getRange) {
   //
   // Gesucht wird in `inFile`, nicht in der sortierten Liste: welcher Bezug es
   // ist, entscheidet die Dokumentreihenfolge (rhythmiaSurfaceReference).
+  //
+  // Und nur die **U**-Fassung: das W desselben Blocks ist eine gefilterte
+  // Fassung derselben zwölf Ableitungen, reiste unter demselben Namen mit und
+  // zeigte einen anderen Kurvenzug — in einer gemessenen Gruppe steht es sogar
+  // vor dem U in der Datei (rhythmia_layout.ECG_FLAVOUR).
   const surfaceFor = (sig, clock) => {
+    const candidates = inFile.filter(
+      b => rhythmiaSignalFamily(b.catheter) === RHYTHMIA_ECG_FAMILY
+        && b.flavour === RHYTHMIA_ECG_FLAVOUR && b.cols === RHYTHMIA_ECG_CHANNELS);
     const index = rhythmiaSurfaceReference(
-      inFile.map(b => [b.catheter, b.prefix, b.rows]), clock.prefix, sig.rows);
-    return index === null ? null : inFile[index];
+      candidates.map(b => [b.catheter, b.prefix, b.rows]), clock.prefix, sig.rows);
+    return index === null ? null : candidates[index];
   };
 
-  const windowOf = async (block, from, to) => {
-    const raw = await getRange(block.idx, from * 4, (to - from) * 4);
-    return aligned(raw, Float32Array);
-  };
+  const version = rhythmiaSoftwareVersion(root);
+  const checked = rhythmiaVersionChecked(version);
+  const ports = rhythmiaCatheterPorts(root);
 
-  return async (point) => {
-    if (!point || point.time == null) return null;
-
-    for (const sig of signals) {
-      // Bezug, nie Gegenstand — auch als einziger Block nicht.
-      if (rhythmiaIsSurfaceEcg(sig.catheter)) continue;
-      const clock = times.find(t => t.prefix === sig.prefix
-                                 || sig.prefix.startsWith(t.prefix));
-      if (!clock) continue;
-      const t = await readTimes(clock);
-      if (!t.length || point.time < t[0] || point.time > t[t.length - 1]) continue;
-
-      // Binäre Suche: die Zeitachse ist monoton.
-      let lo = 0, hi = t.length - 1;
-      while (lo < hi) { const mid = (lo + hi) >> 1; if (t[mid] < point.time) lo = mid + 1; else hi = mid; }
-      // Eine Uhr, die keine Rate nennen kann, ergibt kein Fenster — nicht eines
-      // über zwei Abtastungen und nicht eines über die ganze Aufzeichnung.
-      // Die Regel steht einmal: rhythmia_layout.recording_rate_hz.
-      const rate = rhythmiaRecordingRateHz(t[0], t[t.length - 1], t.length);
-      if (rate === null) continue;
-      const half = Math.max(1, Math.round(rate * SIG_WINDOW_S / 2));
-      const from = Math.max(0, lo - half);
-      const to = Math.min(sig.rows, lo + half);
-      if (to <= from) continue;
-
-      // Spaltenweise: Kanal c beginnt bei c * rows * 4.
-      const channels = [], samples = [];
-      const suffix = sig.flavour === 'B' ? ' bi' : sig.flavour === 'U' ? ' uni' : '';
-      const many = Math.min(sig.cols, 3);
-      for (let c = 0; c < many; c++) {
-        const raw = await getRange(sig.idx, (c * sig.rows + from) * 4, (to - from) * 4);
-        samples.push(aligned(raw, Float32Array));
-        // Rhythmia benennt die einzelnen Kanäle im Export nicht; die Nummer
-        // ist die Spalte, nicht eine Ableitung, und wird auch so beschriftet.
-        channels.push(`${sig.catheter} ${c + 1}${suffix}`);
-      }
-      // Und, wenn vorhanden, eine Oberflächenableitung derselben Uhr darunter.
-      const surface = surfaceFor(sig, clock);
-      if (surface) {
-        try {
-          samples.push(await windowOf(surface, from, to));
-          channels.push(`${surface.catheter} 1`);
-        } catch (e) { /* fehlt sie, fehlt nur der Zeitbezug */ }
-      }
-      return {
-        channels, samples,
-        gainMv: 1000,                      // Float32 in Volt
-        sampleRateHz: Math.round(rate * 1000) / 1000,
-        rateAssumed: false,                // aus der Zeitachse gerechnet
-        window: [t[from], t[Math.min(to, t.length) - 1]],
-        atSeconds: point.time,
-      };
+  /* Die Uhren, die einen Zeitpunkt abdecken, in Dateireihenfolge.
+   *
+   * Zwei Fragen, in dieser Reihenfolge und auf beiden Seiten gleich: nennt
+   * dieser Block überhaupt eine Rate, und deckt seine Aufzeichnung den
+   * Zeitpunkt. Ein Zeitpunkt außerhalb jeder Uhr ist nicht der dieser
+   * Aufzeichnung, und das nächstgelegene Fenster wäre ein echtes Signal aus der
+   * falschen Sekunde. */
+  const coveringClocks = async (when) => {
+    const out = [];
+    for (const block of times) {
+      const t = await readTimes(block);
+      if (t.length < 2) continue;
+      if (rhythmiaRecordingRateHz(t[0], t[t.length - 1], t.length) === null) continue;
+      if (when < t[0] || when > t[t.length - 1]) continue;
+      out.push({ clock: block, t });
     }
-    return null;
+    return out;
   };
+
+  const groupSignals = (clock) => inFile.filter(s => s.prefix.startsWith(clock.prefix));
+
+  // Die Zeitachse ist monoton: der erste Index, dessen Wert nicht kleiner ist —
+  // dieselbe Seite, die Python mit searchsorted(..., side='left') nimmt.
+  const searchLeft = (t, when) => {
+    let lo = 0, hi = t.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (t[mid] < when) lo = mid + 1; else hi = mid; }
+    return lo;
+  };
+
+  const spanOf = async (block, from, to, channels) => {
+    const raw = await getRange(block.idx, from * block.cols * 4,
+                               (to - from) * block.cols * 4);
+    return rhythmiaChannels(aligned(raw, Float32Array), block.cols, channels);
+  };
+
+  const nameOf = (block) => `${block.prefix}_${block.flavour}.dat`;
+
+  const candidatesFor = (group, ablation) => {
+    const usable = group.filter(s => !rhythmiaIsSurfaceEcg(s.catheter));
+    const byRank = usable.slice().sort((a, b) => {
+      const ra = rhythmiaSignalRank(a.flavour, a.cols);
+      const rb = rhythmiaSignalRank(b.flavour, b.cols);
+      return (ra[0] - rb[0]) || (ra[1] - rb[1]);
+    });
+    if (ablation && ports) {
+      // Die Datei sagt, mit welchem Katheter abladiert wurde. Kein Rückfall auf
+      // die Rangfolge: die nahm in 490 von 492 gemessenen Fenstern einen frei
+      // im Blut liegenden Diagnostikkatheter — echt, im richtigen Augenblick,
+      // und unter dem Marker einer Läsion.
+      const wired = ports[RHYTHMIA_ABLATION_PORT] || {};
+      const onPort = byRank.filter(s => wired[s.catheter] === s.cols);
+      const several = new Set(onPort.map(s => s.catheter)).size > 1;
+      return { blocks: onPort, subject: 'ablation-port', ranked: several };
+    }
+    return { blocks: byRank, subject: 'ranking', ranked: true };
+  };
+
+  const decisionFor = async (sig, clock, from, to) => {
+    const family = rhythmiaSignalFamily(sig.catheter);
+    if (checked || !rhythmiaLayoutVerified(family, sig.cols)) {
+      return rhythmiaLayoutDecision(family, sig.cols, checked, null);
+    }
+    const surface = surfaceFor(sig, clock);
+    let ecg = null;
+    if (surface) {
+      try { ecg = await spanOf(surface, from, to, null); } catch (e) { ecg = null; }
+    }
+    return rhythmiaLayoutDecision(family, sig.cols, checked, ecg);
+  };
+
+  const withReference = async (egm, surface, clock, from, to) => {
+    if (!surface) return egm;
+    try {
+      const [lead] = await spanOf(surface, from, to, [0]);
+      egm.samples.push(lead);
+      egm.channels.push(rhythmiaFlavourChannelName(surface.catheter, 0, surface.flavour));
+      egm.flavours.push(surface.flavour);
+      egm.surfaceSource = nameOf(surface);
+    } catch (e) { /* fehlt sie, fehlt nur der Zeitbezug */ }
+    return egm;
+  };
+
+  /* Ein Annotations- oder Ablationspunkt. */
+  const windowStatus = async (point) => {
+    const when = rhythmiaTimeOf(point && point.time);
+    if (when === null) return { egm: null, reason: 'no-time', detail: [] };
+    const groups = await coveringClocks(when);
+    if (!groups.length) return { egm: null, reason: 'no-recording', detail: [] };
+
+    const ablation = point.kind === 'ablation';
+    const refused = [];
+    for (const { clock, t } of groups) {
+      const rate = rhythmiaRecordingRateHz(t[0], t[t.length - 1], t.length);
+      const index = searchLeft(t, when);
+      const half = Math.max(1, Math.round(rate * SIG_WINDOW_S / 2));
+      const chosen = candidatesFor(groupSignals(clock), ablation);
+      for (const sig of chosen.blocks) {
+        const from = Math.max(0, index - half);
+        const to = Math.min(sig.rows, index + half);
+        if (to <= from) continue;
+        const decision = await decisionFor(sig, clock, from, to);
+        if (!decision.ok) {
+          const entry = { family: rhythmiaSignalFamily(sig.catheter),
+                          channels: sig.cols, basis: decision.basis };
+          if (!refused.some(seen => seen.family === entry.family
+                                 && seen.channels === entry.channels
+                                 && seen.basis === entry.basis)) refused.push(entry);
+          continue;
+        }
+        const many = Math.min(sig.cols, 3);
+        const wanted = [];
+        for (let c = 0; c < many; c++) wanted.push(c);
+        const samples = await spanOf(sig, from, to, wanted);
+        const notes = [];
+        if (decision.note) notes.push(decision.note);
+        if (chosen.ranked) notes.push('subject-by-ranking');
+        const egm = {
+          channels: wanted.map(c => rhythmiaFlavourChannelName(sig.catheter, c, sig.flavour)),
+          samples,
+          flavours: wanted.map(() => sig.flavour),
+          gainMv: 1000,                      // Float32 in Volt
+          sampleRateHz: Math.round(rate * 1000) / 1000,
+          rateAssumed: false,                // aus der Zeitachse gerechnet
+          window: [t[from], t[Math.min(to, t.length) - 1]],
+          atSeconds: when,
+          notes, subject: chosen.subject, layout: RHYTHMIA_LAYOUT_ROW_MAJOR,
+          source: nameOf(sig), surfaceSource: '', beatRows: null,
+        };
+        return { egm: await withReference(egm, surfaceFor(sig, clock), clock, from, to),
+                 reason: null, detail: [] };
+      }
+    }
+    if (refused.length) {
+      return { egm: null, reason: 'channel-order-unverified', detail: refused };
+    }
+    if (ablation && ports) {
+      return { egm: null, reason: 'no-ablation-catheter-recording', detail: [] };
+    }
+    return { egm: null, reason: 'no-recording', detail: [] };
+  };
+
+  const withheld = (reason, basis, extra) =>
+    ({ egm: null, reason, detail: [Object.assign({ basis }, extra || {})] });
+
+  /* Ein Messpunkt: **seine eigene** Korbelektrode.
+   *
+   * Ein Messpunkt ist eine Elektrode des Mappingkatheters auf einem
+   * akzeptierten Schlag. Die Tabelle nennt die Elektrode (Spalte 6), den Schlag
+   * (Spalte 0) und die Amplituden, die das System dort gemessen hat (11 und
+   * 12) — das Fenster muss also *diese* Elektrode zeigen, und die Datei erlaubt
+   * zu prüfen, dass es das tut. Nie ein Rückfall auf die Rangfolge: ein fremder
+   * Eingang unter dem Namen einer Elektrode ist genau das stille falsche
+   * Fenster, dessentwegen es diese Regel gibt. */
+  const mappingStatus = async (point) => {
+    const when = rhythmiaTimeOf(point && point.time);
+    if (when === null) return { egm: null, reason: 'no-time', detail: [] };
+    const groups = await coveringClocks(when);
+    if (!groups.length) return { egm: null, reason: 'no-recording', detail: [] };
+    if (!ports) return withheld('no-mapping-catheter-recording', 'no-wiring');
+
+    const wired = ports[RHYTHMIA_MAPPING_PORT] || {};
+    let chosen = null;
+    for (const group of groups) {
+      const here = groupSignals(group.clock).filter(
+        s => s.flavour === RHYTHMIA_UNIPOLAR_FLAVOUR && wired[s.catheter] === s.cols);
+      if (!here.length) continue;
+      // Zwei Körbe am Mappingport: nichts sagt, mit welchem diese Karte
+      // aufgenommen wurde, also wird keiner gezeigt.
+      if (here.length > 1) {
+        return withheld('no-mapping-catheter-recording', 'several-in-group');
+      }
+      chosen = { clock: group.clock, t: group.t, subject: here[0] };
+      break;
+    }
+    if (!chosen) return withheld('no-mapping-catheter-recording', 'not-in-group');
+
+    const { clock, t, subject } = chosen;
+    const family = rhythmiaSignalFamily(subject.catheter);
+    if (!rhythmiaLayoutVerified(family, subject.cols)) {
+      return { egm: null, reason: 'channel-order-unverified',
+               detail: [{ family, channels: subject.cols, basis: 'unknown-layout' }] };
+    }
+    const electrode = Number(point.electrode);
+    if (RHYTHMIA_MAPPING_FAMILIES.indexOf(`${family}|${subject.cols}`) < 0
+        || !Number.isInteger(electrode) || electrode < 0 || electrode >= subject.cols) {
+      return withheld('no-mapping-catheter-recording', 'electrode-outside-catheter');
+    }
+    if (!point.beat) return withheld('mapping-electrode-unconfirmed', 'no-beat-window');
+
+    const rate = rhythmiaRecordingRateHz(t[0], t[t.length - 1], t.length);
+    const index = searchLeft(t, when);
+    const first = index + point.beat.startSample;
+    const last = first + point.beat.samples;
+    if (first < 0 || last > subject.rows) {
+      return withheld('mapping-electrode-unconfirmed', 'beat-outside-recording');
+    }
+    // Eine ausgeschlossene Zeile trägt dort 0, eine unter der Rasteruntergrenze
+    // gar keinen Wert: dann ist nichts zu prüfen, was etwas anderes ist, als zu
+    // prüfen und nicht übereinzustimmen.
+    if (!(Number.isFinite(point.unipolarMv) && point.unipolarMv > 0
+          && Number.isFinite(point.bipolarMv) && point.bipolarMv > 0)) {
+      return withheld('mapping-electrode-unconfirmed', 'no-table-amplitude');
+    }
+    const filtered = groupSignals(clock).find(
+      s => s.flavour === RHYTHMIA_FILTERED_FLAVOUR && s.catheter === subject.catheter
+        && s.cols === subject.cols && s.rows === subject.rows);
+    if (!filtered) return withheld('mapping-electrode-unconfirmed', 'no-filtered-block');
+
+    const neighbour = rhythmiaSplineNeighbour(electrode);
+    const half = Math.max(1, Math.round(rate * SIG_WINDOW_S / 2));
+    const from = Math.max(0, index - half);
+    const to = Math.min(subject.rows, index + half);
+    if (to <= from) return { egm: null, reason: 'no-recording', detail: [] };
+
+    // Je ein Lesevorgang über Fenster und Schlag zusammen.
+    const low = Math.min(from, first), high = Math.max(to, last);
+    const [own] = await spanOf(subject, low, high, [electrode]);
+    const [ownFiltered, neighbourFiltered] = await spanOf(filtered, low, high,
+                                                          [electrode, neighbour]);
+    const pair = new Float32Array(own.length);
+    for (let i = 0; i < pair.length; i++) pair[i] = ownFiltered[i] - neighbourFiltered[i];
+
+    const beatFrom = first - low, beatTo = last - low;
+    let ownLo = Infinity, ownHi = -Infinity, pairLo = Infinity, pairHi = -Infinity;
+    for (let i = beatFrom; i < beatTo; i++) {
+      const value = own[i];
+      if (value < ownLo) ownLo = value;
+      if (value > ownHi) ownHi = value;
+      // Die Differenz in float64 der float32-Werte, wie auf der Python-Seite.
+      const difference = ownFiltered[i] - neighbourFiltered[i];
+      if (difference < pairLo) pairLo = difference;
+      if (difference > pairHi) pairHi = difference;
+    }
+    const ownPtp = ownHi - ownLo, pairPtp = pairHi - pairLo;
+    if (!(rhythmiaAmplitudeHit(ownPtp, point.unipolarMv)
+          && rhythmiaAmplitudeHit(pairPtp, point.bipolarMv))) {
+      const steps = (value) => (value === null ? null : Math.round(value * 1000) / 1000);
+      return withheld('mapping-electrode-unconfirmed', 'amplitude-mismatch', {
+        du: steps(rhythmiaAmplitudeDistance(ownPtp, point.unipolarMv)),
+        db: steps(rhythmiaAmplitudeDistance(pairPtp, point.bipolarMv)),
+      });
+    }
+
+    const egm = {
+      channels: [rhythmiaElectrodeChannelName(subject.catheter, electrode),
+                 rhythmiaPairChannelName(subject.catheter, electrode, neighbour)],
+      samples: [own.subarray(from - low, to - low), pair.subarray(from - low, to - low)],
+      flavours: [RHYTHMIA_UNIPOLAR_FLAVOUR, RHYTHMIA_PAIR_FLAVOUR],
+      gainMv: 1000,
+      sampleRateHz: Math.round(rate * 1000) / 1000,
+      rateAssumed: false,
+      window: [t[from], t[Math.min(to, t.length) - 1]],
+      atSeconds: when,
+      notes: [], subject: 'mapping-electrode', layout: RHYTHMIA_LAYOUT_ROW_MAJOR,
+      source: nameOf(subject), surfaceSource: '', beatRows: [first, last],
+    };
+    return { egm: await withReference(egm, surfaceFor(subject, clock), clock, from, to),
+             reason: null, detail: [] };
+  };
+
+  /* `egm | null` bleibt der Vertrag — das Panel, der OpenEP-Export im Browser
+   * und die CARTO-/EnSite-Pfade rufen es so auf. Der Grund steht daneben, für
+   * wen ihn zeigen will. Ein Punkt ohne `kind` (aus einer wieder eingelesenen
+   * PLY) wird wie ein Annotationspunkt behandelt. */
+  const withReason = async (point) => {
+    if (!point) return { egm: null, reason: 'no-time', detail: [] };
+    return point.kind === 'measurement' ? mappingStatus(point) : windowStatus(point);
+  };
+  const readEgm = async (point) => (await withReason(point)).egm;
+  readEgm.withReason = withReason;
+  return readEgm;
 }
 
 async function buildRhythmiaMeshes(xml, getPayload, getRange) {
@@ -1441,7 +2210,7 @@ async function buildRhythmiaMeshes(xml, getPayload, getRange) {
       const surf = node && childByTag(node, 'SurfElectrodes');
       const bin = surf && childByTag(surf, 'inlinedbin');
       if (!bin) continue;
-      const tableName = (bin.getAttribute && bin.getAttribute('fname')) || '';
+      const tableName = rhythmiaAttribute(bin, 'fname') || '';
       if (!rhythmiaPointsFnameOk(tableName)) {
         // Übergangen, und es wird gesagt: früher passte hier alles, was
         // irgendwo auf `surfelec_<hex>_all.dat` endete.
@@ -1452,8 +2221,8 @@ async function buildRhythmiaMeshes(xml, getPayload, getRange) {
       // Eine andere Breite oder ein anderer Typ ist eine andere Tabelle: sie
       // wird gar nicht erst angefasst, nicht verweigert — so hält es auch der
       // Archivleser, der sie nicht als Punkttabelle vormerkt.
-      if (bin.getAttribute('type') !== 'Float64') continue;
-      if (parseInt(bin.getAttribute('cols'), 10) !== SURFELEC_COLS) continue;
+      if (rhythmiaAttribute(bin, 'type') !== 'Float64') continue;
+      if (parseInt(rhythmiaAttribute(bin, 'cols'), 10) !== SURFELEC_COLS) continue;
       handled.add(bin);
       tables.push(bin);
     }
@@ -1690,9 +2459,9 @@ async function buildRhythmiaMeshes(xml, getPayload, getRange) {
   }
   for (const el of iterTag(root, 'inlinedbin')) {
     if (handled.has(el)) continue;
-    if (!rhythmiaPointsFnameOk((el.getAttribute && el.getAttribute('fname')) || '')) continue;
-    if (el.getAttribute('type') !== 'Float64') continue;
-    if (parseInt(el.getAttribute('cols'), 10) !== SURFELEC_COLS) continue;
+    if (!rhythmiaPointsFnameOk(rhythmiaAttribute(el, 'fname') || '')) continue;
+    if (rhythmiaAttribute(el, 'type') !== 'Float64') continue;
+    if (parseInt(rhythmiaAttribute(el, 'cols'), 10) !== SURFELEC_COLS) continue;
     unassignedTables++;
   }
   meshes.unassignedPointTables = unassignedTables;

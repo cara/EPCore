@@ -27,8 +27,8 @@
  * a gap somebody can see; a fabricated one is not.
  */
 
-import { anatomicalStructures } from './epmetrics.js?v=efadfce5e2dc';
-import { statesLatUnit, rhythmiaLatComment, RHYTHMIA_LAT_COMMENT } from './epconv.js?v=efadfce5e2dc';
+import { anatomicalStructures } from './epmetrics.js?v=39988850ca0e';
+import { statesLatUnit, rhythmiaLatComment, RHYTHMIA_LAT_COMMENT } from './epconv.js?v=39988850ca0e';
 
 export const WRITER = 'EPCore';
 
