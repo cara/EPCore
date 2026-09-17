@@ -15,9 +15,9 @@
   } catch (e) { /* Speicher abgeschaltet */ }
 </script>
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/theme.js?v=cff65c11417e"></script>
-<script type="module" src="../shared/settings.js?v=cff65c11417e"></script>
-<script type="module" src="../shared/i18n.js?v=cff65c11417e"></script>
+<script type="module" src="../shared/theme.js?v=c4070c955fb4"></script>
+<script type="module" src="../shared/settings.js?v=c4070c955fb4"></script>
+<script type="module" src="../shared/i18n.js?v=c4070c955fb4"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -384,6 +384,10 @@
     color: var(--muted);
   }
   #egm .chans button.on { color: var(--accent); border-color: var(--accent); }
+  #egm .annot {
+    display: flex; align-items: center; gap: 6px;
+    padding: 2px 10px 6px; font-size: 11px;
+  }
   #egm .traces { padding: 2px 10px 10px; }
   #egm .trace { margin-bottom: 6px; }
   #egm .trace .lbl {
@@ -1131,6 +1135,13 @@
   </header>
   <div class="meta" id="egm-meta"></div>
   <div class="chans" id="egm-chans"></div>
+  <div class="annot" id="egm-annot" hidden>
+    <small id="egm-annot-read" style="color:var(--accent-dim)"></small>
+    <span class="sp"></span>
+    <button class="chip" id="egm-snap" data-i18n="map.annot.snap"></button>
+    <button class="chip" id="egm-apply" data-i18n="map.annot.apply"></button>
+    <button class="chip" id="egm-cancel" data-i18n="map.annot.cancel"></button>
+  </div>
   <div class="traces" id="egm-traces"></div>
 </div>
 <div id="readout"></div>
@@ -1166,7 +1177,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=cff65c11417e",
+    "three": "../vendor/three/three.module.js?v=c4070c955fb4",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -1176,16 +1187,16 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import epcoreTheme from '../shared/theme.js?v=cff65c11417e';
-import * as EP from './epconv.js?v=cff65c11417e';
-import * as EPM from './epmetrics.js?v=cff65c11417e';
-import * as EPCV from './epconduction.js?v=cff65c11417e';
-import * as EPA from './epablation.js?v=cff65c11417e';
-import * as EPSave from '../shared/save.js?v=cff65c11417e';
-import * as EPO from './epopenep.js?v=cff65c11417e';
-import * as EPP from './eppoints.js?v=cff65c11417e';
-import * as EPAN from './epannot.js?v=cff65c11417e';
-import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=cff65c11417e';
+import epcoreTheme from '../shared/theme.js?v=c4070c955fb4';
+import * as EP from './epconv.js?v=c4070c955fb4';
+import * as EPM from './epmetrics.js?v=c4070c955fb4';
+import * as EPCV from './epconduction.js?v=c4070c955fb4';
+import * as EPA from './epablation.js?v=c4070c955fb4';
+import * as EPSave from '../shared/save.js?v=c4070c955fb4';
+import * as EPO from './epopenep.js?v=c4070c955fb4';
+import * as EPP from './eppoints.js?v=c4070c955fb4';
+import * as EPAN from './epannot.js?v=c4070c955fb4';
+import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=c4070c955fb4';
 
 /* =====================================================================
  *  Color lookup tables
@@ -3595,6 +3606,211 @@ const egmBox = document.getElementById('egm');
 const egmTitle = document.getElementById('egm-title');
 const egmMeta = document.getElementById('egm-meta');
 const egmTraces = document.getElementById('egm-traces');
+const egmAnnot = document.getElementById('egm-annot');
+const egmAnnotRead = document.getElementById('egm-annot-read');
+
+/* Ein laufender Setzvorgang: welcher Punkt, welcher Kanal, welcher Abtastwert.
+ *
+ * Ein Klick allein ändert nichts — er schlägt vor. Übernommen wird erst auf
+ * „Übernehmen", und bis dahin steht die gestrichelte Linie neben der des
+ * Herstellers, damit sichtbar ist, was sich ändern würde.
+ */
+let egmPick = null;
+let egmPoint = null, egmCurrent = null;
+
+/** Auf welchem Kanal ein Zeitpunkt gesetzt werden darf.
+ *
+ * Der Kopf des Exports nennt ihn (`bipolarChannel`, seit R0.1 auch im Browser).
+ * Auf einem anderen zu klicken setzte eine Annotation aus einem Signal, das der
+ * Hersteller für diesen Punkt nicht gemessen hat.
+ */
+function egmMappingChannel(egm) {
+  if (!egm) return null;
+  if (egm.bipolarChannel && egm.channels.includes(egm.bipolarChannel)) {
+    return egm.bipolarChannel;
+  }
+  return null;
+}
+
+/* Was auf der Kurve steht, in Abtastwerten.
+ *
+ * Alles hier ist eine Zeile des exportierten Sweeps: das Fenster, die
+ * Annotation des Herstellers, die von EPCore, der Vorschlag. Millisekunden
+ * entstehen erst bei der Anzeige — die Rate ist bei CARTO angenommen, und eine
+ * gespeicherte Millisekunde backte diese Annahme ein (ADR-0009).
+ */
+function annotMarks(egm, point) {
+  if (!egm || !point) return null;
+  const window = EPP.annotationWindow(point);
+  const key = annotKeyOf(point);
+  const state = key && annot ? annot.state(key) : null;
+  const edited = state && state.lat ? state.lat.value : null;
+  return {
+    window,
+    vendor: point.mapAnnotation ?? null,
+    epcore: edited,
+    candidate: egmPick && egmPick.point === point ? egmPick.sample : null,
+  };
+}
+
+/* Die Zeitsteuerung des Signalfensters: einblenden, verdrahten, auffrischen.
+ *
+ * Wo kein Zeitpunkt gesetzt werden kann, steht der Grund — und die Steuerung
+ * ist dann nicht etwa ausgegraut, sondern nicht da. Ein abgeblendeter Knopf
+ * lädt zum Probieren ein und sagt nichts.
+ */
+function annotShowTimeControls(egm, point) {
+  if (!egmAnnot) return;
+  const can = annotCanSetTime(egm, point);
+  if (!can.ok) {
+    egmAnnot.hidden = true;
+    if (can.reason) {
+      const line = document.createElement('div');
+      line.className = 'warn';
+      line.textContent = T(can.reason);
+      egmMeta.appendChild(line);
+    }
+    return;
+  }
+
+  egmAnnot.hidden = false;
+  annotUpdateReadout(egm, point);
+
+  const snap = document.getElementById('egm-snap');
+  if (snap) snap.onclick = () => annotSnap(egm, point);
+  const apply = document.getElementById('egm-apply');
+  if (apply) apply.onclick = () => annotApplyPick(egm, point);
+  const cancel = document.getElementById('egm-cancel');
+  if (cancel) cancel.onclick = () => {
+    egmPick = null;
+    drawTraces(egm, point);
+    annotUpdateReadout(egm, point);
+  };
+}
+
+/** Was unter der Kurve steht: der vorgeschlagene Abtastwert und seine Millisekunden.
+ *
+ * Millisekunden relativ zur Referenz, und wo die Rate angenommen ist, steht das
+ * daneben — eine Zeitachse auf einer Annahme sieht aus wie eine gemessene.
+ */
+function annotUpdateReadout(egm, point) {
+  if (!egmAnnotRead) return;
+  if (!egmPick || egmPick.point !== point) { egmAnnotRead.textContent = ''; return; }
+  const reference = point.referenceAnnotation ?? 0;
+  const ms = (egmPick.sample - reference) * 1000 / egm.sampleRateHz;
+  let text = T('map.annot.readout', { sample: egmPick.sample, ms: ms.toFixed(1) });
+  if (egm.rateAssumed) text += ' · ' + T('map.annot.assumed', { rate: egm.sampleRateHz });
+  egmAnnotRead.textContent = text;
+}
+
+/** Den Vorschlag auf den steilsten Abfall im Fenster setzen. */
+function annotSnap(egm, point) {
+  const channel = egmMappingChannel(egm);
+  const samples = egm.samples[egm.channels.indexOf(channel)];
+  const found = EPP.pickAnnotation(samples, EPP.annotationWindow(point));
+  if (found == null) {
+    // Gesagt, nicht ersetzt: im Fenster ist nichts, was eine Aktivierung wäre.
+    egmPick = null;
+    drawTraces(egm, point);
+    egmAnnotRead.textContent = T('map.annot.snap.none');
+    return;
+  }
+  egmPick = { point, sample: found, basis: 'assisted:steepest_negative' };
+  drawTraces(egm, point);
+  annotUpdateReadout(egm, point);
+}
+
+/* Einen Klick auf der Kurve in einen Abtastwert übersetzen.
+ *
+ * Über `sampleAtX` und damit über `n`, nicht über die gezeichnete Linie: die
+ * ist auf 400 px dezimiert, und bei 2500 Abtastwerten deckt ein Punkt sechs.
+ * Ein Klick außerhalb des Fensters wird benannt abgelehnt und nicht geklemmt —
+ * geklemmt sähe er aus wie ein Treffer am Rand.
+ */
+function annotClickTrace(event) {
+  const row = event.target.closest('.trace');
+  if (!row || !egmAnnot || egmAnnot.hidden) return;
+  const point = egmPoint, egm = egmCurrent;
+  if (!point || !egm) return;
+  if (row.dataset.channel !== egmMappingChannel(egm)) return;
+
+  const svg = row.querySelector('svg');
+  if (!svg) return;
+  const box = svg.getBoundingClientRect();
+  const n = egm.samples[0].length;
+  const sample = EPAN.sampleAtX((event.clientX - box.left) / box.width * 400, 400, n);
+
+  const window = EPP.annotationWindow(point);
+  if (window && (sample < window[0] || sample > window[1])) {
+    const rate = egm.sampleRateHz, reference = point.referenceAnnotation ?? 0;
+    egmAnnotRead.textContent = T('map.annot.outside.refused', {
+      from: ((window[0] - reference) * 1000 / rate).toFixed(0),
+      to: ((window[1] - reference) * 1000 / rate).toFixed(0),
+    });
+    return;
+  }
+  egmPick = { point, sample, basis: 'manual' };
+  drawTraces(egm, point);
+  annotUpdateReadout(egm, point);
+}
+
+/** Den Vorschlag übernehmen — erst hier ändert sich etwas. */
+function annotApplyPick(egm, point) {
+  if (!egmPick || egmPick.point !== point || !annot) return;
+  const key = annotKeyOf(point);
+  if (!key) return;
+  const channel = egmMappingChannel(egm);
+  const known = annot.log.some(entry => entry.key === key);
+  const fields = {
+    space: EPAN.SPACES.carto,
+    // Gespeichert wird die Größe des Herstellers — eine Zeile desselben Sweeps,
+    // auf derselben Achse wie die Referenz. Nie Millisekunden (ADR-0009).
+    value: egmPick.sample,
+    basis: egmPick.basis,
+    channel: egm.channels.indexOf(channel),
+    channelName: channel,
+  };
+  if (!known) {
+    fields.fp = EPAN.vendorFingerprint(point);
+    fields.vendor = {
+      map_annotation: point.mapAnnotation ?? null,
+      reference_annotation: point.referenceAnnotation ?? null,
+    };
+  }
+  annot.apply('set_lat', key, fields);
+  egmPick = null;
+  drawTraces(egm, point);
+  annotUpdateReadout(egm, point);
+  annotRefresh();
+}
+
+/** Kann auf diesem Punkt überhaupt ein Zeitpunkt gesetzt werden?
+ *
+ * Die Vorbedingung aus ADR-0009: die Referenzannotation muss eine Zeile des
+ * exportierten Sweeps sein, sonst gibt es keinen Ursprung, gegen den ein Klick
+ * gemessen werden könnte. Geprüft, nicht angenommen — und bei Verletzung wird
+ * kein Zeitsteuerelement angeboten.
+ */
+function annotCanSetTime(egm, point) {
+  // Ohne Annotationssatz oder ohne Schlüssel gibt es keine Frage: die Studie ist
+  // gar nicht annotierbar, und *das* steht bereits im Abschnitt „Annotationen".
+  // Hier wäre es ein zweiter Hinweis auf dieselbe Sache.
+  if (!annot || !point || !annotKeyOf(point)) return { ok: false, reason: null };
+
+  // Alles Weitere ist eine Aussage über *diesen* Punkt, und jede davon wird
+  // benannt. Gemessen, warum: ohne Grund verschwand die Zeitsteuerung einfach,
+  // und eine Datei, deren Kopf keinen Mapping-Kanal nennt, sah dann aus wie
+  // eine, bei der das Annotieren gar nicht vorgesehen ist.
+  if (!egm) return { ok: false, reason: 'map.annot.nosignalhere' };
+  if (!egmMappingChannel(egm)) return { ok: false, reason: 'map.annot.nochannel' };
+
+  const n = egm.samples[0] ? egm.samples[0].length : 0;
+  const reference = point.referenceAnnotation;
+  if (reference == null || !(reference >= 0) || reference >= n) {
+    return { ok: false, reason: 'map.annot.noreference' };
+  }
+  return { ok: true, reason: null };
+}
 const egmChans = document.getElementById('egm-chans');
 
 // Welche Kanäle gezeigt werden, über Punkte hinweg. Wer einen Kanal gewählt
@@ -3652,8 +3868,9 @@ function buildChannelChips(egm, point) {
   }
 }
 
-function drawTraces(egm) {
+function drawTraces(egm, point = null) {
   egmTraces.innerHTML = '';
+  const marks = annotMarks(egm, point);
   for (const name of egmChannels(egm)) {
     const idx = egm.channels.indexOf(name);
     const data = egm.samples[idx];
@@ -3662,13 +3879,18 @@ function drawTraces(egm) {
     const ptp = ((hi - lo) * egm.gainMv).toFixed(3);
     const row = document.createElement('div');
     row.className = 'trace';
+    // Das Kanalfeld ist der Griff für einen Klick: nur auf dem Kanal, den der
+    // Kopf als Mapping-Kanal nennt, wird ein Zeitpunkt gesetzt. Auf einem
+    // anderen zu klicken setzte eine Annotation aus einem Signal, das der
+    // Hersteller nicht gemessen hat.
+    row.dataset.channel = name;
     row.innerHTML = `<div class="lbl"><span>${name}</span><span>${ptp} mV</span></div>`
-                  + traceSvg(data, egm.gainMv);
+                  + traceSvg(data, egm.gainMv, marks);
     egmTraces.appendChild(row);
   }
 }
 
-function traceSvg(samples, gainMv) {
+function traceSvg(samples, gainMv, marks = null) {
   const n = samples.length;
   if (!n) return '<svg viewBox="0 0 100 46"></svg>';
   const W = 400, H = 46, pad = 3;
@@ -3684,7 +3906,37 @@ function traceSvg(samples, gainMv) {
     const y = pad + (1 - (samples[i] - lo) / span) * (H - 2 * pad);
     pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
   }
+
+  // Was auf der Kurve steht: das Suchfenster, die Annotation des Herstellers und
+  // die von EPCore. Gezeichnet wird über `xOfSample` — dieselbe Umrechnung, die
+  // ein Klick rückwärts geht, sonst zeigt die Linie woanders hin als der Wert,
+  // den sie meint.
+  const at = (sample) => EPAN.xOfSample(sample, W, n);
+  let overlay = '';
+  if (marks && marks.window) {
+    const from = Math.max(0, Math.min(n - 1, marks.window[0]));
+    const to = Math.max(0, Math.min(n - 1, marks.window[1]));
+    if (to > from) {
+      overlay += `<rect x="${at(from).toFixed(1)}" y="0" `
+               + `width="${(at(to) - at(from)).toFixed(1)}" height="${H}" `
+               + `fill="var(--accent)" opacity="0.08"/>`;
+    }
+  }
+  const line = (sample, colour, dash) => {
+    if (sample == null || !(sample >= 0) || sample > n - 1) return '';
+    const x = at(sample).toFixed(1);
+    return `<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke="${colour}" `
+         + `stroke-width="1" vector-effect="non-scaling-stroke"`
+         + (dash ? ` stroke-dasharray="${dash}"` : '') + '/>';
+  };
+  if (marks) {
+    overlay += line(marks.vendor, 'var(--muted)', '');
+    overlay += line(marks.epcore, 'var(--warn, #e0b050)', '');
+    overlay += line(marks.candidate, 'var(--accent)', '3 2');
+  }
+
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`
+       + overlay
        + `<polyline points="${pts.join(' ')}" fill="none" `
        + `stroke="var(--accent)" stroke-width="1" vector-effect="non-scaling-stroke"/>`
        + `</svg>`;
@@ -3696,6 +3948,10 @@ async function showEgm(point, readEgm) {
   // schon. Beides wird hier abgewartet, damit der Aufrufer den Unterschied
   // nicht kennen muss.
   egmTitle.textContent = `Punkt ${point.id ?? point.label ?? '—'}`;
+  // Ein angefangener Vorschlag gehört zu dem Punkt, an dem er gemacht wurde.
+  egmPick = null;
+  egmPoint = null; egmCurrent = null;
+  if (egmAnnot) egmAnnot.hidden = true;
   egmTraces.innerHTML = '';
   egmMeta.textContent = 'Lade Signal…';
   egmBox.style.display = 'block';
@@ -3770,8 +4026,10 @@ async function showEgm(point, readEgm) {
       const text = say(said.key, said.params, '');
       if (text) lines.push(text);
     }
-    drawTraces(egm);
+    egmPoint = point; egmCurrent = egm;
+    drawTraces(egm, point);
     buildChannelChips(egm, point);
+    annotShowTimeControls(egm, point);
   }
   egmMeta.innerHTML = meta;
   // Als Text angehängt, nicht in `meta` hineingeschrieben: darin stehen die
@@ -4063,7 +4321,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=cff65c11417e'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=c4070c955fb4'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -4358,7 +4616,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=cff65c11417e');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=c4070c955fb4');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -5994,6 +6252,9 @@ document.querySelectorAll('.sec > summary').forEach(summary => {
 
 document.getElementById('t-swap').onclick = () => swapComparison();
 annotWireControls();
+// Ein Klick auf die Kurve schlägt einen Zeitpunkt vor. Delegiert, weil die
+// Spuren bei jedem Punkt neu gezeichnet werden.
+if (egmTraces) egmTraces.addEventListener('click', annotClickTrace);
 
 document.getElementById('t-close').onclick = () => {
   // Gefragt, nicht getan: eine offene Studie zuzuklappen nimmt Schnitte,
@@ -6195,7 +6456,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=cff65c11417e');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=c4070c955fb4');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -6243,7 +6504,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=cff65c11417e';
+import '../shared/bridge.js?v=c4070c955fb4';
 
 /* In der Schale steht "Öffnen" auch oben in der Leiste, für beide Module. Das
  * Menü hier daneben wäre eine zweite Antwort auf dieselbe Frage — die Knöpfe

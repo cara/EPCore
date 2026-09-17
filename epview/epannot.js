@@ -475,3 +475,23 @@ export function vendorFingerprint(point) {
     point ? (point.bipolarMv ?? null) : null,
   ]);
 }
+
+/* Ein Pixel ist nicht die Einheit der Bearbeitung.
+ *
+ * `traceSvg` zeichnet 400 px breit und dezimiert mit `step = max(1, floor(n/W))`.
+ * Bei den 2500 Abtastwerten des Korpus-Exports deckt ein gezeichneter Punkt sechs
+ * Abtastwerte — ±3 ms bei den angenommenen 1 kHz, unsichtbar und klinisch
+ * erheblich. Deshalb wird über `n` gerechnet und nicht über die gezeichnete Linie.
+ */
+export function sampleAtX(x, width, n) {
+  if (!(n > 1) || !(width > 0)) return 0;
+  const t = Math.min(1, Math.max(0, x / width));
+  // `floor(x + 0.5)`, nie `Math.round`: bei `sampleAtX(1, 8, 5)` ist `1/8 * 4`
+  // exakt 0.5, und dort gehen Python und JS auseinander (siehe `canon`).
+  return Math.floor(t * (n - 1) + 0.5);
+}
+
+/** Die Umkehrung: wo ein Abtastwert gezeichnet wird. */
+export function xOfSample(sample, width, n) {
+  return (n > 1 ? sample / (n - 1) : 0) * width;
+}

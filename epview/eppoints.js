@@ -8,7 +8,7 @@
  * over it: a point annotated outside its window belongs to a different beat,
  * and a point off the wall is a measurement of blood.
  */
-import { meshClosure } from './epmetrics.js?v=cff65c11417e';
+import { meshClosure } from './epmetrics.js?v=c4070c955fb4';
 
 /** How far outside the surface a point may sit and still count as on it, mm. */
 export const ON_SURFACE_MM = 3.0;
@@ -160,6 +160,67 @@ export function windowReport(points, reader = null) {
     kept: mask.filter(Boolean).length,
     allRejected: Boolean(checkable) && !mask.some(Boolean),
   };
+}
+
+/** Das Suchfenster in der eigenen Größe des Punktes, oder null.
+ *
+ * `windowOfInterest` gibt das Fenster relativ zur Referenz — so speichert es der
+ * Hersteller. Ein Picker arbeitet auf Abtastzeilen, also muss es erst auf diese
+ * Achse gebracht werden: dieselbe Ursprungskorrektur wie beim Vergleich, nur
+ * andersherum.
+ */
+export function annotationWindow(point) {
+  const window = windowOfInterest(point);
+  if (!window) return null;
+  const reference = referenceOf(point);
+  return [window[0] + reference, window[1] + reference];
+}
+
+/** Der Abtastwert der Aktivierung im Fenster, oder null.
+ *
+ * **Null wird gesagt, nicht ersetzt.** Ein Fenster ohne Auslenkung ist ein echter
+ * Fall — ein Punkt während einer Pause, ein nicht angeschlossener Kanal —, und
+ * den ersten Abtastwert oder das Extremum einer flachen Linie zurückzugeben
+ * setzte eine Annotation dorthin, wo nichts geschehen ist.
+ *
+ * Das Kriterium ist der steilste *negative* Abfall: die lokale Aktivierung eines
+ * intrakardialen Elektrogramms ist der Abfall, nicht der Extremwert.
+ */
+export function pickAnnotation(samples, window = null,
+                               { criterion = 'steepest_negative' } = {}) {
+  if (criterion !== 'steepest_negative' && criterion !== 'peak') {
+    throw new Error(`unbekanntes Kriterium ${criterion}`);
+  }
+  const values = samples || [];
+  if (values.length < 2) return null;
+
+  let first = 0, last = values.length - 1;
+  if (window) {
+    // `floor(x + 0.5)` und nicht `Math.round`: die beiden Sprachen gehen bei einer
+    // exakten Hälfte auseinander, und dieser Index entscheidet, auf welchem
+    // Abtastwert eine Annotation landet.
+    first = Math.max(first, Math.floor(Number(window[0]) + 0.5));
+    last = Math.min(last, Math.floor(Number(window[1]) + 0.5));
+  }
+  if (last <= first) return null;
+
+  if (criterion === 'peak') {
+    const inside = Array.from(values).slice(first, last + 1).sort((a, b) => a - b);
+    const median = inside[Math.floor(inside.length / 2)];
+    let best = first, most = -Infinity;
+    for (let i = first; i <= last; i++) {
+      const away = Math.abs(values[i] - median);
+      if (away > most) { most = away; best = i; }
+    }
+    return best;
+  }
+
+  let best = -1, lowest = 0;
+  for (let i = first + 1; i <= last; i++) {
+    const step = values[i] - values[i - 1];
+    if (step < lowest) { lowest = step; best = i; }
+  }
+  return best < 0 ? null : best;   // nichts fällt in diesem Fenster
 }
 
 /** Squared distance from a point to one triangle, clamped into it. */
