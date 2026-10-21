@@ -13,8 +13,8 @@
  * ===================================================================== */
 
 import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment,
-         encodeTagComment } from './epmap.js?v=b816277563b3';
-import { readVisitag, summarise as summariseAblation } from './epablation.js?v=b816277563b3';
+         encodeTagComment } from './epmap.js?v=c324b1da71e8';
+import { readVisitag, summarise as summariseAblation } from './epablation.js?v=c324b1da71e8';
 
 const SENTINEL = 1e4;
 
@@ -2652,6 +2652,17 @@ function triangleIndices(rows, vertexCount, volIdx = 0) {
   return tris;
 }
 
+/* Surface_of_origin entries are read the way ensite_to_3d.py reads them
+ * (_SURFACE_NUMBER, _ENTRY_SEPARATOR there), not through `textToRows`. That one
+ * skips a token `parseFloat` rejects (`inf`, `-nan`, `N/A`) — and with it the
+ * token's slot, so every later triangle landed on its neighbour's surface — and
+ * reads `0x1` as 0 and `1_0` as 1, where Python failed the file or read 10.
+ * A token is a number when it is spelled as a plain decimal; anything else
+ * is no surface number and costs its own triangle, in place. `[0-9]` and ASCII
+ * whitespace, because `\d` and `\s` mean different sets in the two languages. */
+const SURFACE_NUMBER = /^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/;
+const ENTRY_SEPARATOR = /[ \t\n\r\f\v]+/;
+
 export function parseEnSite(text, dxlText = null) {
   const dp = getDOMParser();
   if (!dp) throw new Error('DOMParser nicht verfügbar (Browser erforderlich).');
@@ -2697,14 +2708,69 @@ export function parseEnSite(text, dxlText = null) {
 
     const sooEl = firstTag(vol, 'Surface_of_origin');
     if (sooEl && sooEl.textContent) {
-      const soo = []; for (const r of textToRows(sooEl.textContent)) for (const v of r) soo.push(Math.trunc(v));
-      const nSurf = Math.max(...soo) + 1;
-      for (let s = 0; s < nSurf; s++) {
-        const tri = [];
-        for (let i = 0; i < soo.length; i++) if (soo[i] === s) tri.push(allTris[i*3], allTris[i*3+1], allTris[i*3+2]);
-        if (!tri.length) continue;
+      // Surface_of_origin carries one entry per triangle, which is what made
+      // the two obvious spellings wrong here:
+      //
+      //   `Math.max(...soo)` spreads one argument per triangle. V8 takes
+      //   100 000 and throws `RangeError: Maximum call stack size exceeded`
+      //   from ~125 000 on, so a dense map did not open at all. No maximum is
+      //   needed: the surfaces are the numbers that occur, counted below.
+      //
+      //   Collecting each surface's triangles by walking the whole list once
+      //   per surface is O(surfaces x triangles). Counting first and then
+      //   placing each triangle once is two passes, whatever the surface count.
+      const nTri = allTris.length / 3;
+      const soo = new Int32Array(nTri);
+      let paired = 0, surplus = 0, dropped = 0;
+      for (const token of sooEl.textContent.split(ENTRY_SEPARATOR)) {
+        if (!token) continue;
+        // More surface numbers than triangles is a damaged export. The extra
+        // ones used to index past `allTris` and push `undefined`, which
+        // `Uint32Array.from` turned into triangle (0,0,0). Counted, not kept.
+        if (paired >= nTri) { surplus++; continue; }
+        const v = SURFACE_NUMBER.test(token) ? Number(token) : NaN;
+        // Not a surface number at all: dropped, like a row no triangle claims.
+        // The test comes before the truncation — `Math.trunc(-0.5)` is -0,
+        // which passes `>= 0` and put the row on surface 0 while Python
+        // dropped it. Numbers from 2**31 on do not fit this array and are no
+        // surface any export uses (SURFACE_ID_LIMIT on the Python side).
+        const usable = Number.isFinite(v) && v >= 0 && v < 2 ** 31;
+        if (!usable) dropped++;
+        soo[paired++] = usable ? Math.trunc(v) : -1;
+      }
+      const unclaimed = nTri - paired;
+      if (dropped || surplus || unclaimed) {
+        // The map still opens with what is usable. Saying so is what keeps a
+        // damaged export from looking complete; the Python converter prints
+        // the same counts as a WARNUNG.
+        console.warn('[epconv] EnSite: Volume %d: Surface_of_origin unvollständig – '
+                     + 'ungültige Einträge: %d, Einträge ohne Dreieck: %d, '
+                     + 'Dreiecke ohne Eintrag: %d. %d Dreieck(e) fehlen in der Karte.',
+                     volIdx, dropped, surplus, unclaimed, dropped + unclaimed);
+      }
+      // Counted by the numbers that occur, not by the largest one: a dense
+      // array up to the maximum made one damaged row naming surface 10**9 a
+      // gigabyte allocation, and RangeError from 2**31 on.
+      const counts = new Map();
+      for (let i = 0; i < paired; i++) {
+        if (soo[i] >= 0) counts.set(soo[i], (counts.get(soo[i]) || 0) + 1);
+      }
+      const ids = [...counts.keys()].sort((a, b) => a - b);
+      const faces = new Map(ids.map(s => [s, new Uint32Array(counts.get(s) * 3)]));
+      const at = new Map(ids.map(s => [s, 0]));
+      // Triangles past the end of Surface_of_origin belong to no surface, so
+      // only the paired ones are placed — as before.
+      for (let i = 0; i < paired; i++) {
+        const s = soo[i];
+        if (s < 0) continue;
+        const into = faces.get(s), k = at.get(s);
+        into[k] = allTris[i*3]; into[k+1] = allTris[i*3+1]; into[k+2] = allTris[i*3+2];
+        at.set(s, k + 3);
+      }
+      // Only surfaces that have triangles are in `ids`, so none is written empty.
+      for (const s of ids) {
         meshes.push({ name: `EnSite_vol${volIdx}_surf${s}`, positions, normals,
-          faces: Uint32Array.from(tri), scalars: md ? { map_data: md } : {}, source: 'ensite' });
+          faces: faces.get(s), scalars: md ? { map_data: md } : {}, source: 'ensite' });
       }
     } else {
       meshes.push({ name: `EnSite_vol${volIdx}`, positions, normals, faces: allTris,
