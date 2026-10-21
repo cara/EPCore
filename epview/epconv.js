@@ -13,8 +13,8 @@
  * ===================================================================== */
 
 import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment,
-         encodeTagComment } from './epmap.js?v=4496055f0c0e';
-import { readVisitag, summarise as summariseAblation } from './epablation.js?v=4496055f0c0e';
+         encodeTagComment } from './epmap.js?v=23c1b703aa14';
+import { readVisitag, summarise as summariseAblation } from './epablation.js?v=23c1b703aa14';
 
 const SENTINEL = 1e4;
 
@@ -3341,7 +3341,15 @@ export function parsePLY(buffer) {
   // zum Byte-Offset (wichtig für den Binär-Body). Eine einzige native Dekodierung
   // statt zeichenweisem Aufbau -> O(n) statt O(n²), auch bei 200k-Vertex-Meshes.
   const full = new TextDecoder('latin1').decode(bytes);
-  const he = full.match(/end_header\r?\n/);
+  // Only a line of its own ends the header. A match anywhere let
+  // `comment end_header` end the header early. The share backend
+  // (`_ply_header`) scans the header for identifying text before a map gets a
+  // link, and it refuses any file whose first end_header line is not exactly
+  // what this pattern accepts — so for every file it publishes, both cut on
+  // the same byte. Change this and `_ply_header` has to change with it, or the
+  // viewer reads past a header nobody scanned
+  // (tests/conformance/test_ply_header_boundary_conformance.py).
+  const he = full.match(/\nend_header[ \t]*\r?\n/);
   if (!he) throw new Error('PLY: kein end_header');
   const headerEnd = he.index + he[0].length;
 
