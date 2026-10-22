@@ -60,6 +60,15 @@
   --ui: "Saira", "Segoe UI", system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
+  /* The select's arrow, drawn in --text-dim. A url() cannot read a token, so
+     the arrow is a token itself and the light theme restates it with its own
+     --text-dim — written once into the rule, it stayed #8fa3b0 on the light
+     fields at 2.2:1, and it is the one thing that marks them as dropdowns. */
+  --select-arrow: url("data:image/svg+xml;charset=utf-8,\
+%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E\
+%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238fa3b0' stroke-width='1.5' \
+stroke-linecap='round'/%3E%3C/svg%3E");
+
   --radius: 4px;
   --gap: 12px;
   /* Nothing may be smaller than this. Below it, a label is decoration. */
@@ -78,7 +87,7 @@
  * so every rule written against the tokens keeps its meaning. Ink and accent
  * are restated rather than inverted, because the same teal that reads on
  * near-black is 1.9:1 on white. Measured against --bg-0: --text 14.9:1,
- * --text-dim 7.4:1, --text-faint 5.4:1, --accent 4.7:1.
+ * --text-dim 7.4:1, --text-faint 5.4:1, --accent 6.8:1.
  */
 :root[data-theme="light"] {
   color-scheme: light;
@@ -98,9 +107,16 @@
   --line: #d3dde2;
   --line-strong: #b4c2ca;
 
-  --accent: #0d7c8e;
+  /* The accent is text on tinted surfaces more often than on the page: the
+     selected tab and the hovered menu entry sit on --accent-wash, the dialog
+     titles on --bg-2. #0d7c8e was chosen against white alone and came to
+     3.9:1 on the selected tab and 4.2:1 under the titles. This one clears
+     4.5:1 on all four surfaces and on the wash over each (lowest: 4.5:1, the
+     wash over --bg-3). It is now darker than --accent-dim, which stays as it
+     was — that token draws borders and secondary ink, not the accent. */
+  --accent: #0a6472;
   --accent-dim: #10697a;
-  --accent-wash: rgba(13, 124, 142, 0.12);
+  --accent-wash: rgba(10, 100, 114, 0.12);
 
   --warn: #8a6100;
   --warn-wash: rgba(138, 97, 0, 0.10);
@@ -115,6 +131,12 @@
   --ev-dec: #43439e;
   --ev-stim: #6a5c00;
   --ev-marker: #4a5c68;
+
+  /* --text-dim above: 6.6:1 on --bg-2. */
+  --select-arrow: url("data:image/svg+xml;charset=utf-8,\
+%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E\
+%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23445561' stroke-width='1.5' \
+stroke-linecap='round'/%3E%3C/svg%3E");
 }
 
 /* --- base ---------------------------------------------------------------- */
@@ -197,7 +219,10 @@ h1, h2, h3 { font-family: var(--ui); font-weight: 500; letter-spacing: .2px; }
   font-size: var(--size-min);
   margin-left: 6px;
 }
-.epcore-tabs button[aria-selected="true"] .sub { color: var(--accent-dim); }
+/* The accent, not --accent-dim: on the wash the dark --accent-dim is 3.5:1,
+ * and this is the subtitle of the tab that is selected for most of a session.
+ * Font and size keep it quieter than the label. */
+.epcore-tabs button[aria-selected="true"] .sub { color: var(--accent); }
 
 .epcore-tabs .spacer { flex: 1; }
 .epcore-tabs .meta {
@@ -206,6 +231,21 @@ h1, h2, h3 { font-family: var(--ui); font-weight: 500; letter-spacing: .2px; }
   color: var(--text-faint);
   font-size: var(--size-min);
   padding-left: 10px;
+}
+
+/* The shell lets the window shrink to 800px wide (on Windows the frame counts
+ * towards that, so the page gets about 784). Nothing in the bar wraps, shrinks
+ * or scrolls, and at full length it needs 881px in German — 908px when
+ * "Backend nicht erreichbar" stands in for the version. So the version and
+ * the backend's health fell off the right edge, and "Einführung" was cut.
+ * Narrow windows drop the two things that only repeat: the tab subtitles say
+ * what the start page's tiles say, and "Sprache" names a picker that shows a
+ * language and keeps its own accessible name. That is about 140px in German,
+ * and the bar fits 784px in every language with the backend up or down.
+ * Wrapping is no answer: a second row of tabs is how the way back gets lost. */
+@media (max-width: 960px) {
+  .epcore-tabs button .sub,
+  .epcore-tabs .lang > span { display: none; }
 }
 
 /* --- panels, tiles, rows -------------------------------------------------- */
@@ -236,21 +276,30 @@ a.tile, button.tile {
   cursor: pointer;
   transition: border-color .12s, background .12s;
 }
+/* A button centres its content vertically, and `display: block` does not
+ * undo that. The grid stretches every tile in a row to the tallest, so the
+ * tile with less text started its title lower than its neighbour — 19px in
+ * the English module row. As a flex column the content starts at the top. */
+button.tile { display: flex; flex-direction: column; }
 a.tile:hover, button.tile:hover { border-color: var(--accent-dim); background: var(--bg-2); }
 .tile .t { font-family: var(--ui); font-size: 13.5px; color: var(--accent); margin-bottom: 3px; }
 .tile .d { color: var(--text-dim); }
 .tile .f { color: var(--text-faint); font-size: var(--size-min); margin-top: 8px; }
 
+/* A clickable list entry, so only inside a `.rows` list. Bare `.row` is also
+ * every form line in the anonymisers, the EPTrace dialogs and the map view's
+ * settings, and as a bare selector this gave each of them a band, a rule, a
+ * hand cursor and a hover highlight on empty space that does nothing. */
 .rows { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
-.row {
+.rows > .row {
   display: flex; gap: var(--gap); align-items: baseline; width: 100%; text-align: left;
   background: var(--bg-1); color: var(--text); border: 0;
   border-bottom: 1px solid var(--line);
   padding: 8px 14px; cursor: pointer; font: inherit;
 }
-.row:last-child { border-bottom: 0; }
-.row:hover { background: var(--bg-2); }
-.row .p {
+.rows > .row:last-child { border-bottom: 0; }
+.rows > .row:hover { background: var(--bg-2); }
+.rows > .row .p {
   color: var(--text-faint); font-size: var(--size-min); margin-left: auto;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%;
 }
@@ -288,6 +337,13 @@ button.btn:disabled { color: var(--text-faint); cursor: default; background: var
   font: inherit;
 }
 label { color: var(--text-dim); }
+
+/* Left to the engine, the placeholder is #757575 in Chromium (3.8:1 on the
+ * dark --bg-2) and #a9a9a9 in WebKit (2.0:1 on the light one). It is not
+ * decoration: it carries instructions — the anonymiser's "darf es noch nicht
+ * geben" — and for the unlabelled path fields it is the accessible name.
+ * Opacity because Firefox dims it to 0.54 on top of the colour. */
+::placeholder { color: var(--text-faint); opacity: 1; }
 
 /* --- focus ---------------------------------------------------------------- */
 /* This block used to be `outline: none` with a border-colour change, which is
@@ -330,10 +386,7 @@ select {
   appearance: none;
   -webkit-appearance: none;
   padding-right: 22px;
-  background-image: url("data:image/svg+xml;charset=utf-8,\
-%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E\
-%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238fa3b0' stroke-width='1.5' \
-stroke-linecap='round'/%3E%3C/svg%3E");
+  background-image: var(--select-arrow);
   background-repeat: no-repeat;
   background-position: right 7px center;
   background-size: 10px 6px;
@@ -359,7 +412,9 @@ stroke-linecap='round'/%3E%3C/svg%3E");
   margin: 16px 0;
 }
 .note { background: var(--bg-1); border: 1px solid var(--line); color: var(--text-dim); }
-.warn { background: var(--warn-wash); border: 1px solid #3a3524; color: var(--warn); }
+/* The border is the token, not the dark theme's value of it: written out as
+ * #3a3524 it stayed a dark-brown frame round the light theme's pale wash. */
+.warn { background: var(--warn-wash); border: 1px solid var(--warn-line); color: var(--warn); }
 .warn strong { color: var(--warn); }
 
 .muted { color: var(--text-faint); }

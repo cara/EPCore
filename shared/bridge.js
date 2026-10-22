@@ -29,7 +29,6 @@ const OWNER = {
   exportCSV: '/eptrace',
   togglePlay: '/eptrace',
   measureIntervals: '/eptrace',
-  toggleTheme: '/eptrace',
   openAnonymizer: '/eptrace',
   // The cross-link: a map point names a moment, the signal view shows it.
   showMoment: '/eptrace',
@@ -45,6 +44,9 @@ const OWNER = {
   goHome: null,
   goSignals: null,
   goMaps: null,
+  // One choice for the whole program (shared/theme.js), so no module owns it.
+  // Routed to the signal view, it switched the user off the map to get there.
+  toggleTheme: null,
 };
 
 const PANE_OF = { '/eptrace': 'eptrace', '/epview/': 'epview' };
@@ -91,6 +93,32 @@ function api() {
 
 const hasNativeHost = () => api() !== null;
 
+/** Runs `use(api)` once, as soon as the host offers the function `name`.
+ *
+ * Looking once while the module evaluates finds nothing in the real window:
+ * pywebview injects after the page has loaded, from a thread — first an empty
+ * `api`, then the functions, then `pywebviewready` on the top frame. Only a
+ * test that installs its stand-in before load sees a host that early. A module
+ * frame listens on the parent, because nothing is ever injected into it.
+ *
+ * In a browser the event never comes, and `use` is never called.
+ */
+function whenHost(name, use) {
+  let done = false;
+  const attempt = () => {
+    const native = api();
+    if (done || !native || typeof native[name] !== 'function') return;
+    done = true;
+    use(native);
+  };
+  attempt();
+  if (done) return;
+  for (const target of new Set([window, window.parent])) {
+    try { target.addEventListener('pywebviewready', attempt); }
+    catch { /* cross-origin parent: not our host */ }
+  }
+}
+
 /* Was schiefgeht, in das Protokoll der Anwendung.
  *
  * Eine WebView hat keine Konsole, in die jemand schauen könnte. Zwei Fehler
@@ -100,10 +128,11 @@ const hasNativeHost = () => api() !== null;
  * Protokoll gewesen.
  *
  * Nur im Fenster, nicht im Browser: dort gibt es eine Konsole, und ein zweiter
- * Weg dorthin wäre Lärm. */
-(() => {
-  const native = api();
-  if (!native || typeof native.report !== 'function') return;
+ * Weg dorthin wäre Lärm. Eingehängt, sobald der Wirt da ist: pywebview kommt
+ * erst nach dem Laden, und ein Haken, der nur beim Auswerten nachsah, fehlte
+ * im Fenster deshalb immer — in der Schale und in jedem Modul, das mit ihr
+ * zusammen geladen wurde. */
+whenHost('report', (native) => {
   const send = (level, text) => {
     try { native.report(level, String(text).slice(0, 2000), location.pathname); }
     catch { /* das Protokollieren darf nie das sein, was etwas kaputtmacht */ }
@@ -144,7 +173,7 @@ const hasNativeHost = () => api() !== null;
       send(level === 'warn' ? 'warning' : 'error', merge(args));
     };
   }
-})();
+});
 
 /* --- the backend ---------------------------------------------------------- */
 
@@ -185,14 +214,29 @@ function localFile(root, entry) {
   const url = `/api/local/read?root=${encodeURIComponent(root)}`
             + `&path=${encodeURIComponent(entry.path)}`;
   const range = async (from, to) => {
+    // Nothing to read. Asked anyway, `bytes=100-99` comes back as one byte:
+    // the backend clamps a range it cannot serve instead of refusing it.
+    if (from != null && to <= from) return new ArrayBuffer(0);
     if (!await hasBackend()) throw new Error('no backend to read through');
     const headers = from == null ? {} : { Range: `bytes=${from}-${to - 1}` };
     const response = await fetch(url, { headers });
     if (!response.ok && response.status !== 206) {
       throw new Error(`${entry.path} -> ${response.status}`);
     }
-    return response.arrayBuffer();
+    const buffer = await response.arrayBuffer();
+    // The reader copies what arrives into a block of the length it asked for
+    // and moves on by that length, so a short or misplaced answer becomes
+    // zeros or someone else's bytes in the map. Refused here, it is a message.
+    if (from != null && buffer.byteLength !== to - from) {
+      throw new Error(`${entry.path}: ${to - from} Bytes ab Byte ${from} angefordert, `
+                    + `${buffer.byteLength} erhalten.`);
+    }
+    return buffer;
   };
+  /* Plain arithmetic, not `| 0`: that folds an offset into int32, so a part
+   * file past 2 GiB was read from a negative or wrapped offset — the start of
+   * the file, or one byte — and nothing said so. */
+  const offset = (x) => Math.min(entry.size, Math.max(0, Math.trunc(Number(x)) || 0));
   return {
     name: entry.path.slice(entry.path.lastIndexOf('/') + 1),
     webkitRelativePath: entry.path,
@@ -200,10 +244,10 @@ function localFile(root, entry) {
     arrayBuffer: () => range(null, null),
     text: async () => new TextDecoder().decode(await range(null, null)),
     slice(from, to) {
-      const start = Math.max(0, from | 0);
-      const end = Math.min(entry.size, to == null ? entry.size : to | 0);
+      const start = offset(from);
+      const end = Math.max(start, to == null ? entry.size : offset(to));
       return {
-        size: Math.max(0, end - start),
+        size: end - start,
         arrayBuffer: () => range(start, end),
         text: async () => new TextDecoder().decode(await range(start, end)),
       };
@@ -255,6 +299,11 @@ function report(message) {
   else if (typeof window.epcoreNotify === 'function') window.epcoreNotify(message);
   else console.warn('[epcore]', message);
 }
+
+/** What a page says about an action that reached it and has no handler here. */
+const cannotRun = (action) => (ready
+  ? `Diese Ansicht kann „${action}" nicht ausführen.`
+  : `„${action}" kam an, bevor die Seite bereit war.`);
 
 /** Shell only: which pane claimed which action, and what could not be delivered yet. */
 const claimed = Object.create(null);
@@ -325,6 +374,7 @@ const epcore = {
   hasBackend,
   api,
   hasNativeHost,
+  whenHost,
 
   /** A page declares the menu actions it implements. */
   register(map) {
@@ -382,11 +432,21 @@ const epcore = {
   },
 };
 
+/** Switch the theme where the call lands; theme.js passes it to the other panes. */
+function toggleTheme() {
+  // Looked up, not imported: the page loads theme.js itself, and a page that
+  // does not should say so rather than leave the menu entry doing nothing.
+  if (window.epcoreTheme) return window.epcoreTheme.toggle();
+  report('Das Thema lässt sich auf dieser Seite nicht wechseln.');
+  return undefined;
+}
+
 /** Called by the native menu, by an in-page menu, and by the shell's tiles. */
 function epcoreMenu(action, payload) {
   if (action === 'goHome') return epcore.go('/');
   if (action === 'goSignals') return epcore.go('/eptrace');
   if (action === 'goMaps') return epcore.go('/epview/');
+  if (action === 'toggleTheme') return toggleTheme();
 
   if (isShell()) return routeFromShell(action, payload);
 
@@ -406,17 +466,21 @@ function epcoreMenu(action, payload) {
   if (owner && !window.location.pathname.startsWith(owner)) {
     return navigate(owner, action, payload);
   }
-  report(ready
-    ? `Diese Ansicht kann „${action}" nicht ausführen.`
-    : `„${action}" kam an, bevor die Seite bereit war.`);
+  report(cannotRun(action));
   return undefined;
 }
 
 window.addEventListener('message', (event) => {
   if (event.origin !== window.location.origin || !event.data) return;
 
-  if (event.data.type === MESSAGE && handlers[event.data.action]) {
-    handlers[event.data.action](event.data.payload);
+  if (event.data.type === MESSAGE) {
+    /* The shell sends here once this page has claimed anything at all — an
+     * empty claim included, which is what a module sends when its main script
+     * died before defining its actions (the map view without WebGL). Dropped
+     * without a word, every menu entry aimed here did nothing. */
+    const handler = handlers[event.data.action];
+    if (handler) handler(event.data.payload);
+    else report(cannotRun(event.data.action));
     return;
   }
   if (event.data.type === 'epcore.claim' && isShell()) {

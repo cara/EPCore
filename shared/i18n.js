@@ -8,12 +8,35 @@
  * A missing key renders as ⟦key⟧ rather than falling back to another language.
  * A silent fallback is how half-translated interfaces ship: the gap only ever
  * shows up to the person who speaks the language nobody on the team does.
+ *
+ * Pages load this module in their <head> with blocking="render". Their markup
+ * ships empty, and a module runs only after the parse, which leaves time for a
+ * first frame with every button and heading blank; the text then lands and
+ * shoves everything below it about. Render-blocking holds that frame until the
+ * text is in. Browsers honour it only in <head>, and one that does not know the
+ * attribute paints early, as before.
  */
 
-import { CATALOGUES, LANGUAGES, LANGUAGE_NAMES } from './i18n.generated.js?v=c324b1da71e8';
+import { CATALOGUES, LANGUAGES, LANGUAGE_NAMES } from './i18n.generated.js?v=d400d396e5fb';
 
 const STORAGE_KEY = 'epcore.language';
 const DEFAULT = 'de';
+
+/* The backend words its errors in the language the request asks for, and
+ * without this the request asks in the browser's or the OS language — never
+ * in the one picked here, which lives in localStorage and the DOM and does not
+ * leave the page. A cookie travels with every request — once an earlier page
+ * has set it, also with the ones the classic scripts send before this module
+ * runs — and spares the fifty-odd fetch calls from each having to remember
+ * it. web/messages.py reads it.
+ *
+ * Only where the backend lives, on loopback: shared/ also ships on the public
+ * site, which has no backend and promises to set no cookies. Named per port
+ * because cookies ignore the port, and two servers on this machine would
+ * otherwise answer in each other's language. No expiry: the shell takes a new
+ * port at every launch, and a kept cookie per port would only pile up. */
+const LANGUAGE_COOKIE = 'epcore_language';
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 let current = DEFAULT;
 
@@ -64,6 +87,15 @@ function apply(root = document) {
   }
 }
 
+/** Tell the backend which language the page shows — see LANGUAGE_COOKIE. */
+function tellBackend(lang) {
+  if (!LOOPBACK.has(location.hostname)) return;
+  const name = location.port ? `${LANGUAGE_COOKIE}_${location.port}` : LANGUAGE_COOKIE;
+  try {
+    document.cookie = `${name}=${lang}; path=/; SameSite=Strict`;
+  } catch { /* cookies refused: backend errors come in the browser's language */ }
+}
+
 /** Switch language: remember it, tell the document, re-apply, tell listeners. */
 function setLanguage(lang, { remember = true } = {}) {
   if (!LANGUAGES.includes(lang)) return current;
@@ -74,6 +106,9 @@ function setLanguage(lang, { remember = true } = {}) {
       localStorage.setItem(STORAGE_KEY, lang);
     } catch { /* private mode: it holds for this page and no longer */ }
   }
+  // Also when not remembered: the page shows this language either way, and
+  // a cookie left over from an earlier pick must not outvote what it shows.
+  tellBackend(lang);
   apply();
   window.dispatchEvent(new CustomEvent('epcore:language', { detail: { lang } }));
   return current;

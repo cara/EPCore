@@ -15,9 +15,10 @@
   } catch (e) { /* Speicher abgeschaltet */ }
 </script>
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/theme.js?v=c324b1da71e8"></script>
-<script type="module" src="../shared/settings.js?v=c324b1da71e8"></script>
-<script type="module" src="../shared/i18n.js?v=c324b1da71e8"></script>
+<script type="module" src="../shared/theme.js?v=d400d396e5fb"></script>
+<script type="module" src="../shared/settings.js?v=d400d396e5fb"></script>
+<!-- Render-blocking: the markup is empty until this has run (see shared/i18n.js). -->
+<script type="module" src="../shared/i18n.js?v=d400d396e5fb" blocking="render"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -223,11 +224,17 @@
 
   select, .seg {
     width: 100%; font-family: var(--ui); font-size: 13px; color: var(--text);
-    background: var(--field);
+    background-color: var(--field);
     border: 1px solid var(--line); border-radius: 8px;
     padding: 8px 10px; cursor: pointer; appearance: none;
     transition: border-color 0.15s;
   }
+  /* `background-color`, not the shorthand: the shorthand also reset the image,
+     and the image is the arrow shared/epcore.css draws on every select, so
+     the source, anatomy, ablation-colour and recording pickers had no arrow
+     at all. The padding shorthand took the arrow's 22px as well; it is
+     given back here. */
+  select { padding-right: 22px; }
   select:hover { border-color: var(--line-strong); }
   /* Kein `outline: none` hier. Der Ring gehört der Tastatur, und die
      gemeinsame Datei nimmt ihn bei Mausfokus schon selbst weg
@@ -511,6 +518,8 @@
   #recset .row:last-child { margin-bottom: 0; }
   #recset label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
   #recset input[type=number], #recset select { width: 84px; padding: 5px 7px; }
+  /* The arrow's 22px come out of the 84: "Rock/Sway" needs 68px of text. */
+  #recset select { width: 104px; padding-right: 22px; }
   #recset .fmt { font-family: var(--mono); font-size: 11px; color: var(--accent); }
   #sharebox {
     position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
@@ -1178,7 +1187,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=c324b1da71e8",
+    "three": "../vendor/three/three.module.js?v=d400d396e5fb",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -1188,17 +1197,17 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import epcoreTheme from '../shared/theme.js?v=c324b1da71e8';
-import * as EP from './epconv.js?v=c324b1da71e8';
-import * as EPM from './epmetrics.js?v=c324b1da71e8';
-import * as EPCV from './epconduction.js?v=c324b1da71e8';
-import * as EPA from './epablation.js?v=c324b1da71e8';
-import * as EPSave from '../shared/save.js?v=c324b1da71e8';
-import * as EPO from './epopenep.js?v=c324b1da71e8';
-import * as EPP from './eppoints.js?v=c324b1da71e8';
-import * as EPAN from './epannot.js?v=c324b1da71e8';
-import * as EPInterp from './epinterp.js?v=c324b1da71e8';
-import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=c324b1da71e8';
+import epcoreTheme from '../shared/theme.js?v=d400d396e5fb';
+import * as EP from './epconv.js?v=d400d396e5fb';
+import * as EPM from './epmetrics.js?v=d400d396e5fb';
+import * as EPCV from './epconduction.js?v=d400d396e5fb';
+import * as EPA from './epablation.js?v=d400d396e5fb';
+import * as EPSave from '../shared/save.js?v=d400d396e5fb';
+import * as EPO from './epopenep.js?v=d400d396e5fb';
+import * as EPP from './eppoints.js?v=d400d396e5fb';
+import * as EPAN from './epannot.js?v=d400d396e5fb';
+import * as EPInterp from './epinterp.js?v=d400d396e5fb';
+import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=d400d396e5fb';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1864,8 +1873,10 @@ function annotWireControls() {
   const filter = document.getElementById('annot-filter');
   if (filter) filter.onclick = () => {
     annotFilter = annotFilter === 'changed' ? 'all' : 'changed';
-    filter.textContent = T(annotFilter === 'changed'
-      ? 'map.annot.filter.changed' : 'map.annot.filter.all');
+    // As with the play button: the key follows the state, not the markup.
+    filter.dataset.i18n = annotFilter === 'changed'
+      ? 'map.annot.filter.changed' : 'map.annot.filter.all';
+    filter.textContent = T(filter.dataset.i18n);
     annotRefresh();
   };
 
@@ -2725,11 +2736,13 @@ let _animLast = null;
 function startAnim() {
   if (!state.mode || !state.mode.startsWith('scalar:') || !isLatField(state.mode.slice(7))) return;
   state.anim.playing = true; state.anim.engaged = true; _animLast = null;
-  const b = document.getElementById('anim-play'); b.textContent = T('map.pause'); b.classList.add('on');
+  // The key along with the text: a switch of language re-applies the key, and
+  // the markup's would label a running playback "play".
+  const b = document.getElementById('anim-play'); b.dataset.i18n = 'map.pause'; b.textContent = T('map.pause'); b.classList.add('on');
 }
 function stopAnim() {
   state.anim.playing = false;
-  const b = document.getElementById('anim-play'); b.textContent = T('map.play'); b.classList.remove('on');
+  const b = document.getElementById('anim-play'); b.dataset.i18n = 'map.play'; b.textContent = T('map.play'); b.classList.remove('on');
 }
 function stepAnim(now) {
   if (!state.anim.playing || !mesh || !state.mode.startsWith('scalar:') || !isLatField(state.mode.slice(7))) { _animLast = now; return; }
@@ -3527,7 +3540,9 @@ function latUnitNote(shown) {
  * Ein Kasten, ein Aufruf. Zwei Wege dorthin hätten sich gegenseitig
  * überschrieben — `showMapNotes` ersetzt den Inhalt.
  */
+let mapNotesFrom = null;   // what the notes on screen were worded from
 function mapNotes(meshes, shown) {
+  mapNotesFrom = [meshes, shown];
   const lines = rhythmiaNotes(meshes);
   const unit = latUnitNote(shown);
   if (unit) lines.push(unit);
@@ -4453,7 +4468,7 @@ async function loadFiles(fileList) {
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
       setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=c324b1da71e8'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=d400d396e5fb'));
     }
     setLoading('Konvertiere…');
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
@@ -4748,7 +4763,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=c324b1da71e8');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=d400d396e5fb');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -6468,6 +6483,24 @@ epcoreTheme.onChange((name) => {
   if (button) button.textContent = name === 'dark' ? '\u263E' : '\u263C';
 });
 
+/* The language can be switched in the shell, too, with a map open that a
+ * reload would throw away. The markup follows on its own; what is built here
+ * in script — the metrics, the notes under them, the annotation list, the
+ * chips, the legend — is built again from the state on hand. */
+addEventListener('epcore:language', () => {
+  if (current) {
+    updateStats(current);
+    if (mapNotesFrom) showMapNotes(mapNotes(...mapNotesFrom));
+  }
+  annotRefresh();
+  buildTagUI();
+  buildAblationColorUI();
+  buildTrimUI();
+  refreshCompareUI();
+  _legendKey = null;                    // or the legend sees nothing changed
+  drawLegend();
+});
+
 addEventListener('resize', () => {
   camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
@@ -6588,7 +6621,7 @@ async function loadURL(url) {
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=c324b1da71e8');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=d400d396e5fb');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
@@ -6636,7 +6669,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=c324b1da71e8';
+import '../shared/bridge.js?v=d400d396e5fb';
 
 /* In der Schale steht "Öffnen" auch oben in der Leiste, für beide Module. Das
  * Menü hier daneben wäre eine zweite Antwort auf dieselbe Frage — die Knöpfe
