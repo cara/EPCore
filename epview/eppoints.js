@@ -8,7 +8,7 @@
  * over it: a point annotated outside its window belongs to a different beat,
  * and a point off the wall is a measurement of blood.
  */
-import { meshClosure } from './epmetrics.js?v=9c18153262e8';
+import { meshClosure } from './epmetrics.js?v=c4ae27508f81';
 
 /** How far outside the surface a point may sit and still count as on it, mm. */
 export const ON_SURFACE_MM = 3.0;
