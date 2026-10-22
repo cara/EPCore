@@ -59,7 +59,12 @@ export function interpolate(positions, faces, xyz, values,
       if (d <= radiusMm) near.push([d, p]);
     }
     if (!near.length) continue;
-    near.sort((a, b) => a[0] - b[0]);
+    // At equal distance the point index decides, not the grid cell: `near` fills
+    // in cell order, while interpolate.py's stable argsort keeps the lower index.
+    // When the tie sits at the k-th neighbour — common on a symmetric mesh — the
+    // other order takes a different point in, and the browser's map is no longer
+    // the one Python computes from the same points.
+    near.sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
 
     let weighted = 0, total = 0;
     for (let k = 0; k < Math.min(take, near.length); k++) {

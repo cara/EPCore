@@ -15,10 +15,10 @@
   } catch (e) { /* Speicher abgeschaltet */ }
 </script>
 <link href="../shared/epcore.css" rel="stylesheet">
-<script type="module" src="../shared/theme.js?v=d400d396e5fb"></script>
-<script type="module" src="../shared/settings.js?v=d400d396e5fb"></script>
+<script type="module" src="../shared/theme.js?v=9c18153262e8"></script>
+<script type="module" src="../shared/settings.js?v=9c18153262e8"></script>
 <!-- Render-blocking: the markup is empty until this has run (see shared/i18n.js). -->
-<script type="module" src="../shared/i18n.js?v=d400d396e5fb" blocking="render"></script>
+<script type="module" src="../shared/i18n.js?v=9c18153262e8" blocking="render"></script>
 <style>
   :root {
     /* Palette, fonts and lines come from ../shared/epcore.css — the whole set
@@ -28,9 +28,18 @@
     --panel-solid: #0d151c;
     --field: rgba(5, 9, 12, 0.65);
     --muted: var(--text-faint);
+    /* Teal for words and numbers, such as the readouts beside a slider and the
+       point list's counts. --accent-dim is a line colour: as 9-11 px text on the
+       dark panel it measured 4.1-4.3:1, under the 4.5:1 AA asks for. In the
+       light theme it is the darker teal, 5.4-6.3:1, while --accent falls to
+       4.2:1 on the raised surfaces, so there it stays. */
+    --accent-ink: var(--accent);
     --shadow: 0 10px 40px rgba(0, 0, 0, 0.55);
     /* Der Hauch Farbe unten rechts hinter der Leinwand. */
-    --glow: var(--glow);
+    /* A value, not var(--glow): shared/epcore.css has no --glow, and a property
+       that refers to itself is a cycle, which makes it invalid. The whole
+       #stage::before background then dropped out, vignette included. */
+    --glow: rgba(40, 90, 104, 0.18);
     --grain: 0.035;
     --scrim: rgba(5, 8, 11, 0.55);
   }
@@ -45,6 +54,7 @@
     --panel: rgba(255, 255, 255, 0.82);
     --panel-solid: #ffffff;
     --field: rgba(255, 255, 255, 0.86);
+    --accent-ink: var(--accent-dim);
     --shadow: 0 10px 40px rgba(22, 35, 43, 0.18);
     --glow: rgba(13, 124, 142, 0.10);
     /* Körnung auf Weiß liest sich als Schmutz, nicht als Textur. */
@@ -245,10 +255,14 @@
   select option { background: var(--panel-solid); }
 
   .seg { display: flex; gap: 4px; padding: 4px; }
+  /* Named properties, not `all`, here and on .chip and .tool: `all` takes in
+     the focus outline, which then grew from 0 to 2 px over 140 ms, so for that
+     time a keyboard user saw no ring or a thin one. */
   .seg button {
     flex: 1; font-family: var(--ui); font-size: 12px; color: var(--muted);
     background: transparent; border: 0; border-radius: 6px;
-    padding: 6px 4px; cursor: pointer; transition: all 0.14s; letter-spacing: 0.04em;
+    padding: 6px 4px; cursor: pointer; letter-spacing: 0.04em;
+    transition: color 0.14s, background-color 0.14s;
   }
   .seg button:hover { color: var(--text); }
   .seg button.on { background: var(--accent-wash); color: var(--accent); }
@@ -310,11 +324,17 @@
     position: relative; height: 13px; margin: -2px 0 4px;
     font-family: var(--mono); font-size: 9px; color: var(--muted);
   }
+  /* A label slides off its mark towards its own end of the track by as much
+     of its width as the mark sits along it (--at, 0..1): centred in the middle,
+     flush at either end. Centred everywhere, the first and last label stuck out
+     half their width, were cut off by the panel and made it scroll sideways.
+     The mark under it moves along, so it stays on the value. */
   .dual-scale span {
-    position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap;
+    position: absolute; top: 0; white-space: nowrap;
+    transform: translateX(calc(var(--at, 0.5) * -100%));
   }
   .dual-scale span::before {
-    content: ""; position: absolute; left: 50%; top: -4px;
+    content: ""; position: absolute; left: calc(var(--at, 0.5) * 100%); top: -4px;
     width: 1px; height: 3px; background: var(--line-strong);
   }
 
@@ -326,7 +346,8 @@
     font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
     color: var(--muted); background: var(--field);
     border: 1px solid var(--line); border-radius: 6px;
-    padding: 6px 9px; cursor: pointer; transition: all 0.14s; text-transform: uppercase;
+    padding: 6px 9px; cursor: pointer; text-transform: uppercase;
+    transition: color 0.14s, border-color 0.14s, background-color 0.14s;
   }
   .chip:hover { color: var(--text); border-color: var(--line-strong); }
   .chip.on { color: var(--accent); border-color: var(--accent-dim); background: rgba(69, 198, 218, 0.1); }
@@ -426,9 +447,12 @@
   #stats b { color: var(--text); font-weight: 500; }
   /* Die Hinweise zur Karte. Umgebrochen und ohne die Sperrung der Zahlen
      darüber: das sind Sätze, keine Messwerte. */
+  /* overflow-y: layoutLegend caps the height where the legend needs the room,
+     and the notes past the cap are then scrolled to, not lost under it. */
   #st-note {
     margin-top: 8px; max-width: 46ch; margin-left: auto;
     color: var(--warn); letter-spacing: 0; line-height: 1.45; white-space: normal;
+    overflow-y: auto;
   }
   #st-note div + div { margin-top: 4px; }
 
@@ -441,12 +465,39 @@
        Menü selbst half nichts: die Leiste bildet einen eigenen Stapelkontext,
        in dem er nur gegen Geschwister zählt. */
     z-index: 16; display: flex; gap: 8px;
+    /* Never wider than the window. Shifted to the centre and unbounded, the
+       bar with a study open (about 1056 px in German) ran off both edges below
+       about 1060 px: Open on the left and the close cross on the right lay
+       outside the picture, in the application's window above all (from
+       800 px). A second row is better than a button nobody can reach.
+       `max-content`, because `left: 50%` leaves the bar only half the width
+       otherwise: with wrapping allowed it broke into two rows at 1400 px. */
+    width: max-content; max-width: calc(100vw - 32px);
+    flex-wrap: wrap; justify-content: center;
+    /* The bar draws nothing of its own, only its buttons. Wrapped into two
+       rows, its box spans the window between the title and the counts down to
+       about 100 px, and the empty ends of the shorter row and the gaps took the
+       pointer there: that strip of the map no longer turned, and nothing
+       showed why. The buttons and their menus take it back below. */
+    pointer-events: none;
+  }
+  #toolbar > * { pointer-events: auto; }
+  /* Clear of the brand and the stats too, where two rows are room enough. Held
+     to the window alone, the bar lay over the title and the vertex and face
+     counts below about 1370 px in German, and in a comparison even at 1440.
+     Centred, it needs the same room on both sides: the title's text ends 153 px
+     from the left edge, the counts begin 122-136 px from the right. Below
+     1000 px the two leave less room than the bar needs in two rows, and a third
+     would reach down over the empty view's card, which lies under the bar. */
+  @media (min-width: 1000px) {
+    #toolbar { max-width: calc(100vw - 2 * 160px); }
   }
   .tool {
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
     color: var(--muted); background: var(--panel);
     border: 1px solid var(--line); border-radius: 8px;
-    padding: 8px 13px; cursor: pointer; transition: all 0.14s;
+    padding: 8px 13px; cursor: pointer;
+    transition: color 0.14s, border-color 0.14s, background-color 0.14s;
     backdrop-filter: blur(10px); text-transform: uppercase;
     /* Zeichen und Wort gehören zusammen: „● REC" und „🔗 Teilen" brachen nach
        dem Zeichen um, sobald die Leiste eng wurde, und standen dann zweizeilig
@@ -455,10 +506,16 @@
   }
   .tool:hover { color: var(--accent); border-color: var(--accent-dim); }
   /* Sichtbar nicht bereit, aber anklickbar: der Klick erklärt, was fehlt. */
-  .tool.blocked { opacity: 0.45; }
-  .tool.blocked:hover { color: var(--muted); border-color: var(--line); }
+  /* Dashed, not faded: at opacity 0.45 the label measured 2.0-2.1:1. A button
+     that stays clickable and explains itself is no inactive control, so the
+     4.5:1 AA asks for applies to its label. */
+  .tool.blocked { border-style: dashed; border-color: var(--line-strong); }
+  .tool.blocked:hover { color: var(--muted); border-color: var(--line-strong); }
   .tool-sep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 4px; }
-  .tdrop { position: relative; display: inline-block; }
+  /* Flex, so the button inside stretches with the wrapper: as an inline-block
+     only the wrapper took the row's height, and Öffnen, Video, Speichern and
+     Kamera stood 4 px shorter than the buttons beside them. */
+  .tdrop { position: relative; display: inline-flex; align-items: stretch; }
 /* Geteilter Knopf: Schneiden links, die seltenere Variante unter dem Karat. */
 .tdrop.split { display: inline-flex; align-items: stretch; }
 .tdrop.split #t-cut { border-top-right-radius: 0; border-bottom-right-radius: 0; }
@@ -509,24 +566,43 @@
   #studypick .sub { display: block; color: var(--muted); font-size: 10px;
                     letter-spacing: 0.04em; margin-top: 2px; }
 
+  /* Hung from the toolbar's lower edge, not from a fixed 64 px: where the bar
+     takes a second row (German up to about 1370 px, Spanish and English a little
+     less, a German comparison even at 1600) it reaches down to about 100 px and
+     is drawn above both boxes, so a click on their upper controls reached REC or
+     the closing cross instead. --toolbar-bottom is kept by the script; 58 px is
+     the one-row bar's edge. Not a higher z-index: the box would then cover the
+     bar's second row. */
   #recset {
-    position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
+    position: fixed; top: calc(var(--toolbar-bottom, 58px) + 6px);
+    left: 50%; transform: translateX(-50%);
     z-index: 12; width: 250px; padding: 14px 16px; display: none;
   }
   #recset.show { display: block; }
-  #recset .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 10px; }
-  #recset .row:last-child { margin-bottom: 0; }
+  /* Not `.row`: shared/epcore.css gives that name to its clickable list rows
+     (background, bottom border, padding, pointer), and each setting became a
+     card of its own that looked clickable. The dialog headers below likewise. */
+  #recset .rs-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 10px; }
+  #recset .rs-row:last-child { margin-bottom: 0; }
   #recset label { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
   #recset input[type=number], #recset select { width: 84px; padding: 5px 7px; }
   /* The arrow's 22px come out of the 84: "Rock/Sway" needs 68px of text. */
   #recset select { width: 104px; padding-right: 22px; }
   #recset .fmt { font-family: var(--mono); font-size: 11px; color: var(--accent); }
   #sharebox {
-    position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
+    position: fixed; top: calc(var(--toolbar-bottom, 58px) + 6px);
+    left: 50%; transform: translateX(-50%);
     z-index: 13; width: 280px; padding: 16px;
   }
   #sharebox.show { display: block !important; }
   #sharebox input[type=text] { font-family: var(--mono); font-size: 11px; padding: 6px 8px; }
+  /* Down to the window's lower edge and no further, scrolled past that: hung
+     40 px lower under a two-row bar, the share box ran out of a 560 px window,
+     and on a landscape phone the last settings and the share link's buttons
+     lay below the picture. */
+  #recset, #sharebox {
+    max-height: calc(100vh - var(--toolbar-bottom, 58px) - 12px); overflow-y: auto;
+  }
 
   /* loading overlay */
   #loading {
@@ -553,11 +629,22 @@
   }
 
   /* drop overlay / empty state */
+  /* The overlay covers the whole window but is transparent outside the card,
+     so only the card takes the pointer: otherwise the toolbar, the panel and
+     the phone's sheet handle are drawn, hover and take focus, and a click on
+     them lands on nothing. Dropping a file still works, its listeners are on
+     window. It sits under the popovers and the toolbar's menus: what somebody
+     opens on the empty view, the recording settings, a menu, must not end up
+     behind the card. Above the side panel (z 10), which reaches under the card
+     on a narrow desktop window; on phones it goes under the sheet as well. */
   #drop {
-    position: fixed; inset: 0; z-index: 20; display: flex;
+    position: fixed; inset: 0; z-index: 11; display: flex;
     align-items: center; justify-content: center; flex-direction: column;
     text-align: center; transition: opacity 0.25s; gap: 4px;
+    pointer-events: none;
   }
+  /* Not while faded out: an invisible card would catch clicks on the map. */
+  #drop:not(.hide) .dz { pointer-events: auto; }
   #drop.hide { opacity: 0; pointer-events: none; }
   #drop.dragging .dz {
     border-color: var(--accent); background: var(--accent-wash);
@@ -589,8 +676,10 @@
     transition: filter 0.15s;
   }
   .dz .pick:hover { filter: brightness(1.12); }
+  /* Auto side margins: a block-level button still shrinks to its text, and
+     without them it sat at the card's left edge under the centred buttons. */
   .dz .demo {
-    margin-top: 14px; display: block; background: none; border: 0;
+    margin: 14px auto 0; display: block; background: none; border: 0;
     color: var(--muted); font-family: var(--mono); font-size: 11px;
     letter-spacing: 0.1em; cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
   }
@@ -671,12 +760,20 @@
     #legend .cap { font-size: 9px; letter-spacing: 0.14em; margin-top: 6px; }
 
     /* settings/share popovers: center & fit narrow viewport */
+    /* Standing on the bottom edge, they grow upwards, and on a short screen
+       they grew into the bar's rows or out of the top: at 720 x 450 the share
+       box began at -95 px with its cross, the settings' first three fields lay
+       under the bar. The cap keeps them 6 px below it, as above. */
     #recset, #sharebox {
       top: auto; bottom: 64px;
       width: min(290px, calc(100vw - 24px));
+      max-height: calc(100vh - var(--toolbar-bottom, 58px) - 6px - 64px);
     }
 
     /* drop overlay: smaller card on narrow screens */
+    /* Under the bottom sheet: opened, it reaches over the card, and on top
+       the card would cover the sheet's own handle. */
+    #drop { z-index: 9; }
     .dz { padding: 36px 22px; }
     .dz h2 { font-size: 16px; }
     .dz p { font-size: 12px; }
@@ -695,7 +792,9 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .brand h1 { font-size: 14px; letter-spacing: 0.28em; }
-    #legend { display: none; }
+    /* `.show` named too: `#legend.show` outranks a bare `#legend`, and the
+       legend the script shows came out half-height over the map anyway. */
+    #legend, #legend.show { display: none; }
     #legend.show.force { display: block; }
   }
 
@@ -737,14 +836,27 @@
       top: 50%; left: 6px; width: 3px; height: 36px;
       transform: translateY(-50%);
     }
-    #legend { display: none; }
+    #legend, #legend.show { display: none; }
     #readout { display: none !important; }
+    #drop { z-index: 9; }          /* under the opened drawer, as under the sheet */
   }
 
+  /* One line, always. Shrink-to-fit under `left: 50%` caps the box at half the
+     window, so a longer translation wrapped, and its first line rose under the
+     side panel's lower edge. On one line it stays below the panel (26px up); a
+     text too long for the window is cut, not wrapped. The line height is set,
+     not left to each engine's `normal`, so that margin holds in every WebView;
+     about 1.3 em leaves the descenders room inside the box that cuts. The size
+     is the floor, not under it: at 10 px the one text that explains the mouse
+     sat below what epcore.css allows any label. */
   #controls-legend {
     position: fixed; left: 50%; bottom: 8px; transform: translateX(-50%); z-index: 9;
-    pointer-events: none; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em;
-    color: var(--muted); opacity: 0.7;
+    pointer-events: none; font-family: var(--mono); font-size: var(--size-min); line-height: 14px;
+    letter-spacing: 0.08em;
+    /* Full strength: the only place the mouse is explained. At opacity 0.7 it
+       measured 3.3-3.5:1. */
+    color: var(--muted);
+    white-space: nowrap; max-width: calc(100vw - 32px); overflow: hidden; text-overflow: ellipsis;
   }
   @media (max-width: 720px) { #controls-legend { display: none; } }
 </style>
@@ -828,12 +940,12 @@
   </div>
   <!-- Vorher/nachher: die aktuelle Karte merken, dann die nächste laden. -->
   <div class="tdrop split">
-    <button class="tool" id="t-cut" data-i18n="map.cut"
+    <button class="tool" id="t-cut" data-i18n="map.cut" aria-pressed="false"
             data-i18n-title="map.cut.title"></button><!--
     Der Knopf schneidet die zugewandte Wand — der Normalfall, ein Klick. Das
     Karat daneben führt zum selteneren Schnitt durch beide Wände.
  --><button class="tool" id="t-cut-more"
-            data-i18n-title="map.cut.through">▾</button>
+            data-i18n-title="map.cut.through" data-i18n-label="map.cut.through">▾</button>
     <div class="tmenu panel" id="m-cut">
       <button class="tool" id="cut-front" data-i18n="map.cut.front"></button>
       <button class="tool" id="cut-through" data-i18n="map.cut.through"></button>
@@ -846,7 +958,7 @@
       <button class="tool" id="cut-reset" data-i18n="map.cut.reset"></button>
     </div>
   </div>
-  <button class="tool" id="t-compare" data-i18n="map.compare"
+  <button class="tool" id="t-compare" data-i18n="map.compare" aria-pressed="false"
           data-i18n-title="map.compare.title"></button>
   <!-- Zurücklegen. Erscheint erst, wenn etwas offen ist — ein Knopf, der auf
        eine leere Fläche zeigt, ist einer zu viel. -->
@@ -855,12 +967,15 @@
   <span class="tool" id="compare-name" hidden
         style="color:var(--muted);text-transform:none;letter-spacing:0;max-width:22ch;overflow:hidden;text-overflow:ellipsis"></span>
   <button class="tool" id="t-theme" data-i18n-keep-label
-        data-i18n-title="map.theme.title" aria-label="Hell/Dunkel">☾</button>
+        data-i18n-title="map.theme.title" data-i18n-label="map.theme">☾</button>
   <button class="tool" id="t-anonymise" data-i18n="map.anonymise"></button>
 <!-- Nicht `disabled`: ein Knopf, auf den nichts passiert, sieht aus wie ein
      kaputter Knopf. Er bleibt anklickbar und sagt beim Klick, was fehlt —
      anonymisieren oder ein Teilen-Dienst. -->
-<button class="tool blocked" id="t-share" title="Erst anonymisieren — geteilte Karten bekommen eine öffentliche Adresse." data-i18n="map.share"></button>
+<!-- Its title comes from markAnonymised, in the chosen language, and not from
+     data-i18n-title: a language switch would stamp "anonymise first" back onto
+     a map that has been anonymised. -->
+<button class="tool blocked" id="t-share" data-i18n="map.share"></button>
   <div class="tdrop">
     <button class="tool" id="t-cam" data-i18n="map.camera"></button>
     <div class="tmenu panel" id="m-cam">
@@ -869,61 +984,65 @@
       <button class="tool" data-view="LAO">LAO</button>
       <button class="tool" data-view="RAO">RAO</button>
       <button class="tool" id="t-reset" data-i18n="map.reset"></button>
-      <button class="tool" id="t-rotate" data-i18n="map.autorotate"></button>
+      <button class="tool" id="t-rotate" data-i18n="map.autorotate" aria-pressed="false"></button>
     </div>
   </div>
   <!-- Freie Aufnahme: nimmt auf, was der Nutzer tut, bis er wieder drückt.
        Die beiden Einträge im Video-Menü nehmen je einen fertigen Ablauf auf
        (Kamerafahrt, Aktivierung) und hören von selbst auf — das hier hat kein
        Ende, das jemand vorher kennt. -->
-  <button class="tool" id="t-rec" data-i18n-keep-label
+  <button class="tool" id="t-rec" data-i18n-keep-label aria-pressed="false"
           data-i18n-title="map.rec.free.title">● REC</button>
   <!-- Ganz rechts und nur ein Kreuz: Schließen ist die einzige Aktion hier, die
        etwas wegnimmt, und sie steht dort, wo man sie erwartet — nicht zwischen
        den Werkzeugen, wo sie sich anklicken lässt, während man etwas anderes
        will. Deshalb auch die Rückfrage. -->
   <button class="tool" id="t-close" data-i18n-keep-label
-          data-i18n-title="map.close.title" aria-label="Schließen" hidden
+          data-i18n-title="map.close.title" data-i18n-label="map.close" hidden
           style="margin-left:6px;font-size:14px;line-height:1;padding:5px 9px">✕</button>
 </div>
 
 <div id="controls-legend" data-i18n="map.hint.mouse"></div>
 
+<!-- Each caption names its field through `for`. A label beside its field
+     names nothing without it, and a screen reader said "checkbox, checked" and
+     "combo box 30" with nothing to tell the fields apart. -->
 <div id="recset" class="panel">
-  <div class="row"><label data-i18n="map.bake.scale"></label><input type="checkbox" id="rs-legend" checked></div>
-  <div class="row"><label data-i18n="map.hide.gizmo"></label><input type="checkbox" id="rs-gizmo" checked></div>
-  <div class="row"><label>FPS</label>
+  <div class="rs-row"><label for="rs-legend" data-i18n="map.bake.scale"></label><input type="checkbox" id="rs-legend" checked></div>
+  <div class="rs-row"><label for="rs-gizmo" data-i18n="map.hide.gizmo"></label><input type="checkbox" id="rs-gizmo" checked></div>
+  <div class="rs-row"><label for="rs-fps">FPS</label>
     <select id="rs-fps"><option>24</option><option selected>30</option><option>60</option></select></div>
-  <div class="row"><label data-i18n="map.orbit.seconds"></label><input type="number" id="rs-orbit" min="2" max="60" step="1" value="8"></div>
-  <div class="row"><label data-i18n="map.activation.seconds"></label><input type="number" id="rs-export" min="2" max="60" step="1" placeholder="auto"></div>
-  <div class="row"><label data-i18n="map.loop.cycles"></label><input type="number" id="rs-cycles" min="1" max="20" step="1" value="1"></div>
-  <div class="row"><label data-i18n="map.path"></label>
+  <div class="rs-row"><label for="rs-orbit" data-i18n="map.orbit.seconds"></label><input type="number" id="rs-orbit" min="2" max="60" step="1" value="8"></div>
+  <div class="rs-row"><label for="rs-export" data-i18n="map.activation.seconds"></label><input type="number" id="rs-export" min="2" max="60" step="1" placeholder="auto"></div>
+  <div class="rs-row"><label for="rs-cycles" data-i18n="map.loop.cycles"></label><input type="number" id="rs-cycles" min="1" max="20" step="1" value="1"></div>
+  <div class="rs-row"><label for="rs-path" data-i18n="map.path"></label>
     <select id="rs-path"><option value="turntable" selected>Turntable</option><option value="tilt">Tilt-Orbit</option><option value="rock">Rock/Sway</option></select></div>
-  <div class="row"><label data-i18n="map.ease"></label><input type="checkbox" id="rs-ease" checked></div>
-  <div class="row"><label data-i18n="map.format"></label><span class="fmt" id="rs-fmt">—</span></div>
+  <div class="rs-row"><label for="rs-ease" data-i18n="map.ease"></label><input type="checkbox" id="rs-ease" checked></div>
+  <div class="rs-row"><label data-i18n="map.format"></label><span class="fmt" id="rs-fmt">—</span></div>
 </div>
 
 <!-- Mehrere Studien im geöffneten Ordner: fragen, nicht die erste nehmen. -->
-<div id="studypick" class="panel">
-  <div class="row" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-    <b style="letter-spacing:.1em" data-i18n="map.studies.title"></b>
-    <button class="tool" id="studypick-close" style="padding:4px 10px">✕</button>
+<!-- A dialog, named by its title. Not aria-modal: the page behind stays live. -->
+<div id="studypick" class="panel" role="dialog" aria-labelledby="studypick-title">
+  <div class="dlg-head" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <b id="studypick-title" style="letter-spacing:.1em" data-i18n="map.studies.title"></b>
+    <button class="tool" id="studypick-close" data-i18n-label="map.close" style="padding:4px 10px">✕</button>
   </div>
   <div class="field" style="margin-bottom:8px"><small style="color:var(--muted)" data-i18n="map.studies.hint"></small></div>
   <div id="studypick-list" class="tmenu" style="position:static;display:flex;padding:0;min-width:0"></div>
 </div>
 
-<div id="sharebox" class="panel" style="display:none">
-  <div class="row" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-    <b style="letter-spacing:.1em" data-i18n="map.share.link"></b>
-    <button class="tool" id="share-close" style="padding:4px 10px">✕</button>
+<div id="sharebox" class="panel" role="dialog" aria-labelledby="sharebox-title" style="display:none">
+  <div class="dlg-head" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <b id="sharebox-title" style="letter-spacing:.1em" data-i18n="map.share.link"></b>
+    <button class="tool" id="share-close" data-i18n-label="map.close" style="padding:4px 10px">✕</button>
   </div>
   <div id="share-busy" class="field"><small data-i18n="map.uploading"></small></div>
   <div id="share-result" style="display:none">
     <img id="share-qr" alt="QR" style="width:180px;height:180px;display:block;margin:0 auto 12px;background:#fff;border-radius:8px"/>
     <div class="field" style="margin-bottom:10px"><small style="color:var(--muted)" data-i18n="map.share.caveat"></small></div>
-    <div class="field"><small data-i18n="map.link"></small>
-      <input type="text" id="share-link" readonly style="width:100%"></div>
+    <div class="field"><small id="share-link-label" data-i18n="map.link"></small>
+      <input type="text" id="share-link" readonly style="width:100%" aria-labelledby="share-link-label"></div>
     <div class="anim-row">
       <button class="chip" id="share-copy" data-i18n="map.copy.link"></button>
       <button class="chip" id="share-revoke" data-i18n="map.revoke"></button>
@@ -939,7 +1058,7 @@
        wer sie anders will, stellt das einmal in den Einstellungen ein. Das
        Feld bleibt (versteckt) bestehen, weil alles andere es liest. -->
   <div hidden>  <div class="grp" id="grp-cmap">
-    <label data-i18n="map.colorscale"></label>
+    <label for="cmap" data-i18n="map.colorscale"></label>
     <select id="cmap">
       <option value="rhythmia_voltage">Rhythmia · Voltage</option>
       <option value="rhythmia_lat">Rhythmia · LAT</option>
@@ -947,7 +1066,7 @@
       <option value="turbo">Turbo</option>
     </select>
   </div></div>
-  <button type="button" id="ctrl-toggle" aria-label="Bedienfeld ein-/ausklappen">
+  <button type="button" id="ctrl-toggle" data-i18n-label="map.controls.toggle">
     <span data-i18n="map.controls"></span>
     <span class="chev">▾</span>
   </button>
@@ -956,19 +1075,30 @@
        Bild, und der Auslauf am Rand hätte den Rahmen mit ausgeblendet. -->
   <div id="controls-scroll">
   <div class="grp" id="grp-mesh" style="display:none">
-    <label data-i18n="map.anatomy"></label>
+    <label for="meshsel" data-i18n="map.anatomy"></label>
     <select id="meshsel"></select>
   </div>
-  <div class="grp">
-    <label data-i18n="map.source"></label>
+  <!-- An EnSite Velocity archive can hold several maps, and the server shows
+       the first by name. Shown only when there is a choice; choosing asks the
+       server again, since the map is put on the anatomy there. -->
+  <div class="grp" id="grp-velmap" style="display:none">
+    <label for="velmap" data-i18n="map.velocity.map"></label>
+    <select id="velmap"></select>
+  </div>
+  <!-- Both hidden until a map brings fields: without one the selector is empty
+       and the window slider moves a readout over nothing. -->
+  <div class="grp" id="grp-mode" style="display:none">
+    <label for="mode" data-i18n="map.source"></label>
     <select id="mode"></select>
   </div>
-  <div class="grp" id="grp-range">
-    <label><span data-i18n="map.window"></span> <span id="range-unit" style="color:var(--accent-dim)"></span>
+  <div class="grp" id="grp-range" style="display:none">
+    <label><span id="vwin-label" data-i18n="map.window"></span> <span id="range-unit" style="color:var(--accent-ink)"></span>
       <span id="vwin-readout" style="float:right; font-family:var(--mono); font-size:10px; color:var(--text); text-transform:none; letter-spacing:0; opacity:0.9"></span></label>
+    <!-- Named by the caption's word and min or max, not by the whole caption:
+         that carries the unit and the live readout. -->
     <div class="dual" id="vwin">
-      <input type="range" id="vmin-s" min="0" max="1000" step="1">
-      <input type="range" id="vmax-s" min="0" max="1000" step="1">
+      <input type="range" id="vmin-s" min="0" max="1000" step="1" aria-labelledby="vwin-label vmin-label">
+      <input type="range" id="vmax-s" min="0" max="1000" step="1" aria-labelledby="vwin-label vmax-label">
     </div>
     <!-- Beschriftete Marken, weil die Bahn nicht mehr linear ist: ohne sie
          wüsste niemand, wo auf dem Weg 0,5 mV liegt. -->
@@ -976,23 +1106,29 @@
     <details class="advanced">
       <summary data-i18n="map.advanced"></summary>
       <div class="range-row">
-        <div class="field"><small>min</small><input type="number" id="vmin" step="0.01"></div>
-        <div class="field"><small>max</small><input type="number" id="vmax" step="0.01"></div>
+        <div class="field"><small id="vmin-label">min</small><input type="number" id="vmin" step="0.01" aria-labelledby="vwin-label vmin-label"></div>
+        <div class="field"><small id="vmax-label">max</small><input type="number" id="vmax" step="0.01" aria-labelledby="vwin-label vmax-label"></div>
       </div>
       <div class="toggles" id="vpresets"></div>
       <div id="conf-mask-row" style="display:none; gap:6px; align-items:center">
-        <button class="chip" id="conf-mask" style="flex:1"><span data-i18n="map.conf.mask"></span> <span id="conf-mask-th-lbl">0.03</span> mV</button>
-        <div class="field" style="flex:0 0 84px"><small data-i18n="map.threshold"></small><input type="number" id="conf-mask-th" step="0.01" min="0" value="0.03"></div>
+        <button class="chip" id="conf-mask" style="flex:1" aria-pressed="false"><span data-i18n="map.conf.mask"></span> <span id="conf-mask-th-lbl">0.03</span> mV</button>
+        <div class="field" style="flex:0 0 84px"><small id="conf-mask-th-label" data-i18n="map.threshold"></small><input type="number" id="conf-mask-th" step="0.01" min="0" value="0.03" aria-labelledby="conf-mask-th-label"></div>
       </div>
     </details>
   </div>
-  <details class="sec" id="sec-anim" data-sec="anim">
+  <!-- `hidden` here as well, on each section whose only group starts hidden:
+       refreshSections() hides them at start too, but only after the first
+       frame, and the panel, anchored at the bottom, then lost five headings at
+       once. On a phone the whole sheet dropped by 170 px, a layout shift of
+       0.14 on load. A map brings them back through refreshSections() as
+       before. -->
+  <details class="sec" id="sec-anim" data-sec="anim" hidden>
     <summary data-i18n="map.sec.activation"></summary>
   <div class="grp" id="grp-anim" style="display:none">
-      <label><span data-i18n="map.activation"></span> <span id="anim-t" style="color:var(--accent-dim)"></span></label>
+      <label><span data-i18n="map.activation"></span> <span id="anim-t" style="color:var(--accent-ink)"></span></label>
       <div class="seg" id="anim-mode">
-        <button data-mode="loop" class="on" data-i18n="map.loop.reentry"></button>
-        <button data-mode="linear" data-i18n="map.linear"></button>
+        <button data-mode="loop" class="on" aria-pressed="true" data-i18n="map.loop.reentry"></button>
+        <button data-mode="linear" aria-pressed="false" data-i18n="map.linear"></button>
       </div>
       <div class="anim-row">
         <button class="chip" id="anim-play" data-i18n="map.play"></button>
@@ -1002,18 +1138,20 @@
         <button class="chip" id="anim-stop" data-i18n="map.stop"
                 data-i18n-title="map.stop.title"></button>
       </div>
-      <div class="field" style="margin-top:8px"><small data-i18n="map.cursor.ms"></small>
-        <input type="range" id="anim-cursor"></div>
-      <div class="field" style="margin-top:6px"><small data-i18n="map.speed"></small>
-        <input type="range" id="anim-speed" min="1" max="500" step="1" value="60"></div>
-      <div class="field" style="margin-top:6px"><small data-i18n="map.band"></small>
-        <input type="range" id="anim-band"></div>
+      <!-- Each slider named by its caption: a <small> beside it names nothing,
+           and a screen reader said "slider" three times over. -->
+      <div class="field" style="margin-top:8px"><small id="anim-cursor-label" data-i18n="map.cursor.ms"></small>
+        <input type="range" id="anim-cursor" aria-labelledby="anim-cursor-label"></div>
+      <div class="field" style="margin-top:6px"><small id="anim-speed-label" data-i18n="map.speed"></small>
+        <input type="range" id="anim-speed" min="1" max="500" step="1" value="60" aria-labelledby="anim-speed-label"></div>
+      <div class="field" style="margin-top:6px"><small id="anim-band-label" data-i18n="map.band"></small>
+        <input type="range" id="anim-band" aria-labelledby="anim-band-label"></div>
       <!-- Wieviel Fläche wann aktiviert. Bei einem durchlaufenden Kreis flach;
            bricht die Welle ein, steht dort eine Delle — und die ist die Frage,
            um die es bei einem Isthmus geht. -->
       <div class="field" style="margin-top:10px">
         <small data-i18n="map.skyline"></small>
-        <span id="skyline-quiet" style="float:right;color:var(--accent-dim);font-size:10px"></span>
+        <span id="skyline-quiet" style="float:right;color:var(--accent-ink);font-size:10px"></span>
       </div>
       <canvas id="skyline" width="240" height="54"
               style="width:100%;height:54px;display:block;margin-top:4px"></canvas>
@@ -1022,53 +1160,59 @@
   <details class="sec" id="sec-view" data-sec="view">
     <summary data-i18n="map.sec.display"></summary>
   <div class="grp">
-      <label data-i18n="map.opacity"></label>
+      <label for="opacity" data-i18n="map.opacity"></label>
       <input type="range" id="opacity" min="0.15" max="1" step="0.01" value="1">
     </div>
     <div class="grp">
       <label data-i18n="map.display"></label>
       <div class="toggles">
-        <button class="chip on" id="c-axes" data-i18n="map.orientation"></button>
-        <button class="chip" id="c-wire" data-i18n="map.wireframe"></button>
-        <button class="chip" id="c-smooth" data-i18n="map.smooth"></button>
+        <button class="chip on" id="c-axes" aria-pressed="true" data-i18n="map.orientation"></button>
+        <button class="chip" id="c-wire" aria-pressed="false" data-i18n="map.wireframe"></button>
+        <button class="chip" id="c-smooth" aria-pressed="false" data-i18n="map.smooth"></button>
       </div>
     </div>
     <div class="grp" id="grp-smooth" style="display:none">
-      <label><span data-i18n="map.interpolation"></span> <span id="smooth-val" style="color:var(--accent-dim)">10</span></label>
-      <input type="range" id="smooth-level" min="0" max="10" step="1" value="10">
+      <label><span id="smooth-label" data-i18n="map.interpolation"></span> <span id="smooth-val" style="color:var(--accent-ink)">10</span></label>
+      <!-- Named by the caption's word alone, as the window: the live readout
+           beside it is the slider's own value. -->
+      <input type="range" id="smooth-level" min="0" max="10" step="1" value="10" aria-labelledby="smooth-label">
     </div>
   </details>
-  <details class="sec" id="sec-area" data-sec="area">
+  <details class="sec" id="sec-area" data-sec="area" hidden>
     <summary data-i18n="map.sec.area"></summary>
   <div class="grp" id="grp-area" style="display:none">
-      <label><span data-i18n="map.area"></span> <span style="color:var(--accent-dim)">· cm²</span></label>
+      <!-- Measured on the map as drawn, smoothed and masked; the metrics row
+           measures the raw values like `epcore epview metrics`. Both can say
+           "< 0.5 mV" with different numbers, so the label says which this is. -->
+      <label data-i18n-title="map.area.shown.title"><span data-i18n="map.area"></span>
+        <span style="color:var(--accent-ink)">· cm² · <span data-i18n="map.area.shown"></span></span></label>
       <div id="area-summary"><b id="area-total">—</b><span id="area-mid" style="color:var(--muted)">—</span></div>
       <details class="advanced">
         <summary data-i18n="map.breakdown"></summary>
         <div id="area-readout"></div>
-        <button class="chip" id="area-isolate" style="margin-top:8px; width:100%" data-i18n="map.isolate"></button>
+        <button class="chip" id="area-isolate" style="margin-top:8px; width:100%" aria-pressed="false" data-i18n="map.isolate"></button>
       </details>
     </div>
   </details>
-  <details class="sec" id="sec-trim" data-sec="trim">
+  <details class="sec" id="sec-trim" data-sec="trim" hidden>
     <summary data-i18n="map.sec.cut"></summary>
   <div class="grp" id="grp-trim" style="display:none">
       <label><span data-i18n="map.trim"></span>
-        <span id="trim-note" style="float:right;color:var(--accent-dim);font-size:10px"></span></label>
+        <span id="trim-note" style="float:right;color:var(--accent-ink);font-size:10px"></span></label>
       <!-- Die Tiefe gilt den erkannten Öffnungen (Venenstümpfe, Klappenebene),
            nicht dem gezeichneten Schnitt. Ohne Öffnung bewegt sie nichts, also
            steht sie dort auch nicht — ein Regler ohne Wirkung ist ein Versprechen,
            hinter dem nichts steht. -->
-      <div class="field" id="trim-depth-row" hidden><small data-i18n="map.trim.depth"></small>
-        <span id="trim-depth-val" style="color:var(--accent-dim)">8 mm</span>
-        <input type="range" id="trim-depth" min="1" max="30" step="1" value="8"></div>
+      <div class="field" id="trim-depth-row" hidden><small id="trim-depth-label" data-i18n="map.trim.depth"></small>
+        <span id="trim-depth-val" style="color:var(--accent-ink)">8 mm</span>
+        <input type="range" id="trim-depth" min="1" max="30" step="1" value="8" aria-labelledby="trim-depth-label"></div>
       <div class="toggles" id="trim-list" style="margin-top:6px"></div>
     </div>
   </details>
-  <details class="sec" id="sec-points" data-sec="points">
+  <details class="sec" id="sec-points" data-sec="points" hidden>
     <summary data-i18n="map.annot.section"></summary>
     <div class="grp" id="grp-annot" style="display:none">
-      <div class="field"><small id="annot-counts" style="color:var(--accent-dim)"></small></div>
+      <div class="field"><small id="annot-counts" style="color:var(--accent-ink)"></small></div>
       <div class="toggles" style="margin-top:6px">
         <button class="chip" id="annot-filter" data-i18n="map.annot.filter.changed"></button>
         <button class="chip" id="annot-clear" data-i18n="map.annot.selection.clear"></button>
@@ -1087,27 +1231,27 @@
         <button class="chip" id="annot-load" data-i18n="map.annot.load"></button>
         <input type="file" id="annot-file" accept=".json" hidden>
       </div>
-      <div class="field"><small id="annot-note" style="color:var(--accent-dim)"></small></div>
+      <div class="field"><small id="annot-note" style="color:var(--accent-ink)"></small></div>
     </div>
   </details>
-  <details class="sec" id="sec-tags" data-sec="tags">
+  <details class="sec" id="sec-tags" data-sec="tags" hidden>
     <summary data-i18n="map.sec.points"></summary>
   <div class="grp" id="grp-tags" style="display:none">
       <label><span data-i18n="map.tags"></span> <button class="chip" id="tags-all" style="float:right; padding:2px 8px" data-i18n="map.all"></button></label>
-      <div class="field" style="margin-top:6px"><small><span data-i18n="map.pointsize"></span> <span id="tag-size-val" style="color:var(--accent-dim)">2.50×</span></small>
-        <input type="range" id="tag-size" min="0.3" max="6" step="0.05" value="2.5"></div>
+      <div class="field" style="margin-top:6px"><small><span id="tag-size-label" data-i18n="map.pointsize"></span> <span id="tag-size-val" style="color:var(--accent-ink)">2.50×</span></small>
+        <input type="range" id="tag-size" min="0.3" max="6" step="0.05" value="2.5" aria-labelledby="tag-size-label"></div>
       <div class="toggles" style="margin-top:6px">
-        <button class="chip" id="tag-project" data-i18n="map.project"></button>
+        <button class="chip" id="tag-project" aria-pressed="false" data-i18n="map.project"></button>
       </div>
       <!-- Wo abgegeben wurde, sagt schon der Marker. Ob die Abgabe etwas
            bewirkt hat, steht im Impedanzabfall — bei Rhythmia im Export. -->
       <div class="field" id="abl-color-row" style="margin-top:6px;display:none">
-        <small data-i18n="map.ablation.colour"></small>
-        <select id="abl-color">
+        <small id="abl-color-label" data-i18n="map.ablation.colour"></small>
+        <select id="abl-color" aria-labelledby="abl-color-label">
           <option value="category" data-i18n="map.ablation.colour.category"></option>
           <option value="drop" data-i18n="map.ablation.colour.drop"></option>
         </select>
-        <span id="abl-color-note" style="color:var(--accent-dim);font-size:10px"></span>
+        <span id="abl-color-note" style="color:var(--accent-ink);font-size:10px"></span>
       </div>
       <div class="toggles" id="tag-list" style="margin-top:6px"></div>
     </div>
@@ -1138,15 +1282,15 @@
     </div>
 </div>
 
-<div id="egm" role="dialog" aria-label="Elektrogramm">
+<div id="egm" role="dialog" data-i18n-label="map.egm.dialog">
   <header>
     <b id="egm-title">—</b><span class="sp"></span>
-    <button class="chip" id="egm-close" title="Schließen">×</button>
+    <button class="chip" id="egm-close" data-i18n-title="map.close">×</button>
   </header>
   <div class="meta" id="egm-meta"></div>
   <div class="chans" id="egm-chans"></div>
   <div class="annot" id="egm-annot" hidden>
-    <small id="egm-annot-read" style="color:var(--accent-dim)"></small>
+    <small id="egm-annot-read" style="color:var(--accent-ink)"></small>
     <span class="sp"></span>
     <button class="chip" id="egm-snap" data-i18n="map.annot.snap"></button>
     <button class="chip" id="egm-apply" data-i18n="map.annot.apply"></button>
@@ -1187,7 +1331,7 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "../vendor/three/three.module.js?v=d400d396e5fb",
+    "three": "../vendor/three/three.module.js?v=9c18153262e8",
     "three/addons/": "../vendor/three/addons/"
   }
 }
@@ -1197,17 +1341,17 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import epcoreTheme from '../shared/theme.js?v=d400d396e5fb';
-import * as EP from './epconv.js?v=d400d396e5fb';
-import * as EPM from './epmetrics.js?v=d400d396e5fb';
-import * as EPCV from './epconduction.js?v=d400d396e5fb';
-import * as EPA from './epablation.js?v=d400d396e5fb';
-import * as EPSave from '../shared/save.js?v=d400d396e5fb';
-import * as EPO from './epopenep.js?v=d400d396e5fb';
-import * as EPP from './eppoints.js?v=d400d396e5fb';
-import * as EPAN from './epannot.js?v=d400d396e5fb';
-import * as EPInterp from './epinterp.js?v=d400d396e5fb';
-import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, scrubTagGroups, isIdentifyingLabel, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=d400d396e5fb';
+import epcoreTheme from '../shared/theme.js?v=9c18153262e8';
+import * as EP from './epconv.js?v=9c18153262e8';
+import * as EPM from './epmetrics.js?v=9c18153262e8';
+import * as EPCV from './epconduction.js?v=9c18153262e8';
+import * as EPA from './epablation.js?v=9c18153262e8';
+import * as EPSave from '../shared/save.js?v=9c18153262e8';
+import * as EPO from './epopenep.js?v=9c18153262e8';
+import * as EPP from './eppoints.js?v=9c18153262e8';
+import * as EPAN from './epannot.js?v=9c18153262e8';
+import * as EPInterp from './epinterp.js?v=9c18153262e8';
+import { LUTS, UNMAPPED, OUTSIDE_WINDOW, impedanceDropColor, DROP_FULL_OHM, tagCategoryColor, srgbToLinear, buildLUT, lut, linLut, dataRange, clampWindow, voltagePresets, highlightFactor, advanceCursor, clamp01, activationCursor, tagMarkerRadius, anonymiseTagGroups, triangleArea, areaByThreshold, ease, orbitPath, buildAdjacencyCSR, smoothScalarSpatial, medianEdgeLength, edgeStepScale, buildVertexGrid, nearestVertexIndex, windowCurve, positionToValue, valueToPosition, windowTicks } from './epmap.js?v=9c18153262e8';
 
 /* =====================================================================
  *  Color lookup tables
@@ -1462,9 +1606,10 @@ let annotKeys = null;      // Schlüssel in Aufzählungsreihenfolge, parallel zu
 let annotLocked = null;    // Grund, falls für diese Studie nicht annotiert werden darf
 let annotSelection = new Set();
 let annotFilter = 'changed';
-let annotSaved = 0;        // Länge des Verlaufs beim letzten Sichern
+let annotSaved = {};       // the state at the last save or load (EPAN.snapshotOf)
 let annotLockedCount = 0;  // wie viele Punkte den Grund ausgelöst haben
 let annotDerived = null;   // was die abgeleitete Karte zuletzt kostete
+let annotDropped = [];     // keys left out because their vendor values changed (mapNotes)
 const group = new THREE.Group();
 scene.add(group);
 
@@ -1661,14 +1806,63 @@ function annotAdopt(data) {
   const fingerprint = EPAN.studyFingerprint(vendor, keys);
   if (annot && annot.studyFp === fingerprint) {
     annotKeys = keys;          // dieselbe Studie, andere Anatomie: alles bleibt
+    /* The same keys are not yet the same values. A CARTO key is the point's
+     * place and ID, so a re-export after re-annotating in CARTO, or another
+     * study numbered 1..N, keeps the set too — and an edit made against other
+     * vendor values would re-point at a different measurement. The check a
+     * loaded file gets (ADR-0009): what no longer fits is left out and named.
+     * Within one study the values are the same and nothing is left out. */
+    const stale = annot.verify(keys, annotFingerprints(annot)).stale;
+    if (stale.length) {
+      annot = annotWithout(annot, stale);
+      annotDropped = [...new Set([...annotDropped, ...stale])].sort();
+    }
     annotRefresh();
     return;
   }
   annot = new EPAN.AnnotationSet(vendor, fingerprint);
   annotKeys = keys;
   annotSelection = new Set();
-  annotSaved = 0;
+  annotSaved = {};
+  annotDropped = [];
+  // The derivation was the previous study's: kept, its note told this one it
+  // had a derived map, discarded points and a coverage it never had.
+  annotDerived = null;
   annotRefresh();
+}
+
+/** Today's vendor fingerprint of every point `set` touches, by key. */
+function annotFingerprints(set) {
+  const touched = new Set(set.log.map(entry => entry.key));
+  const out = {};
+  annotKeys.forEach((key, index) => {
+    if (touched.has(key)) out[key] = EPAN.vendorFingerprint(current.points[index]);
+  });
+  return out;
+}
+
+/** `set` without the entries for `keys`, renumbered — or `set` itself if none. */
+function annotWithout(set, keys) {
+  const dropped = new Set(keys);
+  if (!dropped.size) return set;
+  const kept = new EPAN.AnnotationSet(set.vendor, set.studyFp);
+  for (const entry of [...set.log].sort((a, b) => a.seq - b.seq)) {
+    if (dropped.has(entry.key)) continue;
+    kept.log.push({ ...entry, seq: kept.log.length + 1 });
+  }
+  return kept;
+}
+
+/** Keys shown by name: a count alone lets nobody look up which point it was. */
+function annotNamed(keys) {
+  return keys.slice(0, 5).join(', ') + (keys.length > 5 ? ', …' : '');
+}
+
+/** What the open study's annotations have to say under the map. */
+function annotNotes() {
+  return annotDropped.length
+    ? [`${T('map.annot.stale', { n: annotDropped.length })} (${annotNamed(annotDropped)})`]
+    : [];
 }
 
 /* Die abgeleitete Karte aus den bearbeiteten Punkten rechnen.
@@ -1686,7 +1880,7 @@ function annotRecompute() {
   if (!annot || !annotKeys || !current || !current.points) return null;
   const state = annot.materialise();
   const xyz = [], values = [];
-  let excluded = 0;
+  let excluded = 0, unannotated = 0;
   annotKeys.forEach((key, index) => {
     const point = current.points[index];
     const touched = state[key];
@@ -1694,6 +1888,16 @@ function annotRecompute() {
     if (!point || !point.xyz) return;
     const edited = touched && touched.lat ? touched.lat.value : null;
     const vendor = point.mapAnnotation;
+    // CARTO's "no annotation": map − reference = −10000. The reader lets
+    // each number through on its own (−8000 and 2000 are unremarkable alone),
+    // and taken as a time the point would pull the whole map to ten seconds
+    // before the reference. An edit is a row of the sweep and never affected:
+    // it counts even where the vendor had nothing.
+    if (edited == null && vendor != null && point.referenceAnnotation != null
+        && Math.abs(vendor - point.referenceAnnotation) >= EP.CARTO_ABSENT) {
+      unannotated++;
+      return;
+    }
     const value = edited != null ? edited : vendor;
     if (value == null || !Number.isFinite(value)) return;
     // Millisekunden relativ zur Referenz — dieselbe Achse, auf der die
@@ -1703,11 +1907,31 @@ function annotRecompute() {
     values.push(value - reference);
   });
 
-  if (!values.length) { annotDerived = null; annotRefresh(); return null; }
+  if (!values.length) {
+    annotDerived = null;
+    annotRefresh();
+    // Nothing to derive because the vendor annotated nothing is not the same
+    // as a button that does nothing: said, not swallowed.
+    const note = document.getElementById('annot-note');
+    if (note && unannotated) {
+      note.textContent = [note.textContent,
+        T('map.annot.derived.unannotated', { n: unannotated })].filter(Boolean).join(' ');
+    }
+    return null;
+  }
 
-  const found = EPInterp.interpolate(current.positions, current.faces,
+  /* Derived on the uncut surface and kept with the originals, like every vendor
+   * field. A polygon cut is a view that every later cut or reset rebuilds from
+   * the originals: a field written only into the cut view's scalars was gone
+   * after that, while the selector and the mode still named it, and every
+   * repaint threw. */
+  const found = EPInterp.interpolate(current.positionsOriginal || current.positions,
+                                     current.facesOriginal || current.faces,
                                      new Float64Array(xyz), values);
-  current.scalars.lat_epcore = found.values;
+  const uncut = current.scalarsOriginal || current.scalars;
+  uncut.lat_epcore = found.values;
+  // Cut open: rebuild the view, so the field also reaches the vertices the cut made.
+  if (uncut !== current.scalars) applyTrim();
   if (!current.scalarNames.includes('lat_epcore')) {
     current.scalarNames = [...current.scalarNames, 'lat_epcore'];
     // Das abgeleitete Feld kommt *neben* die Herstellerkarte und wird nicht von
@@ -1715,11 +1939,18 @@ function annotRecompute() {
     buildModeOptions(current, { keepMode: true });
   }
   annotDerived = {
-    sources: found.sources, excluded, coverage: found.coverage,
-    radiusMm: found.radiusMm, revision: annot.log.length,
+    sources: found.sources, excluded, unannotated, coverage: found.coverage,
+    radiusMm: found.radiusMm, basis: EPAN.snapshotOf(annot),
   };
   annotRefresh();
-  if (activeLatField() === 'lat_epcore') updateMetrics(current);
+  // With the derived field on screen the new derivation has to reach the screen
+  // as well: colours, area shares and the curve, not only the metrics box.
+  if (activeLatField() === 'lat_epcore') {
+    applyColors();
+    recomputeArea();
+    refreshSkyline();
+    updateMetrics(current);
+  }
   return annotDerived;
 }
 
@@ -1727,8 +1958,62 @@ function annotRecompute() {
 function annotForget() {
   annot = null; annotKeys = null; annotLocked = null; annotLockedCount = 0;
   annotSelection = new Set();
-  annotSaved = 0;
+  annotSaved = {};
+  annotDropped = [];
+  annotDerived = null;
   annotRefresh();
+}
+
+/* The open study's annotations as one handle, so a comparison side can take
+ * them along and bring them back on a swap — loading the other map adopts a
+ * set of its own, and the side's edits were otherwise gone without a word. */
+function annotHold() {
+  return { set: annot, saved: annotSaved, derived: annotDerived, dropped: annotDropped };
+}
+
+function annotRestore(hold) {
+  annot = hold ? hold.set : null;
+  annotSaved = hold ? hold.saved : {};
+  annotDerived = hold ? hold.derived : null;
+  annotDropped = hold ? hold.dropped : [];
+  annotSelection = new Set();
+}
+
+function annotUnsavedOf(hold) {
+  return hold && hold.set ? EPAN.changedSince(hold.set, hold.saved) : 0;
+}
+
+/* What replacing the front map would discard: its unsaved changes, unless the
+ * comparison holds the very same set and keeps them. */
+function annotUnsavedInFront() {
+  const held = comparison && comparison.annot;
+  return held && held.set === annot ? 0 : annotUnsavedOf(annotHold());
+}
+
+/* What ending the comparison would discard: the held map's unsaved changes,
+ * unless they are the front map's own set. */
+function annotUnsavedHeld() {
+  const held = comparison && comparison.annot;
+  return held && held.set && held.set !== annot ? annotUnsavedOf(held) : 0;
+}
+
+/* What closing the study would discard: the front set's unsaved changes and
+ * the held side's, a set both sides share counted once. Not
+ * annotUnsavedInFront: closeMap ends the comparison as well, so a set the
+ * comparison shares with the front map is not kept by it. Counted as kept,
+ * VERGLEICHEN on an edited study and then the close cross asked about cuts
+ * alone, and the shell's closeStudy asked nothing, while the edits went. */
+function annotUnsavedOnClose() {
+  return annotUnsavedOf(annotHold()) + annotUnsavedHeld();
+}
+
+/* Asked before another study is opened over unsaved annotation changes. An
+ * annotation file is not another study: it is loaded into this one. */
+function annotMayOpen(files) {
+  const list = files ? Array.from(files) : [];
+  if (list.length === 1 && /\.epannot\.json$/i.test(list[0].name || '')) return true;
+  const n = annotUnsavedInFront();
+  return !n || confirm(T('map.annot.unsaved.open', { n }));
 }
 
 /** Welche Zeilen die Liste zeigt — gefiltert und gefenstert in `epannot.js`. */
@@ -1768,20 +2053,27 @@ function annotRefresh() {
     excluded: values.filter(v => v.excluded).length,
   });
 
-  const unsaved = annot.log.length - annotSaved;
+  // By content, not by log length: see EPAN.snapshotOf.
+  const unsaved = EPAN.changedSince(annot, annotSaved);
   const lines = [];
-  if (unsaved > 0) lines.push(T('map.annot.unsaved', { n: unsaved }));
+  if (unsaved > 0) {
+    lines.push(unsaved === 1 ? T('map.annot.unsaved.one')
+                             : T('map.annot.unsaved', { n: unsaved }));
+  }
   if (annotDerived) {
     lines.push(T('map.annot.derived.note', {
       n: annotDerived.sources, m: annotDerived.excluded,
       c: (annotDerived.coverage * 100).toFixed(0),
     }));
+    if (annotDerived.unannotated) {
+      lines.push(T('map.annot.derived.unannotated', { n: annotDerived.unannotated }));
+    }
     if (annotDerived.coverage < 0.5) {
       lines.push(T('map.annot.derived.thin', { mm: annotDerived.radiusMm }));
     }
     // Stale heißt: die Karte zeigt eine Ableitung von vorhin. Das gehört gesagt,
     // nicht stillschweigend behoben — neu zu rechnen ist eine Entscheidung.
-    if (annotDerived.revision !== annot.log.length) {
+    if (EPAN.changedSince(annot, annotDerived.basis)) {
       lines.push(T('map.annot.stale.field'));
     }
   }
@@ -1791,11 +2083,10 @@ function annotRefresh() {
   for (const row of annotRows()) {
     const line = document.createElement('div');
     line.className = 'field';
-    line.style.cssText = 'display:flex;gap:6px;align-items:center;padding:2px 0';
+    line.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:2px 0';
     line.dataset.key = row.key;
     line.dataset.state = row.placed ? (row.excluded ? 'excluded' : 'placed') : 'unplaced';
     line.dataset.signal = row.signal ? 'yes' : 'none';
-    line.setAttribute('aria-selected', row.selected ? 'true' : 'false');
     if (row.selected) line.style.background = 'rgba(255,255,255,0.06)';
 
     const name = document.createElement('span');
@@ -1804,21 +2095,41 @@ function annotRefresh() {
     // Beschriftungen kommen aus einer geladenen Datei: über textContent, nie
     // über innerHTML.
     name.textContent = row.key;
-    name.onclick = () => { annotToggleSelection(row.key); };
+    // The row is the handle that opens the point: a point with no position has
+    // no marker to click, and a hidden one is skipped by the marker click on
+    // purpose. A span, not a button, so the row's first button stays the hide
+    // chip; role and tabindex make it reachable from the keyboard.
+    name.setAttribute('role', 'button');
+    name.tabIndex = 0;
+    // The selection is said on the row's handle. It was aria-selected on the
+    // row's plain div, which has no role that state belongs to and said nothing.
+    if (row.selected) name.setAttribute('aria-current', 'true');
+    name.style.cursor = 'pointer';
+    name.onclick = () => annotOpenRow(row.key);
+    name.onkeydown = (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      annotOpenRow(row.key);
+    };
     line.appendChild(name);
 
+    // On a line of their own under the name and the chips, appended after them.
+    // Between the two they got only what was left of the 236 px row: the
+    // no-position sentence broke one word per line, the row stood 217 px tall
+    // in a 260 px list, and "Verwerfen" was pushed out past its edge.
+    const marks = [];
     if (!row.placed) {
       const mark = document.createElement('small');
-      mark.style.color = 'var(--accent-dim)';
+      mark.style.color = 'var(--accent-ink)';
       mark.textContent = T('map.annot.noposition');
       mark.title = T('map.annot.noposition');
-      line.appendChild(mark);
+      marks.push(mark);
     }
     if (!row.signal) {
       const mark = document.createElement('small');
-      mark.style.color = 'var(--accent-dim)';
+      mark.style.color = 'var(--accent-ink)';
       mark.textContent = T('map.annot.nosignal');
-      line.appendChild(mark);
+      marks.push(mark);
     }
 
     const hide = document.createElement('button');
@@ -1834,6 +2145,11 @@ function annotRefresh() {
     drop.title = T('map.annot.exclude.title');
     drop.onclick = () => annotDo(row.excluded ? 'include' : 'exclude', row.key);
     line.appendChild(drop);
+
+    for (const mark of marks) {
+      mark.style.flexBasis = '100%';
+      line.appendChild(mark);
+    }
 
     list.appendChild(line);
   }
@@ -1917,6 +2233,9 @@ function annotWireControls() {
   if (save) save.onclick = async () => {
     if (!annot) return;
     const text = JSON.stringify(annot.toJson(), null, 1);
+    // What goes into the file, taken with it: an edit made while the dialog is
+    // open is not in it.
+    const saving = EPAN.snapshotOf(annot);
     const name = (studyName || currentName || 'studie').replace(/\.[^.]+$/, '')
       + '.epannot.json';
     // `saveBytes` gibt {ok, path} oder {ok:false, cancelled} zurück — kein
@@ -1926,7 +2245,7 @@ function annotWireControls() {
     // (:4204, viewer.html:3735).
     const done = await EPSave.saveBytes(
       name, new Blob([text], { type: 'application/json' }));
-    if (done && done.ok) { annotSaved = annot.log.length; annotRefresh(); }
+    if (done && done.ok) { annotSaved = saving; annotRefresh(); }
     else if (done && !done.cancelled) {
       console.warn('[epview] Annotationen speichern:', done.error);
     }
@@ -1966,28 +2285,56 @@ async function annotLoadFile(file) {
   }
 
   // Was nicht mehr passt, wird nicht übernommen — und gezählt, nicht verschwiegen.
-  const fingerprints = {};
-  annotKeys.forEach((key, index) => {
-    fingerprints[key] = EPAN.vendorFingerprint(current.points[index]);
-  });
-  const found = loaded.verify(annotKeys, fingerprints);
+  const found = loaded.verify(annotKeys, annotFingerprints(loaded));
 
-  annot = loaded;
-  annotSaved = loaded.log.length;
+  /* Stale edits are left out, not only counted: the note says they were not
+   * applied, and the counts, the markers and the recompute button otherwise
+   * still read the whole log, so a time set against another vendor value went
+   * silently into the derived map (ADR-0009). Keys this study does not have
+   * stay: they never reach the map, and the note promises they stay in the
+   * file. */
+  const kept = annotWithout(loaded, found.stale);
+
+  annot = kept;
+  annotSaved = EPAN.snapshotOf(kept);
   annotSelection = new Set();
+  annotDropped = [];
   applyTagMarkerSettings();
   annotRefresh();
 
+  // By name: a count alone lets nobody look up which point it was.
   const said = [];
-  if (found.stale.length) said.push(T('map.annot.stale', { n: found.stale.length }));
+  if (found.stale.length) {
+    said.push(`${T('map.annot.stale', { n: found.stale.length })} (${annotNamed(found.stale)})`);
+  }
   if (found.unknown.length) said.push(T('map.annot.unknownkey', { n: found.unknown.length }));
-  if (said.length) showMapNotes(said);
+  if (said.length) {
+    // The box now holds this file's report, not the map's notes: a language
+    // switch must not word the map's notes over it.
+    mapNotesFrom = null;
+    showMapNotes(said);
+  }
 }
 
-function annotToggleSelection(key) {
-  if (annotSelection.has(key)) annotSelection.delete(key);
-  else annotSelection.add(key);
+/* Open a point from the list: select it and show its signal.
+ *
+ * Selected, not toggled: the row stays in the "changed" list while somebody
+ * works on the point, and a second click opens it again instead of dropping it.
+ * "Auswahl aufheben" clears the selection.
+ */
+function annotOpenRow(key) {
+  if (!annot || !annotKeys) return;
+  annotSelection.add(key);
   annotRefresh();
+  // The list was drawn anew; a keyboard user keeps their place in it.
+  for (const name of document.querySelectorAll('#annot-list [data-key] [role="button"]')) {
+    if (name.parentElement.dataset.key === key) { name.focus(); break; }
+  }
+  const index = annotKeys.indexOf(key);
+  const point = index < 0 || !current || !current.points ? null : current.points[index];
+  if (!point) return;
+  showEgm(point, current.readEgm)
+    .catch(err => console.error('[epview] Elektrogramm:', err));
 }
 
 /** Der Schlüssel eines Punktes, oder null, wenn diese Studie keine trägt. */
@@ -2070,6 +2417,22 @@ function applyAblationColors(entry) {
   if (entry.inst.instanceColor) entry.inst.instanceColor.needsUpdate = true;
 }
 
+/* A marker group's name on screen.
+ *
+ * The readers name their own groups in German, and that name is data: it is
+ * written into a saved or shared PLY (EPVIEW_TAGS) and read back from one.
+ * Named in the chosen language where the group is made, the file would carry
+ * whichever language the person saving it had chosen. So the page translates
+ * the readers' own names where it shows them; any other name came from the
+ * export or from the scrub and is shown as it stands. */
+function tagGroupLabel(group) {
+  const label = String((group && group.label) ?? '');
+  if (label === 'Mapping-Punkte') return T('map.tags.group.mapping');
+  const measured = label.match(/^(.*) · Messpunkte$/);
+  if (measured) return T('map.tags.group.measurement', { map: measured[1] });
+  return label;
+}
+
 function buildTagUI() {
   const grp = document.getElementById('grp-tags');
   const list = document.getElementById('tag-list');
@@ -2079,10 +2442,11 @@ function buildTagUI() {
   tagMeshes.forEach(({ group: g, inst }) => {
     const chip = document.createElement('button');
     chip.className = 'chip' + (inst.visible ? ' on' : '');
+    chip.setAttribute('aria-pressed', String(inst.visible));
     const sw = document.createElement('span');
     sw.style.cssText = `display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:middle;background:rgb(${g.color[0]},${g.color[1]},${g.color[2]})`;
     chip.appendChild(sw);
-    chip.appendChild(document.createTextNode(`${g.label} (${g.points.length})`));
+    chip.appendChild(document.createTextNode(`${tagGroupLabel(g)} (${g.points.length})`));
     // Die Zahl im Chip ist, was gezeichnet wird. Wie viel das System verworfen
     // hat, gehört daneben — sonst liest sie sich als „so viele Messungen gab es".
     if (g.excluded) chip.title = T('map.points.excluded', { count: g.excluded });
@@ -2108,17 +2472,41 @@ function closeMap() {
   if (typeof markAnonymised === 'function') markAnonymised(false);
   cutState.shapes = [];
   trimState.chosen.clear();
+  // The cut goes with the map it was made on. Its white seam hangs in `group`,
+  // which outlives the mesh, so it floated over the empty view, and the Cut
+  // section went on offering to edit or reset a cut on nothing.
+  endEditing();
+  drawCutSeam();
+  buildTrimUI();
   annotForget();
+  // The anatomies go with the study. Left in the selector, the closed study's
+  // names stayed on screen and choosing one brought the whole study back.
+  rawMeshes = [];
+  populateMeshSelector([]);
+  showVelocityMaps(null);               // and so do a Velocity archive's maps
   buildTagMarkers([], 50);
+  // The panel as a fresh start shows it. Left as it was, the field selector
+  // still offered the closed map's fields, and picking one threw on the
+  // missing data; the window, the smoothing and the area spoke of nothing.
+  document.getElementById('mode').innerHTML = '';
+  for (const id of ['grp-mode', 'grp-range', 'grp-smooth']) {
+    document.getElementById(id).style.display = 'none';
+  }
+  updateActivationUI(null);
+  recomputeArea();
   const shown = document.getElementById('open-name');
   if (shown) { shown.textContent = ''; shown.hidden = true; }
   for (const id of ['legend', 'controls', 'stats']) {
     const el = document.getElementById(id);
     if (el) el.classList.remove('show');
   }
+  // The class loadGeometry faded it out with goes too: left on, the drop area
+  // stood there at opacity 0 and let every click through to the empty map.
+  // So does `inert`, or its buttons could not be reached from the keyboard.
   const drop = document.getElementById('drop');
-  if (drop) drop.hidden = false;
+  if (drop) { drop.hidden = false; drop.classList.remove('hide'); drop.inert = false; }
   updateStats({ positions: new Float32Array(), faces: new Uint32Array() });
+  mapNotesFrom = null;
   showMapNotes([]);
   refreshCloseButton();
 }
@@ -2150,7 +2538,16 @@ function rememberComparison() {
   const mine = studyName || currentName || '';
   comparison = { name: mine, mesh: held,
                  radius: geo.boundingSphere.radius || 50,
-                 data: current, state: { ...state, __name: mine } };
+                 data: current,
+                 state: sideSettings(),
+                 // The cut and the study's anatomies go with the side as they
+                 // are now, the moment its picture is taken, so a swap brings
+                 // back what the held picture shows.
+                 cut: { shapes: cutState.shapes.filter(s => !s.preview),
+                        chosen: new Set(trimState.chosen), depthMm: trimState.depthMm },
+                 meshes: rawMeshes,
+                 meshIndex: document.getElementById('meshsel').value,
+                 annot: annotHold() };
   compareGroup.add(held);
   placeSideBySide();
   refreshCompareUI();
@@ -2165,20 +2562,93 @@ function rememberComparison() {
  */
 function swapComparison() {
   if (!comparison || !current) return;
+  const held = comparison;
   const heldData = comparison.data;
   const heldName = comparison.name;
   const heldState = comparison.state;
-  const mineState = { ...state };
   if (!heldData) return;              // eine alte Ansicht ohne Daten dahinter
 
-  rememberComparison();               // die vordere Karte wandert nach hinten
+  /* The front map moves behind, named and with its settings as they are now.
+   * Nothing below renames it: the global settings it was named from once
+   * still held a name an earlier swap had copied into them, so with a third
+   * map opened the held side was named after a map no longer compared. */
+  rememberComparison();
   Object.assign(state, heldState);
-  loadGeometry(heldData, heldName);
+  // Named before it is loaded: loadGeometry writes the brand from studyName,
+  // and set afterwards it named the map that had just moved behind.
   studyName = heldName;
-  comparison.state = mineState;
-  comparison.name = mineState.__name || comparison.name;
+  // Before loadGeometry: annotAdopt then recognises the set as this map's own.
+  annotRestore(held.annot);
+  loadGeometry(heldData, heldName);
+  /* Only now what the side brings back. loadGeometry empties the windows,
+   * picks the first field and clears the cuts, as it should for a map opened
+   * fresh; restored before it, every swap brought a map back on its first
+   * field at the default window, and a cut map came back cut open with no cut
+   * listed to edit or undo. Its study's anatomies and notes come back too:
+   * loadGeometry alone shows only what the surface says about itself. */
+  restoreSide(heldState, heldData);
+  restoreCut(held.cut);
+  rawMeshes = held.meshes || [];
+  populateMeshSelector(rawMeshes);
+  if (rawMeshes.length > 1) document.getElementById('meshsel').value = held.meshIndex;
+  showMapNotes(mapNotes(rawMeshes, current));
   placeSideBySide();
   refreshCompareUI();
+}
+
+/** The front map's settings, for a comparison side to take along.
+ *
+ * A copy of the windows: the window slider changes them in place, and that
+ * must not re-rule the map held behind. Not the recording: it belongs to the
+ * canvas, not to either map. Taken along, a swap wrote the side's
+ * `recording: null` back over a running one; REC then started a second
+ * recorder, and the first ran on and was never saved. */
+function sideSettings() {
+  const { recording, ...own } = state;
+  return { ...own, windows: copyWindows(state.windows) };
+}
+
+/** A side's colour windows as its own copy, so turning the front map's window
+ *  cannot shift the one held behind. */
+function copyWindows(windows) {
+  const out = {};
+  for (const [field, w] of Object.entries(windows || {})) out[field] = { ...w };
+  return out;
+}
+
+/** A side's field, windows, colour scale and mask back in force. */
+function restoreSide(side, data) {
+  state.windows = copyWindows(side.windows);
+  const mode = side.mode || '';
+  const field = mode.startsWith('scalar:') ? mode.slice(7) : null;
+  // A field these data do not carry stays at loadGeometry's choice.
+  if (mode && (!field || (data.scalars && data.scalars[field]))) {
+    selectMode(mode, data);
+    if (field) {
+      state.cmap = side.cmap || state.cmap;
+      state.confMask = !!side.confMask;
+      document.getElementById('cmap').value = state.cmap;
+      const chip = document.getElementById('conf-mask');
+      if (chip) chip.classList.toggle('on', state.confMask);
+    }
+  }
+  document.getElementById('mode').value = state.mode;
+  applyColors();
+}
+
+/** A side's cuts back in force, replayed from the uncut originals. */
+function restoreCut(cut) {
+  if (!cut || (!cut.shapes.length && !cut.chosen.size)) return;
+  cutState.shapes = [...cut.shapes];
+  trimState.chosen.clear();
+  for (const ring of cut.chosen) trimState.chosen.add(ring);
+  trimState.depthMm = cut.depthMm;
+  const depth = document.getElementById('trim-depth');
+  if (depth) depth.value = String(cut.depthMm);
+  const depthLabel = document.getElementById('trim-depth-val');
+  if (depthLabel) depthLabel.textContent = `${cut.depthMm} mm`;
+  buildTrimUI();
+  applyTrim();
 }
 
 function clearComparison() {
@@ -2276,10 +2746,13 @@ function loadGeometry(data, name) {
   // A new map is a new decision. Carrying the previous one over is how an
   // unscrubbed map inherits permission to be published.
   if (typeof markAnonymised === 'function') markAnonymised(false);
+  // Before the notes below: they say what the annotations left out.
+  annotAdopt(data);
   // Und die Hinweise der vorigen Karte gelten für diese nicht. Was diese hier
   // selbst zu sagen hat, steht sofort da — auch wenn sie als einzelne Datei
   // kam und keine Studie mitbringt, deren Hinweise gleich nachgereicht werden.
   showMapNotes(mapNotes(null, data));
+  showVelocityMaps(data);
   currentName = name;
   refreshCloseButton();
   const shown = document.getElementById('open-name');
@@ -2290,7 +2763,21 @@ function loadGeometry(data, name) {
   state.windows = {};
   _smoothCache = null;
   _visibleCache = null;
-  annotAdopt(data);
+
+  /* A dataset that was cut before comes back uncut. The cuts are cleared
+   * below, as for every map; a dataset swapped back in from the comparison is
+   * the same object the cut rewrote, and loaded as it was it stood there cut
+   * open, white rim and all, while the cut list said there was no cut. */
+  if (data.positionsOriginal) {
+    data.positions = data.positionsOriginal;
+    data.faces = data.facesOriginal || data.faces;
+    data.scalars = data.scalarsOriginal || data.scalars;
+    data.rim = null;
+    data.seams = null;
+    data._vertexNormals = null;
+    data._vgrid = null;
+    data._adjacency = null;
+  }
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
@@ -2342,8 +2829,18 @@ function loadGeometry(data, name) {
   buildTagMarkers(data.tagGroups, bs.radius);
   refreshSections();
   _readoutDirty = true;      // neuer Datensatz -> Hover-Wert einmal nachziehen
+  // The live tag names the map in front. Written only when a map was
+  // remembered or swapped, it kept the previous map's name after the next one
+  // was loaded, and both tags named the held map.
+  if (comparison) refreshCompareUI();
 
-  document.getElementById('drop').classList.add('hide');
+  // Faded out is not gone: opacity and pointer-events leave the card's three
+  // buttons in the tab order and the accessibility tree, so Tab walked onto
+  // buttons nobody could see, and Enter on the invisible "Beispiel laden"
+  // replaced the open map. `inert` takes them out until closeMap.
+  const drop = document.getElementById('drop');
+  drop.classList.add('hide');
+  drop.inert = true;
 }
 
 function frameCamera(bs) {
@@ -2357,30 +2854,42 @@ function frameCamera(bs) {
 }
 
 /* ---------- mode / colour ---------- */
+// The names are getters: read from the catalogue when shown, so the selector,
+// the legend and a recording's caption speak the language chosen by then.
+// LAT and LAT (EPCore) read the same in every language.
 const FIELD_META = {
-  voltage:   { label: 'Bipolar Voltage', unit: 'mV', cmap: 'rhythmia_voltage', range: [0.05, 1.5] },
-  unipolar:  { label: 'Unipolar Voltage', unit: 'mV', cmap: 'rhythmia_voltage', range: [0.1, 8.3] },
+  voltage:   { get label() { return T('map.field.voltage'); }, unit: 'mV', cmap: 'rhythmia_voltage', range: [0.05, 1.5] },
+  unipolar:  { get label() { return T('map.field.unipolar'); }, unit: 'mV', cmap: 'rhythmia_voltage', range: [0.1, 8.3] },
   lat:       { label: 'LAT', unit: 'ms', cmap: 'rhythmia_lat', range: null },
   // Neben der Herstellerkarte, nie an ihrer Stelle. Der Name trägt die Herkunft,
   // damit keine Zahl „Aktivierungszeit" heißt, ohne zu sagen, wessen.
   lat_epcore:{ label: 'LAT (EPCore)', unit: 'ms', cmap: 'rhythmia_lat', range: null },
-  activation:{ label: 'Activation (LAT)', unit: 'ms', cmap: 'rhythmia_lat', range: null },
-  map_data:  { label: 'Map Data', unit: '', cmap: 'rhythmia_voltage', range: null },
+  activation:{ get label() { return T('map.field.activation'); }, unit: 'ms', cmap: 'rhythmia_lat', range: null },
+  map_data:  { get label() { return T('map.field.mapdata'); }, unit: '', cmap: 'rhythmia_voltage', range: null },
 };
+
+/** What the field selector calls one of its entries. */
+function modeLabel(value) {
+  if (value === 'vertex') return T('map.field.vertex');
+  if (value === 'tissue') return T('map.field.tissue');
+  const name = String(value).replace(/^scalar:/, '');
+  const meta = FIELD_META[name.toLowerCase()];
+  return meta ? meta.label : name;
+}
 
 function buildModeOptions(data, { keepMode = false } = {}) {
   const sel = document.getElementById('mode');
   sel.innerHTML = '';
-  const add = (val, label) => { const o = document.createElement('option'); o.value = val; o.textContent = label; sel.appendChild(o); };
+  document.getElementById('grp-mode').style.display = '';
+  const add = (val) => { const o = document.createElement('option'); o.value = val; o.textContent = modeLabel(val); sel.appendChild(o); };
 
   let firstScalar = null;
   for (const n of data.scalarNames) {
-    const meta = FIELD_META[n.toLowerCase()] || { label: n, unit: '', cmap: 'rhythmia_voltage', range: null };
-    add('scalar:' + n, meta.label);
+    add('scalar:' + n);
     if (!firstScalar) firstScalar = n;
   }
-  if (data.colors) add('vertex', 'Vertex Colors');
-  add('tissue', 'Tissue (uniform)');
+  if (data.colors) add('vertex');
+  add('tissue');
 
   // `keepMode`, wenn die Liste nur ein Feld dazubekommen hat: sonst fällt die
   // Anzeige auf das erste Skalarfeld zurück und wirft das aus, was jemand gerade
@@ -2466,21 +2975,26 @@ function recomputeArea() {
   if (typeof refreshSections === 'function') refreshSections();
   // Dieselbe Quelle wie das Rendering (geglättet + Conf-Maske), sonst gehören
   // die cm²-Zahlen sichtbar nicht zu dem, was auf dem Schirm steht.
-  const r = areaByThreshold(current.positions, current.faces, visibleScalar(field), state.vmin, state.vmax);
-  const cm2 = a => (a / 100).toFixed(1);
-  const pct = a => (r.total > 0 ? (a / r.total * 100).toFixed(1) : '0.0');
+  // Cut along the isolines like the metrics row; the label says that the
+  // source is the displayed map and not the raw values the metrics row uses.
+  const r = EPM.areaBands(current.positions, current.faces, visibleScalar(field), state.vmin, state.vmax);
+  // Through N like the metrics rows: the same surface area once as "265,3" and
+  // once as "265.3" on one screen. The window bounds keep round(), the notation
+  // the legend and the window fields show them in.
+  const cm2 = a => N(a / 100, 1);
+  const pct = a => N(r.total > 0 ? a / r.total * 100 : 0, 1);
   const lo = round(state.vmin), hi = round(state.vmax), u = state.unit ? ' ' + state.unit : '';
   const totalEl = document.getElementById('area-total');
   const midEl = document.getElementById('area-mid');
   if (totalEl) totalEl.textContent = `${cm2(r.total)} cm²`;
-  if (midEl) midEl.textContent = `Window ${cm2(r.border)} · ${pct(r.border)}%`;
+  if (midEl) midEl.textContent = `${T('map.window')} ${cm2(r.border)} · ${pct(r.border)}%`;
   const el = document.getElementById('area-readout');
   el.textContent = '';
   const line = (txt) => { const d = document.createElement('div'); d.textContent = txt; el.appendChild(d); };
   line(`< ${lo}${u}:  ${cm2(r.scar)} cm² · ${pct(r.scar)}%`);
   line(`${lo}–${hi}${u}:  ${cm2(r.border)} cm² · ${pct(r.border)}%`);
   line(`> ${hi}${u}:  ${cm2(r.healthy)} cm² · ${pct(r.healthy)}%`);
-  if (r.unmapped > 0) line(`unmapped: ${pct(r.unmapped)}%`);
+  if (r.unmapped > 0) line(`${T('map.metrics.unmeasured')}: ${pct(r.unmapped)}%`);
 }
 
 // Single source of truth for the active field's color window.
@@ -2552,7 +3066,9 @@ function drawWindowScale() {
   const curve = currentCurve();
   for (const value of windowTicks(lo, hi, curve)) {
     const mark = document.createElement('span');
-    mark.style.left = (valueToPosition(value, lo, hi, curve) * 100).toFixed(2) + '%';
+    const at = valueToPosition(value, lo, hi, curve);
+    mark.style.left = (at * 100).toFixed(2) + '%';
+    mark.style.setProperty('--at', at.toFixed(4));
     mark.textContent = round(value);
     box.appendChild(mark);
   }
@@ -2564,7 +3080,9 @@ function buildPresets(field) {
   for (const p of voltagePresets(field)) {
     const btn = document.createElement('button');
     btn.className = 'chip';
-    btn.textContent = p.label;
+    // A preset named by a word as well as its range says the word in the
+    // chosen language; the others are named by their range alone.
+    btn.textContent = p.key ? `${T(p.key)} ${p.lo}/${p.hi}` : p.label;
     btn.onclick = () => {
       if (p.lo == null) { const [lo, hi] = dataRange(current.scalars[field]); setWindow(lo, hi); }
       else setWindow(p.lo, p.hi);
@@ -2781,11 +3299,13 @@ let _smoothCache = null;
  *
  * Einmal je Netz und Feld; die Verteilung ändert sich beim Glätten kaum. */
 function smoothingEdge(field) {
-  if (_edgeScale && _edgeScale.mesh === current && _edgeScale.field === field) {
+  const raw = current.scalars[field];
+  if (_edgeScale && _edgeScale.mesh === current && _edgeScale.field === field
+      && _edgeScale.raw === raw) {
     return _edgeScale.value;
   }
-  const value = edgeStepScale(current.scalars[field], getAdjacency(), 0.9);
-  _edgeScale = { mesh: current, field, value };
+  const value = edgeStepScale(raw, getAdjacency(), 0.9);
+  _edgeScale = { mesh: current, field, raw, value };
   return value;
 }
 let _edgeScale = null;
@@ -2813,12 +3333,16 @@ function displayScalar(field) {
    * Millimetern gedacht, damit ein feines und ein grobes Netz gleich stark
    * geglättet werden. */
   const radius = level * meshEdgeLength() * 0.6;
+  /* The raw array belongs in the key too. A field can become another array
+   * under the same name (the derived map after every recompute), and
+   * (mesh, field, level) alone still looked warm: the screen kept the earlier
+   * derivation while the metrics box described the new one. */
   const warm = _smoothCache && _smoothCache.mesh === current
             && _smoothCache.field === field && _smoothCache.level === level
-            && _smoothCache.edge === edge;
+            && _smoothCache.edge === edge && _smoothCache.raw === raw;
   if (warm) return _smoothCache.values;
   const values = smoothScalarSpatial(raw, getAdjacency(), current.positions, radius, edge);
-  _smoothCache = { mesh: current, field, level, edge, values };
+  _smoothCache = { mesh: current, field, level, edge, raw, values };
   return values;
 }
 // Werte so, wie der Nutzer sie sieht: geglättet, und Vertices, die die
@@ -2842,9 +3366,13 @@ let _visibleCache = null;
 function visibleScalar(field) {
   const s = displayScalar(field);
   if (!confMaskActive(field)) return s;
-  const key = { mesh: current, field, level: state.smoothLevel, th: state.confMaskTh };
+  // `raw` for the same reason as in displayScalar: a re-derived field is
+  // another array under the same name.
+  const key = { mesh: current, field, level: state.smoothLevel, th: state.confMaskTh,
+                raw: current.scalars[field] };
   if (_visibleCache && _visibleCache.mesh === key.mesh && _visibleCache.field === key.field
-      && _visibleCache.level === key.level && _visibleCache.th === key.th) return _visibleCache.values;
+      && _visibleCache.level === key.level && _visibleCache.th === key.th
+      && _visibleCache.raw === key.raw) return _visibleCache.values;
   /* Womit gemessen wird: bei Spannung das Feld selbst, bei der Aktivierung die
    * Spannung daneben. Die Zeit sagt nichts darüber, ob dort etwas war. */
   const judge = (field === 'voltage' || field === 'unipolar')
@@ -3198,12 +3726,23 @@ function drawLegendRing() {
  *
  * Die Legende stand fest auf halber Höhe. Trägt die Karte viele Kennzahlen,
  * reichen die bis in sie hinein, und beide sind dort unlesbar. Sie weicht
- * jetzt nach unten aus, so weit die Kennzahlen reichen. */
+ * jetzt nach unten aus, so weit die Kennzahlen reichen.
+ *
+ * Where stats, notes and legend do not all fit in the window, the notes give
+ * way: they scroll in their own box. Pushed further down, the legend ended up
+ * below the window edge, where body's overflow:hidden puts it out of reach,
+ * and the notes past the edge could not be scrolled to either. */
+const LEGEND_GAP = 14;     // between the stats and the legend
+const LEGEND_EDGE = 24;    // from the window's bottom, as #stats keeps from its top
+const NOTES_MIN = 96;      // about six lines of the notes stay in view
+const BAR_MIN = 140;       // the colour bar gives up at most half of its 280 px
+
 function layoutLegend() {
   const legend = document.getElementById('legend');
   const bar = document.querySelector('#legend .legend-inner');
   const ring = document.getElementById('cring');
   const row = document.getElementById('cyclic-row');
+  const note = document.getElementById('st-note');
   if (!legend) return;
   const cyclic = !!state.cyclic;
   if (bar) bar.hidden = cyclic;
@@ -3213,12 +3752,45 @@ function layoutLegend() {
   // Ein Ring über einer Spannungsskala sagt nichts: die ist nicht zyklisch.
   const ring2 = document.getElementById('cring');
   if (!isLat && ring2) { ring2.hidden = true; if (bar) bar.hidden = false; }
+  // Measured at full length below; the caps are what this run decides.
+  if (note) note.style.maxHeight = '';
+  if (bar) bar.style.height = '';
 
+  // Up to 720 px the stylesheet places the legend itself (bottom: 50%) and the
+  // stats are not shown, so there is nothing to make room for. An inline top
+  // on top of that bottom squeezed the panel to a strip its bar hung out of.
+  // The query is the stylesheet's own; mqBottomSheet is declared further down.
+  if (matchMedia('(max-width: 720px)').matches) {
+    legend.style.top = '';
+    legend.style.transform = '';
+    return;
+  }
   const stats = document.getElementById('stats');
   const bottom = stats ? stats.getBoundingClientRect().bottom : 0;
-  const height = legend.getBoundingClientRect().height || 320;
+  const shown = legend.classList.contains('show');
+  let height = shown ? (legend.getBoundingClientRect().height || 320) : 0;
+  const room = innerHeight - LEGEND_EDGE;
   const middle = Math.max(0, (innerHeight - height) / 2);
-  legend.style.top = `${Math.round(Math.max(middle, bottom + 14))}px`;
+  let top = Math.max(middle, bottom + LEGEND_GAP);
+  if (top + height > room) {
+    const notes = note && !note.hidden ? note.getBoundingClientRect() : null;
+    const kept = notes ? notes.top + Math.min(notes.height, NOTES_MIN) : bottom;
+    // A short window has no room even for that much beside a whole legend;
+    // the bar then gives some of its height.
+    const short = kept + LEGEND_GAP + height - room;
+    if (shown && short > 0 && bar && !bar.hidden) {
+      const was = bar.getBoundingClientRect().height;
+      const next = Math.max(BAR_MIN, was - short);
+      bar.style.height = `${Math.round(next)}px`;
+      height -= was - next;
+    }
+    top = Math.max(0, room - height);
+    if (notes) {
+      const end = shown ? top - LEGEND_GAP : room;
+      note.style.maxHeight = `${Math.max(0, Math.round(end - notes.top))}px`;
+    }
+  }
+  legend.style.top = `${Math.round(top)}px`;
   legend.style.transform = 'none';
 }
 
@@ -3278,7 +3850,10 @@ function refreshDisplayToggles() {
 }
 
 /* ---------- stats ---------- */
-const N = (v, digits = 1) => v.toLocaleString('de-DE',
+// Numbers in the language the page speaks. Fixed to German, the English page
+// read "18.137 vertices", which an English reader takes for eighteen point one.
+const numberLocale = () => (window.epcoreI18n ? window.epcoreI18n.language() : 'de');
+const N = (v, digits = 1) => v.toLocaleString(numberLocale(),
   { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
 /* Zuschneiden: welche Öffnungen weg sollen, und wie tief.
@@ -3303,6 +3878,8 @@ function buildTrimUI() {
   // einen Ring — das Werkzeug in der Leiste ist dort der einzige Weg.
   if (!trimState.rings.length && !cutState.shapes.length) {
     group.style.display = 'none';
+    // The count goes too, or the next map that shows the section shows the old one.
+    updateTrimNote();
     return;
   }
   group.style.display = '';
@@ -3310,6 +3887,7 @@ function buildTrimUI() {
   trimState.rings.forEach((ring, index) => {
     const chip = document.createElement('button');
     chip.className = 'chip' + (trimState.chosen.has(index) ? ' on' : '');
+    chip.setAttribute('aria-pressed', String(trimState.chosen.has(index)));
     chip.textContent = `⌀ ${round(ring.diameterMm)} mm`;
     chip.title = T('map.trim.hint');
     chip.onclick = () => {
@@ -3327,6 +3905,7 @@ function buildTrimUI() {
     const index = cutState.shapes.indexOf(shape);
     const chip = document.createElement('button');
     chip.className = 'chip' + (cutState.editing === index ? ' on' : '');
+    chip.setAttribute('aria-pressed', String(cutState.editing === index));
     chip.dataset.cut = String(index);
     chip.textContent = T(shape.plane ? 'map.trim.plane' : 'map.trim.outline');
     chip.title = T('map.trim.edit.hint');
@@ -3477,6 +4056,10 @@ function showMapNotes(lines) {
     box.appendChild(row);
   }
   box.hidden = !box.childElementCount;
+  // Placed now, with the notes in it. The ResizeObserver on #stats would do it
+  // a frame later, and on a slow machine that frame showed the legend over the
+  // notes. It stays for what grows the stats without coming through here.
+  if (state.mode) layoutLegend();
 }
 
 /** Die Hinweise einer Rhythmia-Studie: was zurückgehalten wurde, und warum.
@@ -3512,6 +4095,12 @@ function rhythmiaNotes(meshes) {
   if (meshes && meshes.unassignedPointTables) {
     lines.push(T('map.msg.pointsUnassigned', { count: meshes.unassignedPointTables }));
   }
+  // Ein Archiv, das mitten in einem Block endet, wird gelesen, soweit es reicht.
+  // Ohne diese Zeile läse sich die Karte als vollständig — ohne Ablation, ohne
+  // Annotationen, und niemand erführe, warum.
+  if (meshes && meshes.truncated) {
+    lines.push(T('map.msg.archiveTruncated', { part: meshes.truncated.next }));
+  }
   return lines;
 }
 
@@ -3546,12 +4135,67 @@ function mapNotes(meshes, shown) {
   const lines = rhythmiaNotes(meshes);
   const unit = latUnitNote(shown);
   if (unit) lines.push(unit);
+  lines.push(...velocityNotes(shown));
+  // Why VisiTag rows were skipped. The metrics row carries only the count: a
+  // label that long widened the right-aligned panel until its numbers slid
+  // under the controls, and a reason is a sentence, which wraps here.
+  if (shown && shown.ablationSkipped) {
+    lines.push(T('map.msg.ablationSkipped', { count: shown.ablationSkipped }));
+  }
+  // Here and not in annotAdopt: the box is redrawn after every load, and a
+  // line written once from there was gone before anyone could read it.
+  if (shown && shown === current) lines.push(...annotNotes());
   return lines;
 }
 
+/** Which of an EnSite Velocity archive's maps is on the anatomy, and which
+ * others it holds.
+ *
+ * The server shows the first by name — `map10` before `map2` — unless asked
+ * for another. Said only in a response header and the server's log, the
+ * choice was invisible here: one activation map on screen, and no word that
+ * the archive held another, which may be the one the operator acquired.
+ */
+function velocityNotes(shown) {
+  const velocity = shown && shown.velocity;
+  const maps = (velocity && velocity.maps) || [];
+  if (!maps.length) return [];
+  if (!velocity.shown) return [T('map.msg.velocityMapEmpty', { maps: maps.join(', ') })];
+  const others = maps.filter(m => m !== velocity.shown);
+  if (!others.length) return [T('map.msg.velocityMap', { map: velocity.shown })];
+  return [T('map.msg.velocityMaps',
+            { map: velocity.shown, count: maps.length, others: others.join(', ') })];
+}
+
+/** The choice between an archive's maps, beside the anatomy selector.
+ *
+ * Read from the map on screen rather than from what was opened last, so a
+ * comparison that swaps two Velocity maps re-asks the archive the front one
+ * came from. */
+function showVelocityMaps(data) {
+  const grp = document.getElementById('grp-velmap');
+  const sel = document.getElementById('velmap');
+  if (!grp || !sel) return;
+  const velocity = data && data.velocity;
+  const maps = (velocity && velocity.maps) || [];
+  // Emptied first, as the anatomy selector is: hidden, it still held the
+  // closed study's map names.
+  sel.textContent = '';
+  if (maps.length < 2) { grp.style.display = 'none'; return; }
+  for (const name of maps) {
+    const option = document.createElement('option');
+    // As text: a map name is a folder name from the archive.
+    option.value = name;
+    option.textContent = name;
+    sel.appendChild(option);
+  }
+  sel.value = velocity.shown || velocity.asked || maps[0];
+  grp.style.display = '';
+}
+
 function updateStats(data) {
-  document.getElementById('st-verts').textContent = (data.positions.length/3).toLocaleString('de-DE');
-  document.getElementById('st-faces').textContent = (data.faces.length/3).toLocaleString('de-DE');
+  document.getElementById('st-verts').textContent = N(data.positions.length / 3, 0);
+  document.getElementById('st-faces').textContent = N(data.faces.length / 3, 0);
   updateMetrics(data);
 }
 
@@ -3629,11 +4273,9 @@ function updateMetrics(data) {
   if (m.activation && latField) {
     try {
       const cv = EPCV.conductionVelocity(data.positions, data.faces, latField);
-      const finite = [];
-      for (const v of cv.speedMmS) if (Number.isFinite(v)) finite.push(v);
-      if (finite.length) {
-        finite.sort((x, y) => x - y);
-        const median = finite[finite.length >> 1];
+      // medianSpeed: the command line's median, not one of our own.
+      const median = EPCV.medianSpeed(cv.speedMmS);
+      if (median != null) {
         rows.push([T('map.metrics.cv'), `${N(median, 0)} mm/s`]);
         /* Ein Median über eine ganze Kammer sagt wenig: eine Karte mit einem
          * langsamen Isthmus und schnellem Rest hat denselben Median wie eine
@@ -3662,10 +4304,20 @@ function updateMetrics(data) {
   // Korpus-Export sind alle 22 Stellen messbar und keine zeichenbar, weil
   // AdjustedPositions.txt leer ist. Ohne diese Zeile sähe der Nutzer keinen
   // einzigen Marker und schlösse daraus, es habe keine Ablation gegeben.
-  if (data.ablation && data.ablation.length) {
-    const summary = EPA.summarise(data.ablation);
+  //
+  // Rows without a readable key are counted here even when no site is left:
+  // otherwise the whole block disappears, which reads as no ablation, and with
+  // some of them gone fewer sites look complete. The label stays as short as
+  // its neighbours; the reason is a sentence under the numbers (mapNotes).
+  const ablationSkipped = data.ablationSkipped || 0;
+  if ((data.ablation && data.ablation.length) || ablationSkipped) {
+    const summary = EPA.summarise(data.ablation || []);
     rows.push([T('map.metrics.ablation'),
                `${N(summary.sites, 0)}`]);
+    if (ablationSkipped) {
+      rows.push([T('map.metrics.ablation.skipped'),
+                 `<span class="warn-text">${N(ablationSkipped, 0)}</span>`]);
+    }
     if (summary.totalDeliveryS != null) {
       rows.push([T('map.metrics.ablation.time'),
                  `${N(summary.totalDeliveryS, 0)} s`]);
@@ -3688,10 +4340,11 @@ function updateMetrics(data) {
       rows.push([T('map.metrics.ablation.power'),
                  `${N(summary.powerW.mean, 1)} W`]);
     }
-    if (!summary.placed) {
+    // With no site read there is nothing of which none is placed.
+    if (summary.sites && !summary.placed) {
       rows.push([T('map.metrics.ablation.unplaced'),
                  `<span class="muted">${T('map.metrics.none')}</span>`]);
-    } else {
+    } else if (summary.placed) {
       /* Ob aus den Stellen eine Linie geworden ist. Dauer und Leistung sagen,
        * wie kräftig abgegeben wurde — eine Kette mit einer Lücke leitet
        * trotzdem weiter, und das steht in keiner der beiden Zahlen. */
@@ -3764,6 +4417,10 @@ const egmAnnotRead = document.getElementById('egm-annot-read');
  */
 let egmPick = null;
 let egmPoint = null, egmCurrent = null;
+/* Which opening of the panel is the latest. A Rhythmia window is read from the
+ * archive and can take seconds: a read that lands after another point was
+ * opened, or after the panel was closed, belongs to nothing on screen. */
+let egmTicket = 0;
 
 /** Auf welchem Kanal ein Zeitpunkt gesetzt werden darf.
  *
@@ -3805,19 +4462,17 @@ function annotMarks(egm, point) {
  * Wo kein Zeitpunkt gesetzt werden kann, steht der Grund — und die Steuerung
  * ist dann nicht etwa ausgegraut, sondern nicht da. Ein abgeblendeter Knopf
  * lädt zum Probieren ein und sagt nichts.
+ *
+ * Returns the reason as text for the caller to write, rather than writing it
+ * into #egm-meta here: showEgm sets the meta box's innerHTML afterwards, and
+ * a line appended here was wiped before anyone could read it.
  */
 function annotShowTimeControls(egm, point) {
-  if (!egmAnnot) return;
+  if (!egmAnnot) return null;
   const can = annotCanSetTime(egm, point);
   if (!can.ok) {
     egmAnnot.hidden = true;
-    if (can.reason) {
-      const line = document.createElement('div');
-      line.className = 'warn';
-      line.textContent = T(can.reason);
-      egmMeta.appendChild(line);
-    }
-    return;
+    return can.reason ? T(can.reason) : null;
   }
 
   egmAnnot.hidden = false;
@@ -3833,6 +4488,7 @@ function annotShowTimeControls(egm, point) {
     drawTraces(egm, point);
     annotUpdateReadout(egm, point);
   };
+  return null;
 }
 
 /** Was unter der Kurve steht: der vorgeschlagene Abtastwert und seine Millisekunden.
@@ -3971,6 +4627,7 @@ const EGM_PREFERRED = ['M1-M2', 'M1', 'I', 'II'];
 const EGM_MAX_TRACES = 3;
 
 function hideEgm() {
+  egmTicket++;          // a read still under way is not to open it again
   egmBox.style.display = 'none';
   egmTraces.innerHTML = '';
   egmChans.innerHTML = '';
@@ -4001,6 +4658,7 @@ function buildChannelChips(egm, point) {
     const chip = document.createElement('button');
     chip.textContent = name;
     chip.className = showing.has(name) ? 'on' : '';
+    chip.setAttribute('aria-pressed', String(showing.has(name)));
     chip.onclick = () => {
       const next = new Set(egmChannels(egm));
       if (next.has(name)) next.delete(name); else next.add(name);
@@ -4008,7 +4666,9 @@ function buildChannelChips(egm, point) {
       // Punkt ohne Signal, und das ist etwas anderes.
       if (!next.size) return;
       egmChosen = egm.channels.filter(c => next.has(c));
-      drawTraces(egm);
+      // With the point: without it the redraw lost the window, the vendor's
+      // and EPCore's lines and the pending pick that "Übernehmen" still writes.
+      drawTraces(egm, point);
       buildChannelChips(egm, point);
     };
     egmChans.appendChild(chip);
@@ -4031,8 +4691,19 @@ function drawTraces(egm, point = null) {
     // anderen zu klicken setzte eine Annotation aus einem Signal, das der
     // Hersteller nicht gemessen hat.
     row.dataset.channel = name;
-    row.innerHTML = `<div class="lbl"><span>${name}</span><span>${ptp} mV</span></div>`
-                  + traceSvg(data, egm.gainMv, marks);
+    // The name stands in the signal file's header as the export wrote it: set
+    // it as text, never as markup. The file can come from anywhere through
+    // ?src=, and in the application a script would run beside the local file
+    // API. The trace itself is numbers only.
+    const label = document.createElement('div');
+    label.className = 'lbl';
+    const channel = document.createElement('span');
+    channel.textContent = name;
+    const amplitude = document.createElement('span');
+    amplitude.textContent = `${ptp} mV`;
+    label.append(channel, amplitude);
+    row.appendChild(label);
+    row.insertAdjacentHTML('beforeend', traceSvg(data, egm.gainMv, marks));
     egmTraces.appendChild(row);
   }
 }
@@ -4091,16 +4762,17 @@ function traceSvg(samples, gainMv, marks = null) {
 
 async function showEgm(point, readEgm) {
   // Rhythmia liest ein Fenster aus einem mehrere Gigabyte großen Archiv und
-  // antwortet deshalb mit einem Promise; CARTO und EnSite haben ihre Datei
-  // schon. Beides wird hier abgewartet, damit der Aufrufer den Unterschied
-  // nicht kennen muss.
-  egmTitle.textContent = `Punkt ${point.id ?? point.label ?? '—'}`;
+  // antwortet deshalb mit einem Promise, CARTO aus einem Ordner ebenso, weil es
+  // die Signaldatei erst jetzt liest; EnSite hat seine Datei schon. Beides wird
+  // hier abgewartet, damit der Aufrufer den Unterschied nicht kennen muss.
+  const ticket = ++egmTicket;
+  egmTitle.textContent = T('map.egm.point', { id: point.id ?? point.label ?? '—' });
   // Ein angefangener Vorschlag gehört zu dem Punkt, an dem er gemacht wurde.
   egmPick = null;
   egmPoint = null; egmCurrent = null;
   if (egmAnnot) egmAnnot.hidden = true;
   egmTraces.innerHTML = '';
-  egmMeta.textContent = 'Lade Signal…';
+  egmMeta.textContent = T('map.egm.loading');
   egmBox.style.display = 'block';
 
   let egm = null, failure = null, answer = null;
@@ -4116,12 +4788,16 @@ async function showEgm(point, readEgm) {
     }
   }
   catch (err) { failure = err.message || String(err); }
+  // Another point was opened, or the panel closed, while this one was read.
+  // Drawn anyway, its trace sat under the other point's title, or the closed
+  // panel came back.
+  if (ticket !== egmTicket) return;
 
   // Ein Formatierer für alle Hersteller (eppoints.js): NaN ist kein Messwert
   // und wird nicht als „NaN mV" gezeigt, und ein Rhythmia-Messpunkt nennt seine
   // LAT in ms ab Schlagmarker — oder sagt, warum er keine hat.
   const { bits, notes } = EPP.pointMeasurements(point, T);
-  let meta = bits.join(' · ') || 'keine Messwerte im Export';
+  let meta = bits.join(' · ') || T('map.egm.nomeasurements');
 
   // Die Katalogfassung, oder der Rückfall — ein fehlender Schlüssel rendert
   // sonst als ⟦…⟧ auf dem Schirm (derselbe Griff wie in eppoints.js).
@@ -4136,7 +4812,9 @@ async function showEgm(point, readEgm) {
   const version = (current && current.software && current.software.version) || '';
 
   if (failure) {
-    meta += `<br><span class="warn">Signal nicht lesbar: ${failure}</span>`;
+    // As text, not into `meta`: a reader's error message can quote pieces of
+    // the file, and what comes from the file is never set as markup.
+    lines.push(T('map.egm.unreadable', { error: failure }));
   } else if (!egm) {
     // Warum es kein Fenster gibt, statt „trägt kein Elektrogramm" zu jedem der
     // sechs Fälle — die Aufzeichnung ist in den meisten davon vorhanden.
@@ -4144,18 +4822,21 @@ async function showEgm(point, readEgm) {
     if (said) {
       lines.push(say(said.key, said.params,
                      say(said.fallbackKey, said.params,
-                         `Kein Fenster: ${said.basis || answer.reason}.`)));
+                         T('map.egm.nowindow', { reason: said.basis || answer.reason }))));
     } else {
-      lines.push('Dieser Punkt trägt kein Elektrogramm.');
+      lines.push(T('map.egm.none'));
     }
   } else {
     const seconds = egm.samples[0].length / egm.sampleRateHz;
-    meta += `<br>${egm.channels.length} Kanäle · ${seconds.toFixed(2)} s`;
+    meta += '<br>' + T('map.egm.channels',
+                       { n: egm.channels.length, seconds: seconds.toFixed(2) });
     // Die Rate steht nicht in der Datei. Das gehört auf den Schirm, nicht in
     // einen Kommentar: eine Zeitachse, die auf einer Annahme beruht, sieht
     // aus wie eine gemessene.
+    // `.warn-text`, the colour alone: `.warn` is the shared note box, and its
+    // padding and border on an inline span were drawn over the line above.
     if (egm.rateAssumed) {
-      meta += ` · <span class="warn">${egm.sampleRateHz} Hz angenommen</span>`;
+      meta += ` · <span class="warn-text">${T('map.egm.rate.assumed', { rate: egm.sampleRateHz })}</span>`;
     } else {
       meta += ` · ${egm.sampleRateHz} Hz`;
     }
@@ -4163,8 +4844,7 @@ async function showEgm(point, readEgm) {
     // Katheter. Was hier steht, ist ein Fenster um den Zeitpunkt des Punktes —
     // und das gehört dazugesagt, sonst liest es sich wie seine eigene Messung.
     if (egm.window) {
-      meta += '<br>Fenster aus der laufenden Aufzeichnung um den Zeitpunkt '
-            + 'dieses Punktes, nicht seine eigene Messung.';
+      meta += '<br>' + T('map.egm.window.note');
     }
     // Was das Fenster über sich sagt: welcher Katheter und warum er es ist,
     // ob die Ablage nur angenommen wurde, dass B und W gefilterte Fassungen je
@@ -4176,7 +4856,8 @@ async function showEgm(point, readEgm) {
     egmPoint = point; egmCurrent = egm;
     drawTraces(egm, point);
     buildChannelChips(egm, point);
-    annotShowTimeControls(egm, point);
+    const refused = annotShowTimeControls(egm, point);
+    if (refused) lines.push(refused);
   }
   egmMeta.innerHTML = meta;
   // Als Text angehängt, nicht in `meta` hineingeschrieben: darin stehen die
@@ -4227,7 +4908,7 @@ function tagHover() {
   readout.textContent = '';
   const b = document.createElement('b'); b.textContent = (pt && pt.label) || '';
   readout.appendChild(b);
-  readout.appendChild(document.createTextNode(' · ' + g.label));
+  readout.appendChild(document.createTextNode(' · ' + tagGroupLabel(g)));
   readout.style.display = 'block';
   readout.style.left = hoverX + 'px';
   readout.style.top = hoverY + 'px';
@@ -4257,9 +4938,10 @@ function updateReadout() {
   // Der angezeigte Wert gehört zur Farbe; der Rohwert steht daneben, sobald
   // Glättung oder Conf-Maske ihn verändern.
   const showsRaw = !Number.isNaN(raw) && (Number.isNaN(v) || Math.abs(raw - v) > 1e-9);
+  const rawNote = showsRaw ? T('map.readout.raw', { value: round(raw) }) : '';
   readout.innerHTML = Number.isNaN(v)
-    ? (showsRaw ? `<b>—</b> unmapped (roh ${round(raw)})` : '<b>—</b> unmapped')
-    : `<b>${round(v)}</b> ${meta.unit || ''}` + (showsRaw ? ` <small>(roh ${round(raw)})</small>` : '');
+    ? `<b>—</b> ${T('map.metrics.unmeasured')}` + (showsRaw ? ` (${rawNote})` : '')
+    : `<b>${round(v)}</b> ${meta.unit || ''}` + (showsRaw ? ` <small>(${rawNote})</small>` : '');
   readout.style.display = 'block';
   readout.style.left = hoverX + 'px';
   readout.style.top = hoverY + 'px';
@@ -4272,13 +4954,13 @@ let rawMeshes = [];   // mehrere Anatomien/Surfaces aus einem Rohexport
 
 const loadingEl = document.getElementById('loading');
 const loadingTextEl = document.getElementById('loading-text');
-function showLoading(t) { loadingTextEl.textContent = t || 'Lade…'; loadingEl.classList.add('show'); }
+function showLoading(t) { loadingTextEl.textContent = t || T('map.loading'); loadingEl.classList.add('show'); }
 function setLoading(t) { loadingTextEl.textContent = t; }
 function hideLoading() { loadingEl.classList.remove('show'); }
 const mb = (b) => (b / 1048576).toFixed(0);
 function rawProgress(p) {
-  if (p.phase === 'scan') setLoading(`Archiv scannen…  ${mb(p.done)} / ${mb(p.total)} MB`);
-  else if (p.phase === 'build') setLoading('Mesh & Skalare lesen…');
+  if (p.phase === 'scan') setLoading(T('map.loading.scan', { done: mb(p.done), total: mb(p.total) }));
+  else if (p.phase === 'build') setLoading(T('map.loading.build'));
 }
 
 // Fertiges Mesh (PLY/OBJ/STL)
@@ -4288,8 +4970,8 @@ async function loadMeshFile(file) {
   if (name.endsWith('.ply')) data = EP.parsePLY(await file.arrayBuffer());
   else if (name.endsWith('.obj')) data = EP.parseOBJ(await file.text());
   else if (name.endsWith('.stl')) data = EP.parseSTL(await file.arrayBuffer());
-  else throw new Error('Format nicht unterstützt: ' + name);
-  if (!data.positions.length) throw new Error('Keine Geometrie gefunden.');
+  else throw new Error(T('map.msg.format.unsupported', { name }));
+  if (!data.positions.length) throw new Error(T('map.msg.nogeometry'));
   loadGeometry(data, file.name);
 }
 
@@ -4299,17 +4981,28 @@ function loadParsedMesh(m) {
     positions: m.positions, normals: m.normals || null, colors: null,
     scalars: m.scalars || {}, scalarNames: Object.keys(m.scalars || {}),
     faces: m.faces, tagGroups: m.tagGroups || null, source: m.source || null,
+    // The export's own map name, kept apart from the name shown: after a swap
+    // the shown one is the study's. The OpenEP file must not carry that, and
+    // the OpenEP export picks this map's points by it: with the shown name it
+    // would find none of them.
+    mapName: m.name || null,
     // Named, like everything else here: the field list is deliberate, so a
     // parser that starts returning something new has to say so. `readEgm` is
     // the closure that reads one point's signal on demand — dropping it left
     // every mapping point reporting that it had no electrogram.
     points: m.points || null, readEgm: m.readEgm || null,
     ablation: m.ablation || null, ablationNote: m.ablationNote || null,
+    // VisiTag rows that named no site. Without the count, all of them skipped
+    // shows no ablation, and some of them skipped looks complete.
+    ablationSkipped: m.ablationSkipped || 0,
     // Rhythmia: worauf die Millisekunden sich beziehen, was zurückgehalten
     // wurde und welcher Softwarestand die Karte geschrieben hat. Das erste
     // schreibt der Export in den Kopf der PLY, das zweite steht am Rand.
     beatWindow: m.beatWindow || null, latWithheld: m.latWithheld || null,
     latNotes: m.latNotes || null, software: m.software || null,
+    // EnSite Velocity: the archive it came from, the map on it and the
+    // others the archive holds — said under the map, and choosable.
+    velocity: m.velocity || null,
   }, m.name || 'Mesh');
   // Die Hinweise der Studie gelten auch nach einem Wechsel im Auswahlfeld.
   // `loadGeometry` setzt den Kasten auf das zurück, was die gezeigte Fläche
@@ -4346,41 +5039,63 @@ function loadParsedMesh(m) {
  *
  * Der Server schickt binäres PLY, und das liest der Betrachter ohnehin.
  */
-async function openVelocityArchive(path, name) {
+async function openVelocityArchive(path, name, map) {
   showLoading(T('map.msg.velocity.reading'), name);
-  let buffer;
+  let result;
   try {
-    buffer = await window.epcore.velocityMesh(path);
+    result = await window.epcore.velocityMesh(path, map);
   } catch (err) {
     throw new Error(T('map.msg.velocity.failed') + err.message);
   }
   // Ohne Backend gibt es das nicht — dann gilt, was die Seite ohne Anwendung
   // immer gesagt hat.
-  if (!buffer) { alert(T('map.msg.onlyapp', { name })); return; }
-  const mesh = EP.parsePLY(buffer);
+  if (!result) { alert(T('map.msg.onlyapp', { name })); return; }
+  const mesh = EP.parsePLY(result.buffer);
   studyName = name;
-  loadParsedMesh({ ...mesh, name, source: 'ensite' });
+  const parsed = {
+    ...mesh, name, source: 'ensite',
+    velocity: { path, name, asked: map || null,
+                shown: result.mapName, maps: result.mapNames },
+  };
+  // This study's one anatomy. What a previous study left in the anatomy
+  // selector and in `rawMeshes` is not this study's: its notes would stand
+  // under this map, and the selector would switch to the other study.
+  rawMeshes = [parsed];
+  populateMeshSelector(rawMeshes);
+  loadParsedMesh(parsed);
+}
+
+/** Another of the archive's maps: the server puts it on the anatomy, so ask
+ * the server again — for the archive the map on screen came from. */
+async function chooseVelocityMap(map) {
+  const velocity = current && current.velocity;
+  if (!velocity || !map || map === velocity.shown) return;
+  try {
+    await openVelocityArchive(velocity.path, velocity.name, map);
+  } catch (err) {
+    alert(T('map.msg.load.failed') + '\n' + err.message);
+    showVelocityMaps(current);
+  } finally {
+    hideLoading();
+  }
 }
 
 async function openPath(path) {
-  showLoading('Lade…');
+  showLoading(T('map.loading'));
   try {
     const listing = await window.epcore.localFiles(path);
     if (!listing || !listing.files || !listing.files.length) {
       alert(T('map.msg.nostudies'));
       return;
     }
-    /* Ein Velocity-Archiv erkennt man am geteilten Suffix. Erst fragen, dann
-     * die Dateien einzeln durchreichen: der Browser käme mit ihnen nicht weit. */
-    const velocity = listing.files.find(f => /\.tar\.gz[a-z]{2}$/i.test(f.path || f.name || ''));
-    if (velocity) {
-      const full = (listing.root || path).replace(/\/+$/, '') + '/' + (velocity.path || velocity.name);
-      await openVelocityArchive(full, String(listing.root || path).replace(/^.*[\\/]/, ''));
-      return;
-    }
-    studyName = String(listing.root || path).replace(/^.*[\\/]/, '');
+    // Asked here, before the name changes, and not again in openFileList.
+    if (!annotMayOpen()) return;
+    // The root goes along: with it a Velocity archive is a study like the
+    // others (velocityStudies), grouped and asked about with them.
+    const root = String(listing.root || path).replace(/[\\/]+$/, '');
+    studyName = root.replace(/^.*[\\/]/, '');
     await openFileList(listing.files.map(
-      entry => window.epcore.localFile(listing.root, entry)));
+      entry => window.epcore.localFile(listing.root, entry)), { asked: true, root });
   } catch (err) {
     alert(T('map.msg.load.failed') + '\n' + err.message);
   } finally {
@@ -4388,21 +5103,82 @@ async function openPath(path) {
   }
 }
 
-async function openFileList(fileList) {
+/* The Velocity archives in a folder opened by its path, one study per archive
+ * set (….tar.gzaa, …gzab …).
+ *
+ * From a path the application reads them (openVelocityArchive), so they are
+ * offered beside the folder's other studies. openPath used to open the first
+ * archive anywhere under the folder before anything was grouped: it never
+ * offered the other studies in it, of two Velocity studies it took the one
+ * that sorted first, and it named that after the folder that was opened.
+ *
+ * Taken from all the files rather than from groupStudies: there a folder is a
+ * study, and an archive in a subfolder of another study would be lost.
+ */
+function velocityStudies(files, root) {
+  const sets = new Map();
+  for (const file of files) {
+    const part = /^(.*)\.tar\.gz[a-z]{2}$/i.exec(file.webkitRelativePath || '');
+    if (part) sets.set(part[1], [...(sets.get(part[1]) || []), file]);
+  }
+  const dirOf = (rel) => rel.slice(0, Math.max(0, rel.lastIndexOf('/')));
+  const nameOf = (rel) => rel.replace(/^.*[\\/]/, '');
+  return [...sets].map(([stem, parts]) => {
+    parts.sort((a, b) => (a.webkitRelativePath < b.webkitRelativePath ? -1 : 1));
+    const dir = dirOf(stem);
+    const neighbours = [...sets.keys()].filter(other => dirOf(other) === dir).length;
+    return {
+      root: dir, kind: 'ensite-velocity', readable: true, files: parts,
+      // The first part: the reader finds the others beside it.
+      archive: root + '/' + parts[0].webkitRelativePath,
+      // Its folder's name, as for every other study (at the top, the folder
+      // that was opened); its own where two share a folder.
+      label: neighbours > 1 ? nameOf(stem) : nameOf(dir || root),
+    };
+  });
+}
+
+/** One study of an opened folder, through the reader it needs. */
+async function openStudy(study) {
+  if (!study.archive) { studyName = study.label; await loadFiles(study.files); return; }
+  // Like loadFiles: from the study picker nobody else catches the failure or
+  // takes the notice down.
+  try {
+    await openVelocityArchive(study.archive, study.label);
+  } catch (err) {
+    alert(T('map.msg.load.failed') + '\n' + err.message);
+  } finally {
+    hideLoading();
+  }
+}
+
+async function openFileList(fileList, { asked = false, root = null } = {}) {
   const files = Array.from(fileList);
   if (!files.length) return;
+  // Before anything changes: the file input, the folder input, a drop and the
+  // shell's open all come through here.
+  if (!asked && !annotMayOpen(files)) return;
 
   // Einzeln gewählte Dateien tragen keinen Pfad — dann hat der Nutzer die
   // Auswahl schon getroffen und es gibt nichts zu fragen.
   const picked = files.some(f => f.webkitRelativePath);
   if (!picked) {
     // Einzeln gewählte Dateien: der Name der ersten ist das Beste, was es gibt.
-    studyName = files.length === 1 ? files[0].name : '';
+    // Not for an annotation file: it goes into the open study and does not
+    // rename it. Renamed, the next save offered "….epannot.epannot.json" and
+    // the comparison labelled the map with the annotation file's name.
+    const annotation = files.length === 1 && /\.epannot\.json$/i.test(files[0].name);
+    if (!annotation) studyName = files.length === 1 ? files[0].name : '';
     await loadFiles(files);
     return;
   }
 
-  const studies = EP.groupStudies(files);
+  let studies = EP.groupStudies(files);
+  if (root) {
+    studies = studies.filter(s => s.kind !== 'ensite-velocity')
+      .concat(velocityStudies(files, root))
+      .sort((a, b) => (a.root < b.root ? -1 : a.root > b.root ? 1 : 0));
+  }
   const readable = studies.filter(s => s.readable);
 
   if (!studies.length) {
@@ -4422,7 +5198,7 @@ async function openFileList(fileList) {
             { name: studies[0].label }));
     return;
   }
-  if (readable.length === 1) { studyName = readable[0].label; await loadFiles(readable[0].files); return; }
+  if (readable.length === 1) { await openStudy(readable[0]); return; }
   askWhichStudy(readable);
 }
 
@@ -4439,16 +5215,19 @@ function askWhichStudy(studies) {
     sub.className = 'sub';
     sub.textContent = `${study.kind} · ${study.files.length}`;
     row.appendChild(sub);
-    row.onclick = () => { box.classList.remove('show'); studyName = study.label; loadFiles(study.files); };
+    row.onclick = () => { box.classList.remove('show'); openStudy(study); };
     list.appendChild(row);
   }
-  box.classList.add('show');
+  openDialog(box, list.firstElementChild);
+}
+function closeStudyPicker() {
+  closeDialog(document.getElementById('studypick'), document.getElementById('t-open'));
 }
 
 async function loadFiles(fileList) {
   const files = Array.from(fileList);
   if (!files.length) return;
-  showLoading('Lade…');
+  showLoading(T('map.loading'));
   try {
     // Eine Annotationsdatei ist keine Studie: sie gehört zu der, die offen ist.
     // Vor der Rohexport-Erkennung, sonst landet eine .json dort als unbekanntes
@@ -4467,14 +5246,14 @@ async function loadFiles(fileList) {
     // Rohexport (Rhythmia .000/.001…, CARTO .zip, EnSite .xml)
     let unzip = null;
     if (files.some(f => f.name.toLowerCase().endsWith('.zip'))) {
-      setLoading('ZIP entpacken…');
-      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=d400d396e5fb'));
+      setLoading(T('map.loading.unzip'));
+      ({ unzipSync: unzip } = await import('../vendor/fflate.module.js?v=9c18153262e8'));
     }
-    setLoading('Konvertiere…');
+    setLoading(T('map.loading.convert'));
     // dem Browser einen Frame geben, damit der Spinner sichtbar wird
     await new Promise(r => requestAnimationFrame(() => r()));
     const meshes = await EP.loadRawFiles(files, unzip, rawProgress);
-    if (!meshes.length) throw new Error('Keine Mesh-Daten im Export gefunden.');
+    if (!meshes.length) throw new Error(T('map.msg.nomesh'));
     rawMeshes = meshes;
     populateMeshSelector(meshes);
     loadParsedMesh(meshes[0]);
@@ -4489,8 +5268,10 @@ async function loadFiles(fileList) {
 function populateMeshSelector(meshes) {
   const grp = document.getElementById('grp-mesh');
   const sel = document.getElementById('meshsel');
-  if (!meshes || meshes.length < 2) { grp.style.display = 'none'; return; }
+  // Emptied first: a hidden selector still holding the last study's entries is
+  // only hidden, not gone.
   sel.innerHTML = '';
+  if (!meshes || meshes.length < 2) { grp.style.display = 'none'; return; }
   meshes.forEach((m, i) => { const o = document.createElement('option'); o.value = i; o.textContent = m.name || ('Mesh ' + i); sel.appendChild(o); });
   sel.value = '0';
   grp.style.display = '';
@@ -4526,13 +5307,22 @@ function bakeColorsU8() {
   }
   return null;
 }
+/* A save that failed says so on screen. In the shell the host writes the file,
+ * and a path it cannot write (no permission, a full disk, a share that has gone)
+ * came back as {ok:false} that reached only the console: the export, the
+ * snapshot and the video looked exactly like ones that had been written. */
+function reportSave(r) {
+  if (!r.ok && !r.cancelled) {
+    console.warn('[epview] Speichern:', r.error);
+    alert(T('map.msg.save.failed') + '\n' + r.error);
+  }
+  return r;
+}
 async function download(name, data, mime) {
   // Über den gemeinsamen Speicherpfad: in der Desktop-Hülle lädt `<a download>`
   // nicht herunter, sondern navigiert zur URL — und ersetzt damit die Anwendung
   // durch die Datei, ohne Weg zurück.
-  const r = await EPSave.saveBytes(name, new Blob([data], { type: mime }));
-  if (!r.ok && !r.cancelled) console.warn('[epview] Speichern:', r.error);
-  return r;
+  return reportSave(await EPSave.saveBytes(name, new Blob([data], { type: mime })));
 }
 async function exportMesh(fmt) {
   if (!current) { alert(T('map.msg.load.first')); return; }
@@ -4561,17 +5351,17 @@ async function exportMesh(fmt) {
     // Punkte und Kurven reisen mit, wenn die Karte aus einem Rohexport kam.
     // Die Kurven werden hier gelesen — beim Export will man sie alle, anders
     // als beim Klicken, wo genau eine gefragt ist.
+    // Which channel, in which unit, and which points: `openEPPoints`, by the
+    // same rule as `epcore epview openep`.
+    // Only this map's points go beside this surface. A CARTO export's reader
+    // hangs the whole study's list on every mesh, which is right for showing
+    // them and wrong for a file: CARTO numbers points per map, so another
+    // map's "1" cannot be told from this one's there. `openEPOwnPoints` is the
+    // rule of `epcore epview openep`, and its `note` says how many were left out.
+    const own = EPO.openEPOwnPoints(current.points, current.mapName);
     let points = null, curves = null, names = null;
-    if (current.points && current.points.length && current.readEgm) {
-      points = current.points.filter(p => p.xyz);
-      curves = []; names = [];
-      for (const p of points) {
-        let egm = null;
-        try { egm = await current.readEgm(p); } catch (e) { egm = null; }
-        curves.push(egm ? egm.samples[0] : null);
-        names.push(egm ? `${p.id ?? p.label ?? ''} ${egm.channels[0]}`
-                       : String(p.id ?? p.label ?? ''));
-      }
+    if (own.points.length && current.readEgm) {
+      ({ points, curves, names } = await EPO.openEPPoints(own.points, current.readEgm));
     }
     // Was `lat` ist, entscheidet `openEPActivation` — dieselbe Frage, die
     // `plyComments` zwei Zeilen weiter oben für den PLY-Kopf stellt, und
@@ -4581,10 +5371,21 @@ async function exportMesh(fmt) {
     // umgewandelte CARTO-Karte sieht hier genauso aus und hat echte
     // Millisekunden —, aber die Datei sagt in `notes`, was ungeklärt ist.
     const { activation, latNote } = EPO.openEPActivation(m);
+    // EnSite's unnamed `map_data` goes into the bipolar field with a note
+    // saying so, as `epcore epview openep` writes it; `sc.voltage` alone left
+    // an EnSite map without any value at all.
+    const { bipolar, notes } = EPO.openEPBipolar(m);
     download(base + '.mat',
              EPO.buildOpenEP(m.positions, m.faces, {
-               activation, bipolar: sc.voltage, unipolar: sc.unipolar,
-               impedance: sc.impedance, force: sc.force, name: base, latNote,
+               activation, bipolar, unipolar: sc.unipolar,
+               impedance: sc.impedance, force: sc.force,
+               // Not `base`: that is the file the map was opened from, and a
+               // file name carries patient names and dates into a .mat that
+               // keeps them after the download is renamed.
+               name: EPO.openEPName(current.source, current.mapName), latNote,
+               // After the default sentence, as `epcore epview openep` writes
+               // both: the points of other maps left out, then EnSite's caveat.
+               extraNotes: [own.note, notes].filter(Boolean).join(' '),
                points, curves, pointNames: names }),
              'application/octet-stream');
   }
@@ -4608,15 +5409,37 @@ function shareConfig({ silent = false } = {}) {
   let url = localStorage.getItem('epview_share_url') || '';
   if (!url && /^https?:$/.test(location.protocol)) url = location.origin;
   if (!url && silent) return { url: '', tok: '' };
-  if (!url) { url = (prompt('Backend-Basis-URL (z.B. https://maps.example.org):') || '').trim().replace(/\/+$/, ''); if (url) localStorage.setItem('epview_share_url', url); }
+  if (!url) { url = (prompt(T('map.share.prompt.url')) || '').trim().replace(/\/+$/, ''); if (url) localStorage.setItem('epview_share_url', url); }
   /* No token prompt here. Uploads are open on epcore.app, so the box would ask
    * for a secret that does not exist — and it used to ask before the token was
    * ever sent anywhere, which meant a stored token and a 401 side by side. The
    * server says when it wants one; see the 401 branch below. */
   return { url, tok: localStorage.getItem('epview_share_token') || '' };
 }
-function showShareBox() { document.getElementById('sharebox').classList.add('show'); }
-function hideShareBox() { document.getElementById('sharebox').classList.remove('show'); }
+/* The share box and the study picker are dialogs: the focus goes into one when
+ * it opens, and back to where it came from when Escape or the cross closes it,
+ * or to `fallback` when that place is gone by now (a menu item closes with its
+ * menu; WebKit does not focus a clicked button at all). Without it the focus
+ * stayed on the toolbar and Tab went on through it, past the box. A click
+ * outside the share box closes it and leaves the focus with what was clicked. */
+function openDialog(box, first) {
+  box._back = document.activeElement;
+  box.classList.add('show');
+  first?.focus();
+}
+function closeDialog(box, fallback) {
+  box.classList.remove('show');
+  const back = box._back;
+  box._back = null;
+  const shown = back && back !== document.body && back.isConnected && back.getClientRects().length;
+  (shown ? back : fallback)?.focus();
+}
+function showShareBox() {
+  openDialog(document.getElementById('sharebox'), document.getElementById('share-close'));
+}
+function hideShareBox() {
+  closeDialog(document.getElementById('sharebox'), document.getElementById('t-share'));
+}
 function shareError(msg) {
   document.getElementById('share-busy').style.display = 'none';
   const e = document.getElementById('share-err'); e.style.display = ''; e.textContent = msg;
@@ -4677,12 +5500,11 @@ async function markAnonymised(yes) {
     button.title = why;
   };
   if (!_anonymised) {
-    block('Erst anonymisieren — geteilte Karten bekommen eine öffentliche Adresse.');
+    block(T('map.share.blocked.anon'));
     return;
   }
   if (!await shareBackendAvailable()) {
-    block('Diese Ausgabe hat keinen Teilen-Dienst. Zum Teilen die Karte auf '
-        + 'https://epcore.app/epview/ öffnen.');
+    block(T('map.share.blocked.noservice'));
     return;
   }
   button.classList.remove('blocked');
@@ -4726,7 +5548,7 @@ async function doShare() {
     // used to be collected up front and then not sent, so a self-hosted
     // instance answered 401 to someone who had already typed the right secret.
     if (res.status === 401) {
-      const asked = (prompt('Upload-Token (EPVIEW_TOKEN):') || '').trim();
+      const asked = (prompt(T('map.share.prompt.token')) || '').trim();
       if (asked) {
         localStorage.setItem('epview_share_token', asked);
         headers.Authorization = 'Bearer ' + asked;
@@ -4763,7 +5585,7 @@ async function doShare() {
     document.getElementById('share-busy').style.display = 'none';
     document.getElementById('share-result').style.display = '';
     try {
-      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=d400d396e5fb');
+      const { default: qrcode } = await import('../vendor/qrcode-generator.js?v=9c18153262e8');
       const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
       document.getElementById('share-qr').src = qr.createDataURL(6, 8);
     } catch { document.getElementById('share-qr').style.display = 'none'; }
@@ -4919,13 +5741,16 @@ function setRecButtonsDisabled(d) {
   for (const id of ['t-orbit', 't-export']) document.getElementById(id).style.opacity = d ? '0.5' : '';
 }
 
-// spec: { mode:'driver'|'live', kind, driver?, durationMs, label }
+// spec: { mode:'driver'|'live', kind, driver?, durationMs, label, savedAnim? }
+// Returns true once the recorder runs.
 function startRecording(spec) {
   if (!mesh) { alert(T('map.msg.load.first')); return; }
   if (state.recording) return;
   const mime = pickMime();
   if (!mime) { alert(T('map.msg.norecorder')); return; }
-  const savedAnim = { t: state.anim.t, engaged: state.anim.engaged };  // capture BEFORE priming (driver(0) may move the cursor)
+  // Captured BEFORE priming (driver(0) may move the cursor), unless the caller
+  // changed the view for the recording and passes what it was before.
+  const savedAnim = spec.savedAnim || { t: state.anim.t, engaged: state.anim.engaged };
   // prime the first frame so capture doesn't start blank
   renderer.setScissorTest(false); renderer.setViewport(0, 0, innerWidth, innerHeight);
   if (spec.mode === 'driver' && spec.driver) spec.driver(0);
@@ -4943,6 +5768,7 @@ function startRecording(spec) {
   recorder.start();
   recIndicator(true);
   setRecButtonsDisabled(true);
+  return true;
 }
 function stopRecording() {
   const rec = state.recording; if (!rec) return;
@@ -4991,12 +5817,21 @@ function startExport() {
   if (!mesh) { alert(T('map.msg.load.first')); return; }
   const field = state.mode && state.mode.startsWith('scalar:') ? state.mode.slice(7) : null;
   if (field && isLatField(field)) {
+    // What the map showed before the band was lit, for finishRecording to put
+    // back. Taken in startRecording, after the line below, it put the band
+    // back, and the whole activation map did not return after the export.
+    const before = { t: state.anim.t, engaged: state.anim.engaged };
     state.anim.engaged = true;
     const W = state.vmax - state.vmin;
     const oneCycle = Math.max(2, Math.round(W / (state.anim.speed || 60)));
     const cycles = state.anim.mode === 'loop' ? recOpts.cycles : 1;
     const seconds = recOpts.exportSeconds || (oneCycle * cycles);
-    startRecording({ mode: 'driver', kind: 'activation', driver: activationFrame, durationMs: seconds * 1000, label: 'activation' });
+    if (!startRecording({ mode: 'driver', kind: 'activation', driver: activationFrame,
+                          durationMs: seconds * 1000, label: 'activation', savedAnim: before })) {
+      // No recording, so no finishRecording either: put it back here.
+      state.anim.t = before.t; state.anim.engaged = before.engaged;
+      applyColors();
+    }
   } else {
     startRecording({ mode: 'live', kind: 'live', durationMs: (recOpts.exportSeconds || 6) * 1000, label: 'view' });
   }
@@ -5016,6 +5851,7 @@ function startExport() {
  * formula put them. Nothing but geometry and measurements travels; see
  * demo/README.md for what was checked. */
 async function loadDemo() {
+  if (!annotMayOpen()) return;
   await loadURL(new URL('demo/rhythmia-voltage.ply', location.href).href);
 }
 
@@ -5064,6 +5900,43 @@ document.getElementById('pick').onclick = () => fileInput.click();
  * application. */
 const T = (key, params) => (window.epcoreI18n ? window.epcoreI18n.t(key, params) : key);
 
+/* The shell switches the language of every pane while it runs, and i18n.js
+ * re-applies only the data-i18n attributes. What this page writes with T()
+ * stayed in the language it was written in until something happened to redraw
+ * it: the metrics box read "Knoten" and "Flächen" above "surface" and "mean
+ * voltage". So the same renderers run again. Registered here, after `T`: i18n.js
+ * fires the event once while it loads, before this script runs.
+ *
+ * The notes box under the map is worded again only while it holds the map's
+ * own notes (mapNotesFrom). It can hold what loading an annotation file
+ * reported instead, and redrawing it from the map would drop that. */
+window.addEventListener('epcore:language', () => {
+  // updateStats runs updateMetrics; the counts and the area panel carry
+  // numbers in the language's notation and the panel names its window.
+  if (current) updateStats(current);
+  if (current && mapNotesFrom) showMapNotes(mapNotes(...mapNotesFrom));
+  recomputeArea();
+  annotRefresh();
+  refreshCompareUI();
+  buildTagUI();
+  buildAblationColorUI();
+  buildTrimUI();
+  if (current && state.mode && state.mode.startsWith('scalar:')) buildPresets(state.mode.slice(7));
+  // Two buttons whose markup key names only their first state: apply() has just
+  // written "Play" and "Changed only" on them, whatever state they are in.
+  document.getElementById('anim-play').textContent =
+    T(state.anim.playing ? 'map.pause' : 'map.play');
+  document.getElementById('annot-filter').textContent =
+    T(annotFilter === 'changed' ? 'map.annot.filter.changed' : 'map.annot.filter.all');
+  // The field selector was written when the map was loaded.
+  for (const option of document.getElementById('mode').options) {
+    option.textContent = modeLabel(option.value);
+  }
+  // The legend writes its tooltips only when its layout is fresh.
+  if (current) { _legendKey = null; drawLegend(); }
+  markAnonymised(_anonymised);
+});
+
 const dirInput = document.getElementById('file-dir');
 dirInput.onchange = () => { if (dirInput.files.length) openFileList(dirInput.files); };
 
@@ -5085,8 +5958,11 @@ async function chooseFolder() {
   const native = window.epcore.api();
   if (native && typeof native.open_folder_dialog === 'function') {
     const chosen = await native.open_folder_dialog();
-    if (chosen && chosen.path) { await openPath(chosen.path); return; }
-    if (chosen) return;                  // abgebrochen
+    // A cancel comes back as null (shell/jsapi.py), not as an object without a
+    // path. Read as "no host", it opened the browser's folder input as a second
+    // panel, and on macOS pywebview's panel for that input cannot take a folder.
+    if (chosen && chosen.path) await openPath(chosen.path);
+    return;
   }
   dirInput.click();                      // ohne Wirt: der Weg des Browsers
 }
@@ -5094,7 +5970,15 @@ async function chooseFolder() {
 document.getElementById('t-open-dir').onclick = () => chooseFolder();
 document.getElementById('t-open-files').onclick = () => fileInput.click();
 document.getElementById('pick-dir').onclick = () => chooseFolder();
-document.getElementById('studypick-close').onclick = () => document.getElementById('studypick').classList.remove('show');
+document.getElementById('studypick-close').onclick = closeStudyPicker;
+for (const [id, close] of [['studypick', closeStudyPicker], ['sharebox', hideShareBox]]) {
+  document.getElementById(id).addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    // Not on to the window: there Escape also ends a cut being drawn or edited.
+    e.preventDefault(); e.stopPropagation();
+    close();
+  });
+}
 document.getElementById('demo').onclick = loadDemo;
 fileInput.onchange = () => { if (fileInput.files.length) openFileList(fileInput.files); };
 
@@ -5105,6 +5989,7 @@ window.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove
 
 // Mesh-/Anatomie-Auswahl bei Mehrfach-Meshes aus einem Rohexport
 document.getElementById('meshsel').onchange = e => { const m = rawMeshes[+e.target.value]; if (m) loadParsedMesh(m); };
+document.getElementById('velmap').onchange = e => { chooseVelocityMap(e.target.value); };
 
 // Export-Buttons
 document.getElementById('ex-ply').onclick = () => exportMesh('ply');
@@ -5147,6 +6032,7 @@ document.getElementById('smooth-level').oninput = e => {
   state.smoothLevel = +e.target.value;
   document.getElementById('smooth-val').textContent = state.smoothLevel;
   applyColors();
+  recomputeArea();                // the area panel measures the map as drawn
   if (state.mode && state.mode.startsWith('scalar:') && isLatField(state.mode.slice(7))) {
     drawSkyline(state.mode.slice(7));
   }
@@ -5221,6 +6107,18 @@ document.getElementById('anim-speed').oninput = e => { state.anim.speed = +e.tar
 document.getElementById('anim-band').oninput = e => { state.anim.band = +e.target.value; if (!state.anim.playing) applyColors(); refreshSkyline(); };
 document.getElementById('anim-cursor').oninput = e => { stopAnim(); state.anim.engaged = true; state.anim.t = +e.target.value; updateAnimReadout(); applyColors(); refreshSkyline(); };
 
+/* A switch says whether it is on in words, not only in colour: aria-pressed
+ * follows the `on` class. That class is set in some twenty places, so one
+ * observer keeps the two in step rather than each place remembering to. It
+ * acts only on buttons marked as switches, which carry aria-pressed from the
+ * start; Play and the point list's hide and discard chips are not marked,
+ * because their label already changes with the state. */
+const syncPressed = (el) => el.setAttribute('aria-pressed', String(el.classList.contains('on')));
+document.querySelectorAll('[aria-pressed]').forEach(syncPressed);
+new MutationObserver((changes) => {
+  for (const { target } of changes) if (target.hasAttribute('aria-pressed')) syncPressed(target);
+}).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] });
+
 const toggle = (id, key) => {
   const el = document.getElementById(id);
   el.onclick = () => { state[key] = !state[key]; el.classList.toggle('on', state[key]); applyState(); };
@@ -5238,13 +6136,14 @@ document.getElementById('conf-mask').onclick = () => {
   state.confMask = !state.confMask;
   document.getElementById('conf-mask').classList.toggle('on', state.confMask);
   applyColors();
+  recomputeArea();
 };
 document.getElementById('conf-mask-th').addEventListener('input', e => {
   const v = parseFloat(e.target.value);
   if (!Number.isFinite(v) || v < 0) return;
   state.confMaskTh = v;
   document.getElementById('conf-mask-th-lbl').textContent = round(v);
-  if (state.confMask) applyColors();
+  if (state.confMask) { applyColors(); recomputeArea(); }
 });
 
 document.getElementById('tags-all').onclick = () => {
@@ -5289,6 +6188,19 @@ addEventListener('click', (e) => {
   const rs = document.getElementById('recset'); if (rs && rs.classList.contains('show') && !rs.contains(e.target)) rs.classList.remove('show');
   const sb = document.getElementById('sharebox'); if (sb && sb.classList.contains('show') && !sb.contains(e.target)) sb.classList.remove('show');
 });
+/* The video settings and the share box open below the toolbar's real lower
+ * edge (--toolbar-bottom in the stylesheet). The bar changes rows with the
+ * window, the language and a comparison's extra buttons, also while a box is
+ * open, so the edge is followed rather than read once when a box opens. The
+ * resize listener covers a media rule moving the bar without resizing it. */
+{
+  const bar = document.getElementById('toolbar');
+  const follow = () => document.documentElement.style.setProperty(
+    '--toolbar-bottom', Math.round(bar.getBoundingClientRect().bottom) + 'px');
+  follow();
+  addEventListener('resize', follow);
+  if (typeof ResizeObserver === 'function') new ResizeObserver(follow).observe(bar);
+}
 function applyState() {
   refreshDisplayToggles();
 }
@@ -5311,6 +6223,9 @@ function centreAnatomy() {
   frameCamera(mesh.geometry.boundingSphere);
 }
 document.getElementById('t-shot').onclick = () => {
+  // Like the exports beside it. Without a map the crop finds nothing drawn,
+  // keeps the whole canvas, and a fully transparent PNG was saved unasked.
+  if (!mesh) { alert(T('map.msg.load.first')); return; }
   // Vollen Viewport, und der Orientierungswürfel bleibt draußen: er ist eine
   // Bedienhilfe am Bildschirmrand, kein Teil der Karte.
   renderer.setScissorTest(false);
@@ -5320,7 +6235,7 @@ document.getElementById('t-shot').onclick = () => {
   // ist `alpha: true`, damit die Seite hinter ihr durchscheint. Direkt
   // gespeichert wurde daraus ein PNG mit durchsichtigem Rand — auf hellem
   // Papier ein grauer Schachbrettrahmen, in Präsentationen ein Loch.
-  EPSave.saveCanvas('epview-snapshot.png', snapshotCanvas());
+  EPSave.saveCanvas('epview-snapshot.png', snapshotCanvas()).then(reportSave);
 };
 document.getElementById('t-orbit').onclick = () => state.recording ? stopRecording() : startOrbit();
 document.getElementById('t-export').onclick = () => state.recording ? stopRecording() : startExport();
@@ -5330,9 +6245,19 @@ const recsetEl = document.getElementById('recset');
 document.getElementById('t-recset').onclick = (e) => {
   e.stopPropagation();
   const mime = pickMime();
-  document.getElementById('rs-fmt').textContent = mime ? mimeExt(mime).toUpperCase() : 'nicht unterstützt';
+  document.getElementById('rs-fmt').textContent = mime ? mimeExt(mime).toUpperCase() : T('map.rec.unsupported');
   recsetEl.classList.toggle('show');
+  // Into the panel: it stands after the whole toolbar in the tab order, and the
+  // menu item that opened it is gone with its menu.
+  if (recsetEl.classList.contains('show')) document.getElementById('rs-legend').focus();
 };
+recsetEl.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  // Not on to the window: there Escape also ends a cut being drawn or edited.
+  e.preventDefault(); e.stopPropagation();
+  recsetEl.classList.remove('show');
+  document.getElementById('t-vid').focus();
+});
 document.getElementById('rs-legend').onchange = e => { recOpts.bakeLegend = e.target.checked; };
 document.getElementById('rs-gizmo').onchange = e => { recOpts.hideGizmo = e.target.checked; };
 document.getElementById('rs-fps').onchange = e => { recOpts.fps = +e.target.value; };
@@ -5701,7 +6626,7 @@ function endEditing() {
  * Säge. Dabei entstehen neue Knoten; alles, was je Knoten hängt (die Skalare,
  * aus denen die Farben kommen), wird für sie zwischen den Enden interpoliert.
  */
-function rebuildCuts() {
+function rebuildCuts(quiet = false) {
   if (!current || !current.positionsOriginal) return;
   let positions = current.positionsOriginal;
   let faces = current.facesOriginal;
@@ -5724,6 +6649,7 @@ function rebuildCuts() {
     }
     faces = EPM.facesWithout(faces, trimmed);
   }
+  const afterTrim = faces.length / 3;
 
   /* Wo geschnitten wurde: die Knoten, die dabei entstanden sind. Sie liegen
    * genau auf der Linie, und weiß eingefärbt ergeben sie das Band, das den
@@ -5780,11 +6706,26 @@ function rebuildCuts() {
     console.warn('[epview] Schnitt verworfen: von %d Dreiecken blieben %d übrig '
                  + '(%d Umriss(e), Seite %s)', started, leftOver, cutState.shapes.length,
                  (cutState.shapes[cutState.shapes.length - 1] || {}).side);
-    cutState.shapes.pop();
-    if (typeof epcoreNotify === 'function') {
-      epcoreNotify(T('map.cut.everything'));
+    /* Take back what took everything. If trimming at the openings already
+     * took nearly all, that is the opening chosen last, not a drawn outline.
+     * Taking back outlines only meant: with no outline pop() removed nothing,
+     * the next call came to the same, and that ran on to a stack overflow,
+     * with an alert() per level (measured: 5752 on a short tube at 30 mm).
+     * Each level now takes one away, so it ends. */
+    let ring = null;
+    if (trimState.chosen.size && afterTrim < started * 0.02) {
+      ring = [...trimState.chosen].pop();
+      trimState.chosen.delete(ring);
+    } else {
+      cutState.shapes.pop();
     }
-    rebuildCuts();
+    // Said once, not once per level.
+    if (!quiet && typeof epcoreNotify === 'function') {
+      epcoreNotify(T(ring != null ? 'map.trim.everything' : 'map.cut.everything'));
+    }
+    rebuildCuts(true);
+    // The opening's chip stayed on, although nothing is trimmed there any more.
+    if (ring != null && !quiet) buildTrimUI();
     return;
   }
 
@@ -6014,9 +6955,17 @@ cutOverlay().addEventListener('contextmenu', (event) => {
 cutOverlay().addEventListener('dblclick', (event) => {
   if (!cutState.drawing) return;
   event.preventDefault();
-  // Der Doppelklick setzt zwei Punkte auf dieselbe Stelle; einer davon ist
-  // Absicht, der andere das Schließen.
-  cutState.points.pop();
+  /* The second press of a double click lands on the corner the first press
+   * just set, and a press on a set point grabs it (pointerdown above) instead
+   * of adding one. Popping unconditionally took that real corner: a square
+   * came out as a triangle and a triangle cut nothing. Only a second press
+   * that did add a point, on top of the last one, leaves a spare to drop.
+   * Not event.detail: Chromium reports 0 there for a pointerdown. */
+  const points = cutState.points;
+  const n = points.length;
+  if (n >= 2 && EPM.handleAt([points[n - 2]], points[n - 1][0], points[n - 1][1], 11) >= 0) {
+    points.pop();
+  }
   applyCut();
 });
 addEventListener('keydown', (event) => {
@@ -6292,14 +7241,36 @@ window.epviewActions = {
   // ein Zufall darüber, wer zuletzt geladen hat.
   openMapPath: (payload) => { if (payload && payload.path) openPath(payload.path); },
   // Ordner, nicht Einzeldatei: ein Rhythmia-Export ist ein Verzeichnis aus
-  // .000/.001-Teilen und ein CARTO-Export eines aus Meshes.
-  openMap: () => document.getElementById('file-dir')?.click(),
+  // .000/.001-Teilen und ein CARTO-Export eines aus Meshes. Through the native
+  // dialog, as the view's own Open does: the shell's Open and the menu clicked
+  // the browser's folder input, which hands over files without a path (a split
+  // Velocity archive cannot be read from them) and which pywebview on macOS
+  // opens as a panel that cannot pick a folder at all.
+  openMap: () => chooseFolder(),
   openMapFile: () => document.getElementById('file')?.click(),
   exportMap: () => document.getElementById('ex-ply')?.click(),
-  closeStudy: () => closeMap(),
+  // Asked only about what closing would lose unsaved; the rest is the shell's call.
+  closeStudy: () => {
+    const n = annotUnsavedOnClose();
+    if (!n || confirm(T('map.close.confirm.annot', { n }))) closeMap();
+  },
 };
 
 addEventListener('resize', () => { if (state.mode) layoutLegend(); });
+
+/* The stats grow after the legend was placed: loadParsedMesh writes the map's
+ * notes once the legend is drawn, and a language switch rewrites the metrics.
+ * Placed only on a new field or a resize, the legend stayed where the shorter
+ * stats had left room and covered the notes. Deferred to the next frame, so
+ * the cap layoutLegend sets is not measured inside this same callback. */
+if (typeof ResizeObserver === 'function') {
+  let queued = false;
+  new ResizeObserver(() => {
+    if (queued || !state.mode) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; layoutLegend(); });
+  }).observe(document.getElementById('stats'));
+}
 
 /* Ein Abschnitt zur Zeit, und ein Abschnitt nur dann, wenn er etwas enthält.
  *
@@ -6332,6 +7303,9 @@ document.querySelectorAll('.sec > summary').forEach(summary => {
     if (!section.open) { event.preventDefault(); openSection(section.dataset.sec); }
   });
 });
+// Once at start, too: until a map is loaded nothing else asks, and the empty
+// view offered five headings that opened onto nothing.
+refreshSections();
 
 /* Auf der Legende ziehen stellt Zeiger und Bandbreite.
  *
@@ -6406,18 +7380,28 @@ if (egmTraces) egmTraces.addEventListener('click', annotClickTrace);
 document.getElementById('t-close').onclick = () => {
   // Gefragt, nicht getan: eine offene Studie zuzuklappen nimmt Schnitte,
   // Vergleich und Fenster mit, und der Weg zurück ist, sie neu zu öffnen.
-  if (confirm(T('map.close.confirm'))) closeMap();
+  // Unsaved annotation changes go with it too, and the question counts them.
+  const n = annotUnsavedOnClose();
+  if (confirm(n ? T('map.close.confirm.annot', { n }) : T('map.close.confirm'))) closeMap();
 };
 document.getElementById('t-compare').onclick = () => {
-  if (comparison) clearComparison(); else rememberComparison();
+  if (!comparison) { rememberComparison(); return; }
+  const n = annotUnsavedHeld();
+  if (!n || confirm(T('map.annot.unsaved.compare', { n }))) clearComparison();
 };
 document.getElementById('t-theme').onclick = () => epcoreTheme.toggle();
 document.getElementById('t-anonymise').onclick = (e) => {
   e.stopPropagation();
   if (!current) { alert(T('map.msg.load.first')); return; }
-  const groups = current.tagGroups || [];
-  const before = groups.filter(g => isIdentifyingLabel(g.label)).length;
-  current.tagGroups = scrubTagGroups(groups);
+  /* Only the labels change on the groups on screen. scrubTagGroups builds the
+   * copy that may leave the page, position and label and nothing else, and the
+   * PLY and the share build that copy themselves (encodeTagComment). Put in
+   * place of the groups, it cut every marker off its point: the electrogram
+   * link, the group id the hide state and the marker scales go by, and the
+   * ablation measurements. anonymiseTagGroups replaces the same labels and
+   * keeps every other field; its count covers the points' labels too. */
+  const { groups, replaced } = anonymiseTagGroups(current.tagGroups || []);
+  current.tagGroups = groups;
   markAnonymised(true);
   // Redraw the markers so the new labels are what is on screen — the point of
   // scrubbing is that the reader can see it happened.
@@ -6427,13 +7411,14 @@ document.getElementById('t-anonymise').onclick = (e) => {
   } catch (e) {
     console.warn('tag markers not rebuilt', e);
   }
-  alert(before
-    ? `${before} identifizierende Beschriftung(en) ersetzt. Geometrie und `
-      + 'Messwerte bleiben unverändert. Ergebnis vor dem Teilen selbst prüfen.'
-    : 'Keine identifizierenden Beschriftungen gefunden. Die Karte trägt nur '
-      + 'Geometrie und Messwerte — vor dem Teilen trotzdem selbst prüfen.');
+  alert(replaced
+    ? T('map.anonymise.replaced', { n: replaced })
+    : T('map.anonymise.none'));
 };
 document.getElementById('t-share').onclick = (e) => { e.stopPropagation(); doShare(); };
+// The share button's title comes from markAnonymised alone. Called once now, so
+// the empty view, before any map has been loaded, says why sharing waits too.
+markAnonymised(false);
 document.getElementById('share-close').onclick = hideShareBox;
 document.getElementById('share-copy').onclick = () => { const i = document.getElementById('share-link'); i.select(); navigator.clipboard?.writeText(i.value); };
 document.getElementById('share-revoke').onclick = doRevoke;
@@ -6481,24 +7466,6 @@ epcoreTheme.onChange((name) => {
   lightForTheme(name);
   const button = document.getElementById('t-theme');
   if (button) button.textContent = name === 'dark' ? '\u263E' : '\u263C';
-});
-
-/* The language can be switched in the shell, too, with a map open that a
- * reload would throw away. The markup follows on its own; what is built here
- * in script — the metrics, the notes under them, the annotation list, the
- * chips, the legend — is built again from the state on hand. */
-addEventListener('epcore:language', () => {
-  if (current) {
-    updateStats(current);
-    if (mapNotesFrom) showMapNotes(mapNotes(...mapNotesFrom));
-  }
-  annotRefresh();
-  buildTagUI();
-  buildAblationColorUI();
-  buildTrimUI();
-  refreshCompareUI();
-  _legendKey = null;                    // or the legend sees nothing changed
-  drawLegend();
 });
 
 addEventListener('resize', () => {
@@ -6599,12 +7566,19 @@ applyState();
 
 // Direktlinks: ?demo lädt die Demo-Map, ?src=<url> lädt Mesh ODER Rohexport
 // (.000 Rhythmia, .zip CARTO, .xml EnSite).
-async function loadURL(url) {
-  showLoading('Lade…');
+// `rethrow`: the caller says what went wrong in its own words. A shared link
+// does: an expired map is a different thing from a broken link, and with the
+// generic dialog shown here first, its handler never ran.
+async function loadURL(url, { rethrow = false } = {}) {
+  showLoading(T('map.loading'));
   try {
     const res = await fetch(url);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    setLoading('Konvertiere…');
+    if (!res.ok) {
+      const failure = new Error('HTTP ' + res.status);
+      failure.status = res.status;
+      throw failure;
+    }
+    setLoading(T('map.loading.convert'));
     await new Promise(r => requestAnimationFrame(() => r()));
     const buf = await res.arrayBuffer();
     const name = (url.split('/').pop() || 'mesh').split('?')[0];
@@ -6614,25 +7588,27 @@ async function loadURL(url) {
       if (lower.endsWith('.obj')) data = EP.parseOBJ(new TextDecoder().decode(buf));
       else if (lower.endsWith('.stl')) data = EP.parseSTL(buf);
       else data = EP.parsePLY(buf);
-      if (!data.positions.length) throw new Error('Keine Geometrie gefunden.');
+      if (!data.positions.length) throw new Error(T('map.msg.nogeometry'));
+      rawMeshes = []; populateMeshSelector([]);      // as for a dropped mesh
       loadGeometry(data, name);
       return;
     }
     // Rohexport
     let meshes;
     if (lower.endsWith('.zip')) {
-      const { unzipSync } = await import('../vendor/fflate.module.js?v=d400d396e5fb');
+      const { unzipSync } = await import('../vendor/fflate.module.js?v=9c18153262e8');
       meshes = EP.parseCarto(new Uint8Array(buf), unzipSync);
     } else if (lower.endsWith('.xml')) {
       meshes = EP.parseEnSite(new TextDecoder().decode(buf));
     } else {
       meshes = await EP.parseRhythmia(new Uint8Array(buf));   // .000 (einteilig)
     }
-    if (!meshes.length) throw new Error('Keine Mesh-Daten gefunden.');
+    if (!meshes.length) throw new Error(T('map.msg.nomesh'));
     rawMeshes = meshes;
     populateMeshSelector(meshes);
     loadParsedMesh(meshes[0]);
   } catch (err) {
+    if (rethrow) throw err;
     alert(T('map.msg.load.failed') + '\n' + err.message);
     console.error(err);
   } finally {
@@ -6652,15 +7628,15 @@ if (_params.has('demo')) {
    * both, because nginx hands /view/<id> to this file unchanged. */
   const shared = location.pathname.match(/\/view\/([A-Za-z0-9_-]{16,64})$/);
   if (shared) {
-    loadURL(`/maps/${shared[1]}.ply`).catch((e) => {
+    loadURL(`/maps/${shared[1]}.ply`, { rethrow: true }).catch((e) => {
       console.error('shared map failed', e);
       // 410 means the link outlived the map. That is a different thing from a
-      // broken link and the reader should be told which.
-      const message = String(e && e.message || e);
-      alert(/410|expired/i.test(message)
-        ? 'Dieser Link ist abgelaufen. Geteilte Karten werden nach der '
-          + 'vereinbarten Frist gelöscht.'
-        : 'Die geteilte Karte konnte nicht geladen werden.');
+      // broken link and the reader should be told which. The status, not a
+      // "410" anywhere in the message: a parse error can quote a number.
+      // Any other failure keeps its reason, as loadURL's own dialog did.
+      alert(e && e.status === 410
+        ? T('map.msg.share.expired')
+        : T('map.msg.share.loadfailed') + '\n' + String(e && e.message || e));
     });
   }
 }
@@ -6669,7 +7645,7 @@ if (_params.has('demo')) {
 <script type="module">
 /* See the note in viewer.html. The map view owns the map actions; everything
  * else the menu can send is routed back to the signal view by the bridge. */
-import '../shared/bridge.js?v=d400d396e5fb';
+import '../shared/bridge.js?v=9c18153262e8';
 
 /* In der Schale steht "Öffnen" auch oben in der Leiste, für beide Module. Das
  * Menü hier daneben wäre eine zweite Antwort auf dieselbe Frage — die Knöpfe

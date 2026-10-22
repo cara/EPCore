@@ -2,7 +2,7 @@
  *
  * OpenEP's getConductionVelocity and cvHistogram. The Python side is
  * epcore/epview/conduction.py and the two are pinned to each other by
- * tests/python/epview/test_conduction_conformance.py — a wavefront that comes
+ * tests/python/epview/test_openep_parity_conformance.py — a wavefront that comes
  * out at one speed in the viewer and another on the command line is worse than
  * either being wrong alone.
  *
@@ -21,7 +21,7 @@
  *    artefacts onto the edge of the plausible range and makes the histogram
  *    there look like a finding.
  */
-import { triangleAreas } from './epmetrics.js?v=d400d396e5fb';
+import { triangleAreas } from './epmetrics.js?v=9c18153262e8';
 
 /** Velocities outside this are the annotation's resolution rather than tissue. */
 export const PLAUSIBLE_MM_S = [10.0, 5000.0];
@@ -85,10 +85,15 @@ export function conductionVelocity(positions, faces, lat, bounds = PLAUSIBLE_MM_
     const gy = summed[v * 3 + 1] / total[v];
     const gz = summed[v * 3 + 2] / total[v];
     const magnitude = Math.hypot(gx, gy, gz);       // ms per mm
-    if (!(magnitude > 0)) continue;
+    if (Number.isNaN(magnitude)) continue;
     const raw = 1000 / magnitude;                    // mm per second
-    if (!Number.isFinite(raw)) continue;
-    if (raw < bounds[0] || raw > bounds[1]) { implausible++; continue; }
+    // A gradient of exactly zero is the far end of "near zero": whole-
+    // millisecond times give a fast region whole one-rings at one time. Its
+    // infinite speed is outside every bound and is counted, not dropped.
+    if (!Number.isFinite(raw) || raw < bounds[0] || raw > bounds[1]) {
+      implausible++;
+      continue;
+    }
     speed[v] = raw;
     // Along the gradient: later times are further along the wavefront.
     direction[v * 3] = gx / magnitude;
@@ -100,6 +105,21 @@ export function conductionVelocity(positions, faces, lat, bounds = PLAUSIBLE_MM_
   for (let v = 0; v < n; v++) if (Number.isFinite(speed[v])) measured++;
   return { speedMmS: speed, direction, measuredVertices: measured,
            implausibleVertices: implausible, boundsMmS: [bounds[0], bounds[1]] };
+}
+
+/** The median speed over the measured vertices, or null when none was measured.
+ *
+ *  Taken as `np.nanmedian` takes it, which is what `epcore epview metrics`
+ *  prints: an even count averages the two middle values. Picking the upper one
+ *  instead showed 750 mm/s for a small strip the command line put at 675.
+ */
+export function medianSpeed(speed) {
+  const finite = [];
+  for (const v of speed) if (Number.isFinite(v)) finite.push(v);
+  if (!finite.length) return null;
+  finite.sort((x, y) => x - y);
+  const mid = finite.length >> 1;
+  return finite.length % 2 ? finite[mid] : (finite[mid - 1] + finite[mid]) / 2;
 }
 
 /** How much surface conducts in each speed band. Weighted by area. */

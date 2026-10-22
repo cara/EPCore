@@ -103,14 +103,17 @@ export function clampWindow(vmin, vmax, lo, hi, eps = 1e-6) {
  *
  * Time does not work that way. An activation map spans 0-300 ms and every
  * millisecond is worth the same, so LAT stays linear — a curved time axis
- * would make the middle of a wavefront jump.
+ * would make the middle of a wavefront jump. The LAT EPCore derives from the
+ * edited points is a time like the vendor's and goes on the same straight
+ * track; on the voltage curve half the track sat near its upper end and the
+ * scale under it kept a single mark.
  */
 const WINDOW_CURVE = 2.6;
 
 /** How the slider is scaled for this field: 1 is linear, higher bends it. */
 export function windowCurve(field) {
   const f = (field || '').toLowerCase();
-  return (f === 'lat' || f === 'activation') ? 1 : WINDOW_CURVE;
+  return (f === 'lat' || f === 'activation' || f === 'lat_epcore') ? 1 : WINDOW_CURVE;
 }
 
 /** Slider position (0..1) -> value. */
@@ -149,6 +152,27 @@ function linearTicks(lo, hi, wanted) {
   return out;
 }
 
+/** How close two labels may sit, as a share of the track. A label is up to
+ *  five characters of 9 px mono, about 27 px, on a track of about 236 px, and
+ *  the page slides each label towards its own end of the track so the first
+ *  and last stay inside it. Two neighbours then need 0.15 of the track between
+ *  their marks to keep a few pixels apart. */
+const MIN_TICK_GAP = 0.15;
+
+/** The ticks, without any that would sit closer than MIN_TICK_GAP to the one
+ *  before it along the track. Thinned by position, not by value: on a curved
+ *  track 0.2 and 0.3 mV are a tenth of the track apart, and their labels ran
+ *  into each other ("0.2000.300"). */
+function spacedAlongTrack(ticks, lo, hi, curve) {
+  const out = [];
+  let last = -Infinity;
+  for (const value of ticks) {
+    const at = valueToPosition(value, lo, hi, curve);
+    if (at - last >= MIN_TICK_GAP - 1e-9) { out.push(value); last = at; }
+  }
+  return out;
+}
+
 /** Values worth labelling under the slider, in the field's own units.
  *
  * Two scales, two kinds of mark. A straight axis gets a round step laid across
@@ -157,11 +181,11 @@ function linearTicks(lo, hi, wanted) {
  * negative marks at all. A curved axis gets the 1/2/3/5 decades inside its
  * range instead — evenly spaced numbers would bunch at the top, where the
  * curve has almost no travel — thinned to the ones nearest to evenly spaced
- * *positions*.
+ * *positions*. Either way no two end up closer than MIN_TICK_GAP.
  */
 export function windowTicks(lo, hi, curve = 1, wanted = 5) {
   if (!(hi > lo)) return [];
-  if (curve === 1 || lo <= 0) return linearTicks(lo, hi, wanted);
+  if (curve === 1 || lo <= 0) return spacedAlongTrack(linearTicks(lo, hi, wanted), lo, hi, curve);
 
   // The floor is measured along the track, not along the values: on a curved
   // scale 0.05 mV is a fifth of the way up and worth a label.
@@ -173,7 +197,9 @@ export function windowTicks(lo, hi, curve = 1, wanted = 5) {
       if (value >= floor && value <= hi) candidates.push(value);
     }
   }
-  if (candidates.length <= wanted) return candidates.sort((a, b) => a - b);
+  if (candidates.length <= wanted) {
+    return spacedAlongTrack(candidates.sort((a, b) => a - b), lo, hi, curve);
+  }
 
   const chosen = [];
   for (let i = 0; i < wanted; i++) {
@@ -182,14 +208,16 @@ export function windowTicks(lo, hi, curve = 1, wanted = 5) {
       (best, value) => Math.abs(value - target) < Math.abs(best - target) ? value : best);
     if (!chosen.includes(nearest)) chosen.push(nearest);
   }
-  return chosen.sort((a, b) => a - b);
+  return spacedAlongTrack(chosen.sort((a, b) => a - b), lo, hi, curve);
 }
 
 // Preset windows per field type. {label, lo, hi}; lo/hi === null means "Auto" (data range).
+// `key` names the catalogue word of a preset whose label carries a German one;
+// the page shows that word in the chosen language before the range.
 export function voltagePresets(field) {
   const f = (field || '').toLowerCase();
   const auto = { label: 'Auto', lo: null, hi: null };
-  if (f === 'voltage') return [{ label: 'Atrial 0.05/0.5', lo: 0.05, hi: 0.5 }, { label: 'Ventr. 0.5/1.5', lo: 0.5, hi: 1.5 }, { label: 'Voll 0.01/20', lo: 0.01, hi: 20 }, auto];
+  if (f === 'voltage') return [{ label: 'Atrial 0.05/0.5', lo: 0.05, hi: 0.5 }, { label: 'Ventr. 0.5/1.5', lo: 0.5, hi: 1.5 }, { label: 'Voll 0.01/20', key: 'map.window.preset.full', lo: 0.01, hi: 20 }, auto];
   if (f === 'unipolar') return [{ label: '0.3 / 8.3', lo: 0.3, hi: 8.3 }, auto];
   return [auto];
 }
@@ -339,6 +367,36 @@ export function isIdentifyingLabel(s) {
       || /\d{4}[-_/.]\d{1,2}[-_/.]\d{1,2}/.test(s)     // 2026-03-04
       || /\d{1,2}[-_/.]\d{1,2}[-_/.]\d{2,4}/.test(s)   // 04.03.2026
       || /\d{9,}/.test(s);                             // epoch / long id
+}
+
+// "Anonymisieren" on the live map: identifying labels replaced, every other
+// field kept. `scrubTagGroups` is the export filter — position and label only —
+// and the viewer still needs the rest: `egm` opens a point's electrogram and
+// finds whether it is hidden, `ablation` colours a lesion by its impedance
+// drop. Handed the export form, every point went silent and every lesion grey.
+// Copies, so the parsed study keeps its originals. `replaced` counts point
+// labels too: a timestamp on a point identifies as much as one on its group.
+export function anonymiseTagGroups(groups) {
+  if (!Array.isArray(groups)) return { groups: [], replaced: 0 };
+  let replaced = 0;
+  const out = groups.map(g => {
+    const abl = (g.category || '').toLowerCase() === 'ablation';
+    const copy = { ...g };
+    if (isIdentifyingLabel(g.label)) { copy.label = abl ? 'Ablation' : 'Annotation'; replaced++; }
+    copy.points = Array.isArray(g.points) ? g.points.map((p, i) => {
+      if (!isIdentifyingLabel(p.label)) return p;
+      replaced++;
+      const q = { ...p, label: abl ? 'Abl ' + (i + 1) : 'P ' + (i + 1) };
+      // A Rhythmia point is its own `egm`, and the electrogram panel is titled
+      // from it: left on the original it would show the old label again. A
+      // CARTO or EnSite `egm` is an entry of `points` and stays that object —
+      // the annotation state finds it by identity.
+      if (p.egm === p) q.egm = q;
+      return q;
+    }) : [];
+    return copy;
+  });
+  return { groups: out, replaced };
 }
 
 // Replace identifying tag labels with generic ones; keep positions, color, category, clean labels.

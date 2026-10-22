@@ -27,8 +27,8 @@
  * a gap somebody can see; a fabricated one is not.
  */
 
-import { anatomicalStructures } from './epmetrics.js?v=d400d396e5fb';
-import { statesLatUnit, rhythmiaLatComment, RHYTHMIA_LAT_COMMENT } from './epconv.js?v=d400d396e5fb';
+import { anatomicalStructures } from './epmetrics.js?v=9c18153262e8';
+import { statesLatUnit, rhythmiaLatComment, RHYTHMIA_LAT_COMMENT } from './epconv.js?v=9c18153262e8';
 
 export const WRITER = 'EPCore';
 
@@ -71,6 +71,18 @@ export const RHYTHMIA_C_AMBIGUOUS_NOTE =
 //: Rhythmias — wortgleich mit `openep_export.LAT_STATED_NOTE`.
 export const LAT_STATED_NOTE = "The surface states what its 'lat' is: {}";
 
+//: And what it says about EPCore's derived activation, which is not written —
+//: verbatim `openep_export.DERIVED_LAT_NOTE`. In `act_bip` every reader that
+//: does not know `userdata.epcore` would take it for the recording system's,
+//: and this export does not write the marker ADR-0009 §6 asks for beside it.
+export const DERIVED_LAT_NOTE =
+  "The surface also carried EPCore's derived activation ('lat_epcore', "
+  + 'interpolated from reannotated points). It was not written into the '
+  + "activation field: OpenEP reads that field as the recording system's, and "
+  + "a derived activation needs EPCore's annotation marker beside it (how many "
+  + 'points were edited or discarded, in which study), which this surface '
+  + 'does not carry.';
+
 /** Die Aktivierung für den OpenEP-Export und der Satz, der dazugehört.
  *
  * Dieselbe Entscheidung wie `openep_export._lat_if_stated` für eine PLY: `lat`
@@ -80,6 +92,15 @@ export const LAT_STATED_NOTE = "The surface states what its 'lat' is: {}";
  * genau deshalb ungeprüft und gab `sc.lat` ungefragt weiter.
  */
 export function openEPActivation(mesh) {
+  // A derived activation (`lat_epcore`, from "Fläche neu rechnen") stays out,
+  // but not without a word: the decision is taken on the rest of the surface,
+  // and the sentence is added to it — as `openep_export.main` does for any input.
+  if (mesh && mesh.scalars && mesh.scalars.lat_epcore) {
+    const { lat_epcore: _derived, ...vendor } = mesh.scalars;
+    const found = openEPActivation({ ...mesh, scalars: vendor });
+    return { ...found,
+             latNote: [found.latNote, DERIVED_LAT_NOTE].filter(Boolean).join(' ') };
+  }
   const lat = mesh && mesh.scalars ? mesh.scalars.lat : null;
   if (!lat) return { activation: null, latNote: '' };
   if (!statesLatUnit(mesh)) return { activation: lat, latNote: LAT_UNSTATED_NOTE };
@@ -95,6 +116,101 @@ export function openEPActivation(mesh) {
     ? RHYTHMIA_LAT_NOTE
     : `${RHYTHMIA_LAT_NOTE} ${RHYTHMIA_C_AMBIGUOUS_NOTE}`;
   return { activation: lat, latNote: note };
+}
+
+//: What the file says when its bipolar field holds a measurement whose kind the
+//: export did not state — verbatim `openep_export.UNNAMED_SCALAR_NOTE`.
+export const UNNAMED_SCALAR_NOTE =
+  'The per-vertex scalar comes from an EnSite DIF export, which states one '
+  + 'value per vertex without naming the quantity — bipolar voltage in some '
+  + 'exports and local activation time in others. It has been placed in the '
+  + 'bipolar voltage field because OpenEP has no field for an unnamed '
+  + 'measurement. Check the unit against the original study before reading it '
+  + 'as millivolts.';
+
+/** The bipolar column for the OpenEP export, and the `notes` that go with it.
+ *
+ * The rule of `openep_export.main`: EnSite states one value per vertex as
+ * `map_data` and does not name the quantity. OpenEP has no field for that, so
+ * it goes into the bipolar one, and the file admits it is a guess. Dropping it
+ * wrote a surface with nothing on it while `notes` claimed its scalars were
+ * there. Keyed on the scalars, not on the source, so a PLY converted from a DIF
+ * comes out as the DIF does — as in Python.
+ *
+ * `notes` goes to `buildOpenEP` as `extraNotes`, after the default sentence:
+ * `openep_export.main` passes the caveat as `extra_notes`, so the file still
+ * says which of its fields are empty on purpose.
+ */
+export function openEPBipolar(mesh) {
+  const scalars = (mesh && mesh.scalars) || {};
+  if (scalars.map_data != null && scalars.voltage == null) {
+    return { bipolar: scalars.map_data, notes: UNNAMED_SCALAR_NOTE };
+  }
+  return { bipolar: scalars.voltage || null, notes: '' };
+}
+
+/** The map's name inside the file — the rule of `epcore epview openep`.
+ *
+ * Never the name the map was opened under. A file or study folder is often
+ * named after the patient and carries the procedure date, and the name inside
+ * the .mat survives renaming the download, which is the file that gets handed
+ * on. Like the command line: the technical map name a CARTO or EnSite export
+ * gives ("1-LA", "EnSite_vol0"); "Rhythmia" for a Rhythmia archive, whose
+ * anatomy labels are typed by hand; "map" for anything else, a loaded mesh
+ * file among them.
+ *
+ * An EnSite name is taken only in the form both DIF readers write it
+ * (`ensite_to_3d.parse_ensite_xml`, `epconv.parseEnSite`). A Velocity study
+ * also comes in as EnSite, under the name of the folder it was opened from,
+ * and the command line writes "map" for it, since it takes such a study only
+ * as the PLY converted from it.
+ */
+const ENSITE_MAP_NAME = /^EnSite_vol\d+(_surf\d+)?$/;
+
+export function openEPName(source, mapName) {
+  if (source === 'rhythmia') return 'Rhythmia';
+  if (source === 'carto' && mapName) return String(mapName);
+  if (source === 'ensite' && ENSITE_MAP_NAME.test(String(mapName || ''))) return String(mapName);
+  return 'map';
+}
+
+/** A raw export's mapping points with their traces and names, for `buildOpenEP`.
+ *
+ * The same rule as `openep_export._from_carto`, so that a file from the viewer and
+ * one from `epcore epview openep` say the same:
+ *
+ *  * `egm` is OpenEP's *bipolar* field. It takes the channel the header names as
+ *    the bipolar mapping channel, not whichever happens to come first. If the
+ *    header names none, the first is written and `names` says which it is.
+ *  * In millivolts, not counts: the header names the gain, and a trace in raw
+ *    counts is, at 0.003 mV per count, a signal 333 times too large that does not
+ *    look wrong.
+ *  * Every point, including one with no position. Python writes it with NaN
+ *    coordinates, and one row fewer would shift every later one against the file
+ *    from the other path.
+ *
+ * Here and not in `index.html`, so that a conformance test can hold the rule.
+ */
+export async function openEPPoints(points, readEgm) {
+  const curves = [], names = [];
+  for (const point of points) {
+    const id = String(point.id ?? point.label ?? '');
+    let egm = null;
+    try { egm = await readEgm(point); } catch (e) { egm = null; }
+    if (!egm || !egm.channels || !egm.channels.length) {
+      curves.push(null);
+      names.push(id);
+      continue;
+    }
+    const named = egm.bipolarChannel && egm.channels.includes(egm.bipolarChannel)
+      ? egm.bipolarChannel : null;
+    const channel = named || egm.channels[0];
+    const counts = egm.samples[egm.channels.indexOf(channel)];
+    const gain = Number.isFinite(egm.gainMv) ? egm.gainMv : 1;
+    curves.push(Float64Array.from(counts, (v) => v * gain));
+    names.push(`${id} ${channel}`);
+  }
+  return { points: [...points], curves, names };
 }
 
 // MAT-file data types (Level 5).
@@ -249,10 +365,16 @@ const column = (values, n) => (r) => {
   return Number.isFinite(v) ? v : NaN;
 };
 
-/** The bytes of a .mat file holding one map. */
+/** The bytes of a .mat file holding one map.
+ *
+ * `notes` replaces the sentence that says what is and is not in the file;
+ * `extraNotes` and `latNote` follow it, in that order — as `extra_notes` and
+ * `lat_note` do in `openep_export.build_userdata`.
+ */
 export function buildOpenEP(positions, faces, {
   activation = null, bipolar = null, unipolar = null,
   impedance = null, force = null, name = '', notes = '', latNote = '',
+  extraNotes = '',
   points = null, curves = null, pointNames = null,
 } = {}) {
   const n = positions.length / 3;
@@ -270,9 +392,11 @@ export function buildOpenEP(positions, faces, {
       + 'or ablation records in it, and those fields are empty rather than '
       + 'filled with something invented.');
 
-  // Was die Aktivierungsspalte ist, reist *neben* dem übrigen Satz, nicht
-  // an seiner Stelle: „diese Karte hat keine Punkte" und „ihre lat kam ohne
-  // Einheit" sind zwei Dinge, die ein Leser beide braucht.
+  // What the activation column is rides *along with* the rest of the sentence,
+  // not in its place: "this map has no points" and "its lat came without a
+  // unit" are two things a reader needs both of. The same holds for what the
+  // caller says about the rest of the file (points of other maps left out).
+  if (extraNotes) told = `${told} ${extraNotes}`;
   if (latNote) told = `${told} ${latNote}`;
 
   const rim = anatomicalStructures(positions, faces).rimVertices;
@@ -351,4 +475,37 @@ export function buildOpenEP(positions, faces, {
   w.bytes(new Uint8Array([0x00, 0x01, 0x49, 0x4d]));   // version 0x0100, "IM"
   w.bytes(userdata);
   return w.concat();
+}
+
+//: What the file says when points of the same export's other maps were left
+//: out (`{}` is their count) — verbatim `openep_export.OTHER_MAPS_NOTE`. The
+//: count only: the other maps' names are typed by the operator, and the file
+//: is made to be handed on.
+export const OTHER_MAPS_NOTE =
+  '{} mapping point(s) recorded on other maps of the same export were left '
+  + 'out; they belong beside a different surface.';
+
+/** The points that belong beside the surface of map `mapName`, and the
+ * sentence about the others — the rule of `openep_export.own_points`.
+ *
+ * A CARTO export holds several maps and numbers points per map. The reader
+ * attaches the whole study's point list to every mesh (that is how the viewer
+ * shows them), but only the map's own belong in a .mat: a foreign "1 M1-M2"
+ * next to this map's "1 M1-M2" cannot be told apart in the file, and every
+ * analysis over egmX/egm mixes two chambers. A point whose file name names no
+ * map (`mapName` null) is kept: nothing says it belongs elsewhere.
+ *
+ * Returns `{ points, leftOut, note }`; `note` goes to `buildOpenEP` as
+ * `extraNotes`, so that the file says what is missing.
+ */
+export function openEPOwnPoints(points, mapName) {
+  const own = [];
+  let leftOut = 0;
+  for (const point of points || []) {
+    const theirs = point ? point.mapName : null;
+    if (theirs != null && theirs !== mapName) leftOut += 1;
+    else own.push(point);
+  }
+  return { points: own, leftOut,
+           note: leftOut ? OTHER_MAPS_NOTE.replace('{}', String(leftOut)) : '' };
 }

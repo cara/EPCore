@@ -13,8 +13,8 @@
  * ===================================================================== */
 
 import { hexToRgb, parseXyz, tagCategoryColor, assignTagsToMeshes, decodeTagComment,
-         encodeTagComment } from './epmap.js?v=d400d396e5fb';
-import { readVisitag, summarise as summariseAblation } from './epablation.js?v=d400d396e5fb';
+         encodeTagComment } from './epmap.js?v=9c18153262e8';
+import { readVisitag, summarise as summariseAblation } from './epablation.js?v=9c18153262e8';
 
 const SENTINEL = 1e4;
 
@@ -538,12 +538,24 @@ export function rhythmiaClockStart(offsetMs) {
   return Math.floor(offsetMs / RHYTHMIA_CLOCK_DT_MS + 0.5);
 }
 
+//: Eine Spaltenzahl, wie ein Attribut sie schreibt: Dezimalziffern, höchstens
+//: von dem Leerraum umgeben, auf den XML ein Attribut normalisiert. Wortgleich
+//: mit `rhythmia_layout._WRITTEN_COUNT`.
+const RHYTHMIA_WRITTEN_COUNT = /^[ \t\r\n]*([0-9]+)[ \t\r\n]*$/;
+const RHYTHMIA_WRITTEN_NOTHING = /^[ \t\r\n]*$/;
+
 /** Das Schlagfenster einer Kartenauswertung, oder warum es keines gibt.
  *
  * `W` kommt aus der Spaltenzahl der Konfidenzkurve, wenn sie da ist, sonst aus
  * BeatDuration; beide waren sich auf 19 von 19 echten Karten einig. Sind beide
  * da und um mehr als eine Abtastung uneins, stimmt etwas an der Rate nicht und
  * keine Millisekunde aus diesem Fenster ist belastbar.
+ *
+ * Eine geschriebene Spaltenzahl, die keine ganze Zahl ist, ist ein
+ * Missverhältnis, keine Abwesenheit: `parseInt` las `3e2` als 3 und `303.0`
+ * als 303, Python verwarf beide und nahm still BeatDuration — dieselbe Karte
+ * zeigte LAT im einen Leser und hielt sie im anderen zurück. Die Regel und ihr
+ * Grund stehen einmal, in `rhythmia_layout.beat_window`.
  *
  * Gelesen wird über direkte Kinder, nie über `firstTag`: das ist eine
  * Nachfahrensuche und fände die Properties einer eingebetteten Auswertung.
@@ -556,12 +568,18 @@ export function rhythmiaBeatWindow(eo) {
   const confwf = node && childByTag(node, 'SurfElectrodesConfidenceWF');
   const bin = confwf && childByTag(confwf, 'inlinedbin');
   const raw = bin && rhythmiaAttribute(bin, 'cols');
-  const parsed = raw == null ? NaN : parseInt(raw, 10);
-  const columns = Number.isFinite(parsed) ? parsed : null;
+  let columns = null, unreadable = false;
+  if (raw != null && !RHYTHMIA_WRITTEN_NOTHING.test(String(raw))) {
+    const written = RHYTHMIA_WRITTEN_COUNT.exec(String(raw));
+    // Ab sechzehn Stellen kann ein Double die Zahl runden.
+    if (!written || written[1].length > 15) unreadable = true;
+    else columns = Number(written[1]);
+  }
 
-  if (offset === null || (duration === null && columns === null)) {
+  if (offset === null || (duration === null && columns === null && !unreadable)) {
     return { window: null, reason: rhythmiaReason('no-beat-window') };
   }
+  if (unreadable) return { window: null, reason: rhythmiaReason('window-mismatch') };
   if (duration !== null && columns !== null
       && Math.abs(duration / RHYTHMIA_DT_MS - columns) > 1) {
     return { window: null, reason: rhythmiaReason('window-mismatch') };
@@ -651,6 +669,20 @@ function rhythmiaAnatomyFallbackName(index) {
 function rhythmiaAnatomyName(label, index) {
   const text = label == null ? '' : String(label).trim();
   return text || rhythmiaAnatomyFallbackName(index);
+}
+
+/** Wie eine Anatomie in einer Warnung heißt: bei ihrer Stelle, nie beim Label.
+ *
+ * Im Fenster der Anwendung landet jedes `console.warn` im Protokoll
+ * (shared/bridge.js -> shell/jsapi.report), und dorthin gehört nichts aus der
+ * Studie. Das Label tippt der Untersucher von Hand, und die Prüfung des
+ * Anonymisierers gegen einen echten Export hat es ausdrücklich nicht abgedeckt
+ * (docs/findings/rhythmia-anonymisierung-gegen-echten-export.md). Gezählt ab
+ * eins, in derselben Reihenfolge wie `index` oben — und nicht als
+ * `anatomy_<n>`, denn so heißt eine Anatomie ohne Label tatsächlich.
+ */
+function rhythmiaLogName(index) {
+  return `Anatomie Nr. ${index + 1}`;
 }
 
 /** Der Name, unter dem die Quelle eines Kartenblocks verglichen wird.
@@ -751,6 +783,21 @@ function rhythmiaMeshBlobRefusal(vertexBytes, triangleBytes) {
   return null;
 }
 
+/** Ob die Dreiecke eines `Mesh` in die Vertex-Tabelle zeigen, mit der sie kamen.
+ *
+ * Gefragt nach `rhythmiaMeshBlobRefusal` und wie dort, bevor etwas behalten
+ * wird, mit dem kleinsten und größten Index des ganzen Dreiecksblocks. Die
+ * Schrittweite sagt, dass der Block eine Dreieckstabelle ist, nicht, dass es die
+ * dieses Mesh ist. Die Regel und ihr Grund stehen einmal, in
+ * `rhythmia_layout.mesh_index_refusal`. Ungeprüft wurde hier -1 über das
+ * Uint32Array zu 4294967295, ein Index jenseits der Vertexzahl blieb stehen, und
+ * die Fläche verschwand ganz, mit „NaN cm²" und ohne ein Wort.
+ */
+function rhythmiaMeshIndexRefusal(lowest, highest, vertexCount) {
+  if (lowest < 0 || highest >= vertexCount) return rhythmiaReason('mesh-blob-unreadable');
+  return null;
+}
+
 /** Eine Punkttabelle als Zeilen-/Spaltenzugriff, ohne sie umzukopieren. */
 function surfelecView(bytes, rows) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -784,7 +831,14 @@ function surfelecRefusal(table) {
  */
 function nearestRows(points, targets, count) {
   const k = Math.min(count, points.length);
-  const order = (a, b) => (a.d - b.d) || (a.i - b.i);
+  // Ein Abstand NaN (eine Elektrode ohne Oberflächenposition) ordnet hinter
+  // jedem anderen, auch hinter Infinity — so wie `np.argsort` in
+  // `rhythmia_layout._nearest` ihn legt. Mit `d < NaN`, das nie gilt, blieb eine
+  // solche Elektrode unter den ersten k, wo die Saat sie hinlegte; bei k = 1
+  // war sie der „nächste" Nachbar jedes Vertex, und die Prüfung widerlegte
+  // eine richtige Belegung, die Python bestätigt.
+  const order = (a, b) => (Number.isNaN(a.d) - Number.isNaN(b.d))
+                          || (a.d - b.d) || (a.i - b.i);
   return targets.map((target) => {
     const best = [];
     for (let i = 0; i < points.length; i++) {
@@ -793,7 +847,7 @@ function nearestRows(points, targets, count) {
       const dz = points[i][2] - target[2];
       const d = dx * dx + dy * dy + dz * dz;
       if (best.length < k) { best.push({ i, d }); best.sort(order); continue; }
-      if (d < best[k - 1].d) { best[k - 1] = { i, d }; best.sort(order); }
+      if (order({ i, d }, best[k - 1]) < 0) { best[k - 1] = { i, d }; best.sort(order); }
     }
     return best.map(b => b.i);
   });
@@ -875,8 +929,18 @@ export function rhythmiaLayoutAgrees(vertices, raw, table) {
                               SURFELEC.latUnipolar, SURFELEC.latBipolar);
 
   const one = nearestRows(electrodes, placesOf(bipolarSample), 1);
-  const medianOf = (values, col) => median(bipolarSample.map(
-    (v, i) => Math.abs(values[v] - table.at(counted[one[i][0]], col))));
+  // Nur Paare, die beide Seiten gemessen haben. Ein NaN unter den Spannungen
+  // landete beim Sortieren irgendwo, und wo, entschied über den Median; Python
+  // bekam NaN und ließ eine widerlegte Belegung als unentschieden durch. Mit
+  // weniger Paaren, als die Stichprobe haben muss, ist der Vergleich nach
+  // Anzahl unentschieden (`rhythmia_layout.layout_agrees`).
+  const enough = Math.min(LAYOUT_NEAREST, bipolarSample.length);
+  const medianOf = (values, col) => {
+    const gaps = bipolarSample
+      .map((v, i) => Math.abs(values[v] - table.at(counted[one[i][0]], col)))
+      .filter(Number.isFinite);
+    return gaps.length >= enough ? median(gaps) : NaN;
+  };
   const median12 = medianOf(raw.lnUvBipolar, SURFELEC.lnUvBipolar);
   const median11 = medianOf(raw.lnUvBipolar, SURFELEC.lnUvUnipolar);
   const uniMedian11 = medianOf(raw.lnUvUnipolar, SURFELEC.lnUvUnipolar);
@@ -922,8 +986,10 @@ async function readRhythmiaPointTable(bin, beat, mapName, anatomyIndex, getPaylo
   const rows = parseInt(rhythmiaAttribute(bin, 'rows'), 10);
   const cols = parseInt(rhythmiaAttribute(bin, 'cols'), 10);
   // Eine andere Breite ist eine andere Tabelle. Sie trotzdem so zu lesen ergibt
-  // Zahlen, die wie Koordinaten aussehen und keine sind.
-  if (rhythmiaAttribute(bin, 'type') !== 'Float64' || cols !== SURFELEC_COLS || !rows) {
+  // Zahlen, die wie Koordinaten aussehen und keine sind. Und eine Tabelle ohne
+  // Zeilen ist keine — auch nicht mit `rows="-5"`, das `!rows` durchließ und
+  // dann ohne Grund nichts ergab (`rhythmia_layout.point_table_refusal`).
+  if (rhythmiaAttribute(bin, 'type') !== 'Float64' || cols !== SURFELEC_COLS || !(rows > 0)) {
     return { group: null, refused: 'layout-mismatch' };
   }
   const idx = parseInt((bin.textContent || '').trim(), 10);
@@ -932,9 +998,21 @@ async function readRhythmiaPointTable(bin, beat, mapName, anatomyIndex, getPaylo
   if (!bytes || bytes.length < rows * cols * 8) return { group: null, refused: 'layout-mismatch' };
 
   const table = surfelecView(bytes, rows);
-  const refused = surfelecRefusal(table) || (check ? check(table) : null);
+  // Die Spaltenprüfung läuft auch auf einer strukturell verweigerten Tabelle:
+  // eine widerlegte Belegung hält die LAT der Fläche zurück, und das darf nicht
+  // davon abhängen, ob die Tabelle außerdem noch kaputt ist. Python fragt
+  // `layout_agrees` ebenso, ohne vorher `_refusal` zu fragen (rhythmia_to_3d,
+  // `_layout_verdict`). Mit `||` dahinter sah eine Tabelle mit vertauschten
+  // Spalten und einer Einschlussflagge 2 die Prüfung nie, und dieselbe Karte
+  // kam hier mit LAT und aus dem Konverter ohne.
+  const structural = surfelecRefusal(table);
+  const columns = check ? check(table) : null;
+  const refused = structural || columns;
   if (refused) {
-    try { console.warn(`[epconv] Rhythmia-Punkttabelle ${fname} verweigert: ${refused}`); } catch (e) {}
+    // Ohne `fname`: dessen Verzeichnisteil prüft `rhythmiaPointsFnameOk` nicht,
+    // und die Zeile geht ins Protokoll (rhythmiaLogName).
+    try { console.warn(`[epconv] ${rhythmiaLogName(anatomyIndex)}: Punkttabelle `
+      + `verweigert: ${refused}`); } catch (e) {}
     return { group: null, refused };
   }
 
@@ -1206,6 +1284,20 @@ export function rhythmiaSignalLengthOk(length, rows, cols) {
   const declared = Number(length), r = Number(rows), c = Number(cols);
   if (!Number.isFinite(declared) || !Number.isFinite(r) || !Number.isFinite(c)) return false;
   return declared === r * c * 4;
+}
+
+/** Ob eine Zeitachse die Zeitstempel trägt, die sie angibt.
+ *
+ * Gelesen werden `rows` Float64-Werte ab dem ersten Byte. Gibt `BIN` weniger
+ * her, lief das Lesen in das Tag und das Signal dahinter — im Streamingpfad,
+ * der nicht auf den Block begrenzt — und gab sie als Zeitstempel aus: eine
+ * winzige, endliche Rate und ein Fenster, das bis 1e180 s reicht. Nur dieses
+ * Überlesen wird verweigert, nicht eine längere Angabe; warum, steht in
+ * `rhythmia_layout.clock_length_ok`, mit dem diese Regel wortgleich ist. */
+export function rhythmiaClockLengthOk(length, rows) {
+  const declared = Number(length), r = Number(rows);
+  if (!Number.isFinite(declared) || !Number.isFinite(r)) return false;
+  return declared >= r * 8;
 }
 
 /** Der Zeitpunkt eines Punktes als endliche Zahl — oder nichts.
@@ -1781,6 +1873,15 @@ function rhythmiaSignalIndex(root) {
       blocks.push({ kind: 'signal', catheter: named[1], flavour: named[2],
                     cols, rows, idx, prefix: bare.slice(0, bare.lastIndexOf('_' + named[2] + '.dat')) });
     } else if (RHYTHMIA_CLOCK_NAME.test(bare) && type === 'Float64') {
+      // Eine Zeitachse, die mehr Zeilen angibt, als ihr BIN trägt, ist keine:
+      // ihre Zeitstempel lägen zum Teil im Block dahinter
+      // (`rhythmia_layout.clock_length_ok`).
+      const declared = parseInt(rhythmiaAttribute(el, 'BIN'), 10);
+      if (!rhythmiaClockLengthOk(declared, rows)) {
+        try { console.warn(`[epconv] Zeitachse gibt ${declared} Bytes für ${rows} `
+          + `Zeitstempel an statt ${rows * 8} — nicht als Zeitachse geführt.`); } catch (e) {}
+        continue;
+      }
       blocks.push({ kind: 'time', rows, idx,
                     prefix: bare.slice(0, bare.lastIndexOf('_ts.dat')) });
     }
@@ -2167,6 +2268,8 @@ async function buildRhythmiaMeshes(xml, getPayload, getRange) {
     const props = childByTag(anatomy, 'Properties');
     const lbl = props && childByTag(props, 'Label');
     const name = rhythmiaAnatomyName(lbl && lbl.textContent, anatIdx - 1);
+    // Für die Warnungen unten: `name` ist das Label, und die gehen ins Protokoll.
+    const logName = rhythmiaLogName(anatIdx - 1);
 
     let M = null;
     const tEl = firstTag(anatomy, 'Transform');
@@ -2180,21 +2283,33 @@ async function buildRhythmiaMeshes(xml, getPayload, getRange) {
       if (!vBytes || !tBytes) continue;
       // Beide Blöcke gemessen, bevor einer zugewiesen wird — und eine
       // übersprungene Fläche sagt es, statt still zu verschwinden.
-      const meshRefusal = rhythmiaMeshBlobRefusal(vBytes.length, tBytes.length);
+      let meshRefusal = rhythmiaMeshBlobRefusal(vBytes.length, tBytes.length);
+      let vdata = null, tdata = null, nv = 0;
+      if (!meshRefusal) {
+        vdata = asFloat32(vBytes);
+        nv = vdata.length / 6;
+        tdata = asInt32(tBytes);
+        // In einer Schleife, nicht über `Math.min(...tdata)`: das legt ein
+        // Argument je Index auf den Stapel und wirft ab ~125 000 Indizes.
+        let lowest = Infinity, highest = -Infinity;
+        for (let i = 0; i < tdata.length; i++) {
+          if (tdata[i] < lowest) lowest = tdata[i];
+          if (tdata[i] > highest) highest = tdata[i];
+        }
+        meshRefusal = rhythmiaMeshIndexRefusal(lowest, highest, nv);
+      }
       if (meshRefusal) {
-        try { console.warn(`[epconv] Anatomie „${name}": ein Mesh ist nicht lesbar `
+        try { console.warn(`[epconv] ${logName}: ein Mesh ist nicht lesbar `
           + `(${meshRefusal}) — übersprungen.`); } catch (e) {}
         continue;
       }
-      const vdata = asFloat32(vBytes);
-      const nv = vdata.length / 6;
       positions = new Float32Array(nv * 3);
       normals = new Float32Array(nv * 3);
       for (let i = 0; i < nv; i++) {
         positions[i*3] = vdata[i*6]; positions[i*3+1] = vdata[i*6+1]; positions[i*3+2] = vdata[i*6+2];
         normals[i*3] = vdata[i*6+3]; normals[i*3+1] = vdata[i*6+4]; normals[i*3+2] = vdata[i*6+5];
       }
-      faces = new Uint32Array(asInt32(tBytes));
+      faces = new Uint32Array(tdata);
     }
 
     /* Die Punkttabellen dieser Anatomie, bevor über das Mesh entschieden ist.
@@ -2213,9 +2328,10 @@ async function buildRhythmiaMeshes(xml, getPayload, getRange) {
       const tableName = rhythmiaAttribute(bin, 'fname') || '';
       if (!rhythmiaPointsFnameOk(tableName)) {
         // Übergangen, und es wird gesagt: früher passte hier alles, was
-        // irgendwo auf `surfelec_<hex>_all.dat` endete.
-        try { console.warn(`[epconv] Anatomie „${name}": ${tableName || '(ohne Namen)'} `
-          + `heißt nicht wie eine Punkttabelle — nicht als eine gelesen.`); } catch (e) {}
+        // irgendwo auf `surfelec_<hex>_all.dat` endete. Ohne den Namen — der
+        // ist hier gerade keiner, den eine Regel geprüft hätte.
+        try { console.warn(`[epconv] ${logName}: ein SurfElectrodes-Block heißt `
+          + `nicht wie eine Punkttabelle — nicht als eine gelesen.`); } catch (e) {}
         continue;
       }
       // Eine andere Breite oder ein anderer Typ ist eine andere Tabelle: sie
@@ -2278,7 +2394,7 @@ async function buildRhythmiaMeshes(xml, getPayload, getRange) {
       // Anatomien tragen genau eine (Befund §8.3).
       latWithheld = 'engine-output-multiple';
       beat = { window: null, reason: 'engine-output-multiple' };
-      try { console.warn(`[epconv] Anatomie „${name}" trägt ${engineOuts.length} `
+      try { console.warn(`[epconv] ${logName} trägt ${engineOuts.length} `
         + `Kartenauswertungen — EPCore wählt keine aus: keine Vertexwerte, `
         + `Tabellen verweigert.`); } catch (e) {}
     } else if (engineOuts.length === 1) {
@@ -2388,11 +2504,13 @@ async function buildRhythmiaMeshes(xml, getPayload, getRange) {
       // Spannung bleibt — sie steht nicht auf den Annotationsspalten.
       //
       // Eine strukturell verweigerte Tabelle (falsche Breite, Einschlussflagge
-      // keine Flagge, Elektrodennummerierung gebrochen) sagt dagegen nichts
-      // über die Vertexkarten: die liegen in eigenen Blöcken und hängen nur am
-      // Schlagfenster. Sie deshalb zurückzuhalten hieße, eine Karte wegen einer
-      // fremden Tabelle zu verschweigen — Python tut es nicht, und das
-      // Manifest der Fixture (Anatomie „RA_layout") sagt es ebenso.
+      // keine Flagge, Elektrodennummerierung gebrochen) sagt dagegen für sich
+      // nichts über die Vertexkarten: die liegen in eigenen Blöcken und hängen
+      // nur am Schlagfenster. Sie allein deshalb zurückzuhalten hieße, eine
+      // Karte wegen einer fremden Tabelle zu verschweigen — Python tut es
+      // nicht, und das Manifest der Fixture (Anatomie „RA_layout") sagt es
+      // ebenso. Widerlegt die Prüfung dieselbe Tabelle außerdem, gilt das
+      // Erste: `readRhythmiaPointTable` prüft die Spalten auch dann.
       if (refused === 'layout-mismatch' && columnsDisagree) latWithheld = 'layout-mismatch';
       if (group) groups.push(group);
     }
@@ -2491,11 +2609,64 @@ export async function parseRhythmia(bytes) {
 // die Datei wird NIE komplett in den Speicher geladen. Per File.slice() wird
 // nur XML-Text gescannt, Binärblöcke werden per BIN-Länge übersprungen, und am
 // Ende werden ausschließlich die benötigten Mesh-/Skalar-Payloads gelesen.
-export async function parseRhythmiaFiles(files, onProgress) {
+/* Die Teile eines Archivs, in der Reihenfolge, in der sie aneinandergehören.
+ *
+ * Vorher wurde jede `.NNN`-Datei nach Namen sortiert angehängt. Zwei Archive in
+ * einem Ordner wurden so eine Studie aus zwei Untersuchungen, und ein fehlendes
+ * Mittelstück fiel nicht auf: die Blöcke dahinter lagen an falschen Stellen und
+ * verschwanden still. `rhythmia_to_3d` liest nur Teile mit dem Stamm der `.000`
+ * und verweigert ein Archiv, das danach mitten im Block endet; der
+ * Anonymisierer meldet das fehlende Teil. Also hier: ein Stamm, jede Nummer
+ * einmal, lückenlos ab `.000` — sonst benannt verweigern. Dateien mit
+ * führendem Punkt (`._X.000`, die macOS auf fremden Datenträgern neben jede
+ * Datei legt) sind keine Teile.
+ *
+ * Benannt wird ein Teil nur bei seiner Nummer, und Archive werden gezählt: die
+ * Verweigerung landet über `console.error` im Protokoll der Anwendung
+ * (shared/bridge.js -> shell/jsapi.report), und der Stamm ist der Zeitpunkt
+ * der Untersuchung (`Study_<Datum>_<Zeit>`) — weshalb der Anonymisierer die
+ * Teile umbenennt (core/anonymize/rhythmia.py). Die Namen sieht der Nutzer in
+ * dem Ordner, den er gewählt hat.
+ */
+function rhythmiaParts(files) {
   const parts = Array.from(files)
-    .filter(f => /\.\d{3}$/.test(f.name.toLowerCase()))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .filter(f => /\.\d{3}$/.test(f.name) && !f.name.startsWith('.'));
   if (!parts.length) throw new Error('Keine Rhythmia-Teildateien (.000/.001/…) gefunden.');
+
+  const stems = new Set(parts.map(f => f.name.slice(0, -4)));
+  if (stems.size > 1) {
+    throw new Error(`Teile von ${stems.size} Rhythmia-Archiven in einer Auswahl. `
+      + `Bitte die Teile eines Archivs einzeln öffnen.`);
+  }
+  const [stem] = stems;
+  const suffix = (n) => `.${String(n).padStart(3, '0')}`;
+
+  const byNumber = new Map();
+  for (const f of parts) {
+    const n = parseInt(f.name.slice(-3), 10);
+    if (byNumber.has(n)) {
+      throw new Error(`Rhythmia-Teil ${suffix(n)} liegt mehrfach in der Auswahl `
+                    + `(z. B. in einem Unterordner) — welches gilt, ist nicht zu entscheiden.`);
+    }
+    byNumber.set(n, f);
+  }
+  const last = Math.max(...byNumber.keys());
+  const missing = [];
+  for (let n = 0; n <= last; n++) if (!byNumber.has(n)) missing.push(suffix(n));
+  if (missing.length) {
+    const listed = `${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ', …' : ''}`;
+    throw new Error(`Das Rhythmia-Archiv ist unvollständig, `
+      + (missing.length === 1 ? `es fehlt Teil ${listed}. ` : `es fehlen die Teile ${listed}. `)
+      + `Was dahinter liegt, stünde an falschen Stellen.`);
+  }
+  // `next` mit Stamm ist für den Hinweis unter der Karte, den nur der Nutzer
+  // sieht; `nextSuffix` für alles, was ins Protokoll gehen kann.
+  return { parts: [...byNumber.keys()].sort((a, b) => a - b).map(n => byNumber.get(n)),
+           next: stem + suffix(last + 1), nextSuffix: suffix(last + 1) };
+}
+
+export async function parseRhythmiaFiles(files, onProgress) {
+  const { parts, next, nextSuffix } = rhythmiaParts(files);
 
   const sizes = parts.map(f => f.size);
   const starts = []; let acc = 0;
@@ -2578,8 +2749,19 @@ export async function parseRhythmiaFiles(files, onProgress) {
   if (onProgress) onProgress({ phase: 'build', done: total, total });
   let xml = xmlParts.join('').replace(/BIN=([0-9]+)/g, 'BIN="$1"');
   xml = sanitizeXml(xml);
-  return buildRhythmiaMeshes(xml, idx => readRange(payloadLoc[idx].start, payloadLoc[idx].len),
+  const meshes = await buildRhythmiaMeshes(xml, idx => readRange(payloadLoc[idx].start, payloadLoc[idx].len),
     (idx, at, len) => readRange(payloadLoc[idx].start + at, len));
+  // Gelesen wird, soweit das Archiv reicht — aber dass dahinter etwas fehlt,
+  // muss der Betrachter sagen. Bisher stand es nur in der Konsole, und eine
+  // Karte ohne Ablation und Annotationen las sich wie eine vollständige.
+  if (truncated) {
+    if (!meshes.length) {
+      throw new Error(`Rhythmia-Archiv endet mitten in einem Datenblock (es fehlt `
+                    + `mindestens Teil ${nextSuffix}), und bis dahin steht keine Anatomie darin.`);
+    }
+    meshes.truncated = { next };
+  }
+  return meshes;
 }
 
 /* ===================================================================== *
@@ -2615,12 +2797,36 @@ function tripleRows(rows) {
  * Also nachrechnen. Passt die Zählung ab 1, wird sie genommen. Passt nur die
  * ab 0, wird sie genommen und gesagt. Passt keine, verweigert der Lauf mit den
  * Zahlen, um die es geht — eine kaputte Karte ist schlechter als keine.
+ *
+ * `surfacesPaired`: the volume has a Surface_of_origin column that is paired
+ * with these triangles by position. A row short of a triangle is then refused
+ * instead of skipped, see below.
  */
-function triangleIndices(rows, vertexCount, volIdx = 0) {
+function triangleIndices(rows, vertexCount, volIdx = 0, surfacesPaired = false) {
   const usable = rows.filter(r => r.length >= 3);
   if (!usable.length) {
     throw new Error(`EnSite: Volume ${volIdx} hat keine brauchbaren Polygonzeilen `
                   + `(erwartet drei Indizes je Zeile).`);
+  }
+  const skipped = rows.length - usable.length;
+  if (skipped && surfacesPaired) {
+    // Surface_of_origin names one surface per polygon row, and the split pairs
+    // it with the triangles by position. Skipping a row dropped its triangle
+    // but not its entry, so every later triangle took the surface of the one
+    // before it and was drawn on the wrong anatomy. Whether the row was a
+    // triangle broken across lines, one with a corner lost, or no polygon at
+    // all cannot be told from the file, and each pairs differently, so the
+    // volume is not split on a guess. ensite_to_3d.py refuses in the same words.
+    throw new Error(`EnSite: Volume ${volIdx} hat ${skipped} Polygonzeile(n) mit `
+                  + `weniger als drei Indizes. Surface_of_origin ordnet die Flächen `
+                  + `den Polygonzeilen der Reihe nach zu; ohne diese Zeilen ist nicht `
+                  + `mehr zu sagen, welches Dreieck zu welcher Fläche gehört.`);
+  }
+  if (skipped) {
+    // Skipped as before, but no longer without a word; the Python reader
+    // prints the same count.
+    console.warn('[epconv] EnSite: Volume %d: %d Polygonzeile(n) mit weniger als '
+                 + 'drei Indizes übersprungen.', volIdx, skipped);
   }
   let lowest = Infinity, highest = -Infinity;
   for (const row of usable) {
@@ -2694,7 +2900,10 @@ export function parseEnSite(text, dxlText = null) {
     const pEl = firstTag(vol, 'Polygons');
     if (!pEl || !pEl.textContent) { volIdx++; continue; }
     const pr = tripleRows(textToRows(pEl.textContent));
-    const allTris = triangleIndices(pr, positions.length / 3, volIdx);
+    // The same test the split below applies before it pairs anything.
+    const surfacesGiven = firstTag(vol, 'Surface_of_origin');
+    const allTris = triangleIndices(pr, positions.length / 3, volIdx,
+                                    Boolean(surfacesGiven && surfacesGiven.textContent));
 
     let mapData = null;
     const mEl = firstTag(vol, 'Map_data');
@@ -2808,6 +3017,46 @@ function attachDxL(meshes, dxlText) {
  *  CARTO 3
  * ===================================================================== */
 
+// A value in a vertex, triangle or colour row is read only when it is spelled
+// as a plain decimal, the way CARTO writes it. `Number()` read `0x10` as 16 and
+// turned everything else, a `#` line or a `10,0`, into a NaN vertex that was
+// drawn without a word, where carto_to_3d.py refused the file. Both readers
+// apply this pattern now (`_CARTO_NUMBER`) and refuse on anything else, split
+// on ASCII whitespace alone (`_VALUE_SEPARATOR`), since `\s` and Python's
+// `str.split()` disagree about the other spaces.
+const CARTO_NUMBER = /^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/;
+
+function cartoRows(lines, section) {
+  const rows = [];
+  // A row with nothing after its `N =` is not a vertex at 0, as `Number('')`
+  // made it. Nor can it be dropped where other rows follow it: they are
+  // matched to vertices by position, so each would move up by one, the next
+  // vertex's voltage landing on this one and a triangle on the wrong corners,
+  // all without a word. Only a run at the end of the section moves nothing
+  // and is dropped. Same rule as `_text_to_floats` in carto_to_3d.py; the
+  // position counts from 0, as CARTO numbers its rows.
+  let emptyAt = -1;
+  for (let position = 0; position < lines.length; position++) {
+    const row = [];
+    for (const token of lines[position].split(/[ \t\n\r\f\v]+/)) {
+      if (!token) continue;
+      if (!CARTO_NUMBER.test(token)) {
+        throw new Error(`CARTO: '${token.slice(0, 40)}' in [${section}] ist keine Zahl.`);
+      }
+      row.push(Number(token));
+    }
+    if (!row.length) {
+      if (emptyAt < 0) emptyAt = position;
+      continue;
+    }
+    if (emptyAt >= 0) {
+      throw new Error(`CARTO: Zeile ${emptyAt} in [${section}] ist leer, die Zeilen danach würden aufrücken.`);
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
 export function parseCartoMesh(text, name = 'CARTO') {
   let section = 'none';
   const vLines = [], tLines = [], sLines = [];
@@ -2828,7 +3077,7 @@ export function parseCartoMesh(text, name = 'CARTO') {
     else if (section === 'triangles') tLines.push(line.replace(/^[0-9]*\s*=\s*/, ''));
     else if (section === 'scalars') sLines.push(line.replace(/^[0-9]*\s*=\s*/, ''));
   }
-  const vr = vLines.map(l => l.split(/\s+/).map(Number));
+  const vr = cartoRows(vLines, 'VerticesSection');
   const nv = vr.length;
   const positions = new Float32Array(nv * 3);
   let normals = null;
@@ -2837,11 +3086,11 @@ export function parseCartoMesh(text, name = 'CARTO') {
     positions[i*3]=vr[i][0]; positions[i*3+1]=vr[i][1]; positions[i*3+2]=vr[i][2];
     if (normals) { normals[i*3]=vr[i][3]; normals[i*3+1]=vr[i][4]; normals[i*3+2]=vr[i][5]; }
   }
-  const tr = tLines.map(l => l.split(/\s+/).map(Number));
+  const tr = cartoRows(tLines, 'TrianglesSection');
   const faces = new Uint32Array(tr.length * 3);
   for (let i = 0; i < tr.length; i++) { faces[i*3]=tr[i][0]; faces[i*3+1]=tr[i][1]; faces[i*3+2]=tr[i][2]; }
 
-  const cols = sLines.map(l => l.split(/\s+/).map(Number));
+  const cols = cartoRows(sLines, 'VerticesColorsSection');
   const scalarByLabel = {};
   labels.forEach((lab, ci) => { const a = new Float32Array(nv); for (let i = 0; i < nv; i++) a[i] = (cols[i] && cols[i][ci] !== undefined) ? cols[i][ci] : NaN; scalarByLabel[lab] = a; });
 
@@ -2895,16 +3144,26 @@ function dxlCells(line) {
 function dxlNumericText(value) {
   if (value == null) return null;
   const text = String(value).trim();
-  if (!text) return null;
-  return Number.isFinite(Number(text)) ? text : null;
+  return dxlNumber(text) !== null ? text : null;
 }
+
+// Eine DxL-Zahl, wie die Datei sie schreibt: dezimal, wahlweise mit Exponent.
+// Python (`_DECIMAL` in epcore/epview/ensite_points.py) prüft dasselbe Muster,
+// weil `Number` und `float` uneins sind, was sonst noch eine Zahl ist —
+// `Number` nimmt `0x10`, `float` nimmt `nan`, `inf` und `1_000`. Eine
+// "Sample rate: nan", die eine Seite ablehnt und die andere liest, ist genau
+// die geratene Zeitachse, die hier abgelehnt wird.
+const DXL_DECIMAL = /^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/;
 
 function dxlNumber(value) {
   if (value == null) return null;
   const text = String(value).trim();
   // Eine leere Zelle ist kein Wert. `Number('')` ist 0, und eine 0 sieht aus
   // wie eine Messung: 0,0 mV Spitze-Tal heißt "flach", nicht "nicht erhoben".
-  if (!text) return null;
+  // Das Muster schließt sie aus, wie alles, was keine Dezimalzahl ist.
+  if (!DXL_DECIMAL.test(text)) return null;
+  // Das Muster regelt die Schreibweise; `1e999` ist richtig geschrieben und
+  // läuft trotzdem nach Unendlich über, auf beiden Seiten.
   const n = Number(text);
   return Number.isFinite(n) ? n : null;
 }
@@ -2982,10 +3241,19 @@ export function parseDxL(text) {
     for (let i = waveStart; i < lines.length; i++) {
       const line = lines[i];
       if (!line || !line.length) break;             // Leerzeile trennt die Blöcke
-      const cell = line.split(',')[point.column + 1];
+      const cells = line.split(',');
+      const cell = cells[point.column + 1];
       if (cell === undefined) break;
-      const n = Number(cell);
-      if (!Number.isFinite(n)) break;               // nächster Kopf, nicht mehr Daten
+      // Eine Abtastzeile beginnt mit einer leeren Zelle; eine benannte Zeile
+      // ist der nächste Abschnitt. Nur am Wert zu prüfen hängte an
+      // „rov LAT:,-0.04,…" dessen ersten Wert als eine Abtastung mehr an — eine
+      // Spitze am Ende der Kurve, die wie eine echte aussieht. Python
+      // (`DxLExport.curve`) bricht an beidem ab, hier wie dort.
+      if (cells[0].trim()) break;
+      // `dxlNumber`, nicht `Number`: eine leere Zelle ist 0 für `Number` und
+      // wurde eine erfundene Abtastung von 0 mV, nach der weitergelesen wurde.
+      const n = dxlNumber(cell);
+      if (n === null) break;                        // keine Abtastung, nicht mehr Daten
       values.push(n);
     }
     if (!values.length) return null;
@@ -3021,15 +3289,26 @@ export function parseDxL(text) {
 // eine echte Kurve auf der falschen Ableitung, und die sieht normal aus.
 const CARTO_FIELD = 30;
 
+// A sample cell: a whole count in ASCII digits, the same pattern as `_COUNT`
+// in carto_points.py, so both readers refuse the same cells.
+const CARTO_COUNT = /^[+-]?[0-9]+$/;
+
 // CARTO 3 exportiert mit 1 kHz. Die Rate steht nicht in der Datei und lässt
 // sich aus ihr nicht herleiten, also reist die Annahme sichtbar mit.
 export const CARTO_ASSUMED_RATE_HZ = 1000;
 
-// Was CARTO schreibt, wo es keinen Wert hat.
-const CARTO_ABSENT = 10000;
+// What CARTO writes where it has no value. Also as a distance: an
+// annotation that lies exactly this far before its reference is none
+// (map − reference = −10000; `annotations._diff` reads it the same way).
+export const CARTO_ABSENT = 10000;
 
 function cartoNumber(value) {
   if (value == null) return null;
+  // Ein leeres Attribut ist kein Wert, wie in `dxlNumber`. `Number('')` ist 0:
+  // `Bipolar=""` las sich als 0 mV (dichte Narbe) und `Map_Annotation=""` ging
+  // als LAT von 0 ms in die Interpolation. Python (`carto_points._number`)
+  // scheitert an `float('')` und liest „nicht gemessen".
+  if (!String(value).trim()) return null;
   const n = Number(value);
   return Number.isFinite(n) && Math.abs(n) < CARTO_ABSENT ? n : null;
 }
@@ -3075,11 +3354,29 @@ export function parseCartoEcg(text) {
 
   const body = lines.slice(4).filter(l => l.trim().length);
   const samples = channels.map(() => new Int32Array(body.length));
+  // The rules of carto_points.read_electrogram, which refused the file where
+  // this side read on: a row that ends before its last column is cut off, and
+  // a cell is a whole count or blank. `parseInt(cell) || 0` turned a cut-off
+  // row and a garbled cell into 0 counts, a flat stretch in a curve that
+  // otherwise looks normal, and read `12.7` as 12 and `1e3` as 1. Rows are
+  // counted as Python counts them. The messages name the column by number:
+  // showEgm writes them into innerHTML, and a channel name comes from the file.
   for (let row = 0; row < body.length; row++) {
     const line = body[row];
+    if (line.length < (n - 1) * CARTO_FIELD) {
+      throw new Error(`Zeile ${row + 5} ist zu kurz — ${line.length} Zeichen `
+                    + `für ${n} Kanäle.`);
+    }
     for (let col = 0; col < n; col++) {
       const cell = line.slice(col * CARTO_FIELD, (col + 1) * CARTO_FIELD).trim();
-      samples[col][row] = cell ? parseInt(cell, 10) || 0 : 0;
+      if (!cell) continue;            // a blank cell stays 0, as in Python
+      const count = CARTO_COUNT.test(cell) ? Number(cell) : NaN;
+      // Int32Array wraps a larger count without a word; no export holds one.
+      if (!(count >= -(2 ** 31) && count < 2 ** 31)) {
+        throw new Error(`Zeile ${row + 5}, Spalte ${col + 1}: kein ganzzahliger `
+                      + `Zählwert.`);
+      }
+      samples[col][row] = count;
     }
   }
   return { channels, samples, gainMv: gain,
@@ -3102,6 +3399,52 @@ function parseCartoPositions(text) {
   return out;
 }
 
+/* A point file's text, by the rule `_point_text` in carto_points.py applies:
+ * a UTF-16 byte order mark decides; else a NUL in the first or second byte
+ * means UTF-16 without one (big- or little-endian); else the bytes are UTF-8
+ * where they are valid UTF-8; else they are windows-1252, as every other CARTO
+ * file is read here. A NUL left in the text (UTF-32, say) puts a <parsererror>
+ * in what DOMParser returns, and Python refuses such a file before expat can
+ * read the NUL as UTF-16. An XML declaration is ignored on both paths: DOMParser is handed a
+ * string, for which a declaration names nothing, and Python hands ElementTree
+ * a string for the same reason. A file declaring another code page,
+ * windows-1251 say, therefore reads as windows-1252 on both paths: the same
+ * wrong characters, so the point keys agree, and an electrogram found on
+ * neither.
+ *
+ * Before, this side read every point file as Latin-1 and Python read one
+ * without a declaration as UTF-8. An operator-typed map name such as
+ * "LA Rückwand" reaches `FileName`: written in the Windows code page, Python
+ * skipped the file and every later point key shifted by one; written in UTF-8,
+ * this side named the electrogram "RÃ¼ckwand" and did not find it.
+ */
+const _utf8Strict = new TextDecoder('utf-8', { fatal: true });
+
+// windows-1252 at 0x80-0x9F, spelled out. A browser decodes the `latin1` label
+// as windows-1252 (WHATWG); Node's TextDecoder decodes it as ISO-8859-1, C1
+// controls there (Node 24.9), and the conformance tests run in Node. With the
+// table both runtimes and Python read an en dash (0x96) as an en dash.
+const _WINDOWS_1252_C1 = '\u20AC\u0081\u201A\u0192\u201E\u2026\u2020\u2021'
+                         + '\u02C6\u2030\u0160\u2039\u0152\u008D\u017D\u008F'
+                         + '\u0090\u2018\u2019\u201C\u201D\u2022\u2013\u2014'
+                         + '\u02DC\u2122\u0161\u203A\u0153\u009D\u017E\u0178';
+function decodeWindows1252(u8) {
+  return decodeLatin1(u8).replace(/[\u0080-\u009F]/g,
+                                  c => _WINDOWS_1252_C1[c.charCodeAt(0) - 0x80]);
+}
+
+function cartoXmlText(u8) {
+  if (u8[0] === 0xFF && u8[1] === 0xFE) return new TextDecoder('utf-16le').decode(u8);
+  if (u8[0] === 0xFE && u8[1] === 0xFF) return new TextDecoder('utf-16be').decode(u8);
+  // UTF-16 without a byte order mark, sniffed as expat sniffs it: a NUL in the
+  // first byte is big-endian, in the second little-endian. Read as UTF-8 or
+  // windows-1252, every other character was a NUL, which DOMParser refuses,
+  // while Python read the ASCII ones.
+  if (u8[0] === 0x00) return new TextDecoder('utf-16be').decode(u8);
+  if (u8[1] === 0x00) return new TextDecoder('utf-16le').decode(u8);
+  try { return _utf8Strict.decode(u8); } catch { return decodeWindows1252(u8); }
+}
+
 // Wo ein Punkt sitzt. Zwei Dateien tragen eine Position und meinen nicht
 // dasselbe: der Lagesensor sitzt im Katheterkörper, die Elektroden sind die
 // Elektroden. Der Punkt gehört an die Mapping-Elektrode — der Kopf der
@@ -3117,6 +3460,21 @@ function parseCartoPositions(text) {
 function cartoParentOf(name) {
   const cut = name.lastIndexOf('/');
   return cut < 0 ? '' : name.slice(0, cut);
+}
+
+/* The map a point file belongs to, from its bare name
+ * `<map>_P<n>_Point_Export.xml` — or null for a name of any other shape.
+ *
+ * Greedy, so that the *last* `_P<n>_` is the point's own: the map name is
+ * typed by the operator and can hold `_P` itself (`1-LA_PVI`). An export holds
+ * several maps and numbers points per map, so the point's ID alone does not
+ * say which surface it belongs beside. The same rule as
+ * `carto_points.map_of`; a conformance test holds both to it.
+ */
+export function cartoMapOf(name) {
+  const found = /^([\s\S]+)_P[0-9]+_Point_Export\.xml$/.exec(
+    String(name).replace(/^.*\//, ''));
+  return found ? found[1] : null;
 }
 
 /* Sortiert dieser nackte Name auf beiden Lesewegen gleich?
@@ -3147,13 +3505,24 @@ function cartoByBareName(a, b) {
 function cartoPositionOf(files, stem, parent) {
   for (const kind of ['Eleclectrode_Positions_OnAnnotation',
                       'Sensor_Positions_OnAnnotation']) {
-    for (const name of Object.keys(files)) {
+    const tail = kind + '.txt';
+    // Dieselbe Auswahl wie Pythons `glob(f"{stem}_*{kind}.txt")`: mit dem
+    // Unterstrich nach dem Stamm, denn `Map_P1` ist auch ein Präfix von
+    // `Map_P10_…` — und in Byte-Ordnung steht `_P10_` vor `_P1_`, sodass P1
+    // still den Ort von P10 bekam. Die Länge, weil Stamm und Endung im Glob
+    // nicht übereinanderliegen können.
+    const candidates = Object.keys(files).filter((name) => {
       // Nur im eigenen Ordner des Punktes. Vorher wurde das ganze Archiv
       // durchsucht: liegen zwei Exporte nebeneinander, bekam ein Punkt die
       // Position eines gleichnamigen Geschwisters aus der anderen Studie.
-      if (cartoParentOf(name) !== parent) continue;
+      if (cartoParentOf(name) !== parent) return false;
       const bare = name.replace(/^.*\//, '');
-      if (!bare.startsWith(stem) || !bare.endsWith(kind + '.txt')) continue;
+      return bare.length >= stem.length + 1 + tail.length
+          && bare.startsWith(stem + '_') && bare.endsWith(tail);
+    });
+    // Sortiert wie `sorted(glob(...))`: welcher von mehreren Kandidaten
+    // gewinnt, darf nicht davon abhängen, wie der Browser aufzählt.
+    for (const name of candidates.sort(cartoByBareName)) {
       const found = parseCartoPositions(decodeLatin1(files[name]));
       if (found.has(1)) return found.get(1);
       if (found.size) return found.get(Math.min(...found.keys()));
@@ -3195,12 +3564,19 @@ export function parseCartoPoints(files) {
   for (const name of names) {
     const bare = name.replace(/^.*\//, '');
 
-    let root;
+    let doc;
     try {
-      root = parser.parseFromString(decodeLatin1(files[name]), 'text/xml')
-                   .documentElement;
-    } catch { root = null; }
-    if (!root || root.nodeName === 'parsererror') { unreadable.push(bare); continue; }
+      doc = parser.parseFromString(cartoXmlText(files[name]), 'text/xml');
+    } catch { doc = null; }
+    const root = doc && doc.documentElement;
+    // Nach dem Fehlerelement im ganzen Dokument fragen, wie parseEnSite es tut,
+    // nicht nur an der Wurzel: nur Firefox ersetzt die Wurzel durch
+    // <parsererror>. Chromium und WebKit — die Seite im Netz und das Fenster
+    // der Anwendung — behalten die angefangene Wurzel (oder bauen ein
+    // html-Dokument) und hängen <parsererror> hinein. Eine abgeschnittene
+    // Datei wurde dort zum Punkt mit halben Werten, eine kaputte zu einem
+    // Phantompunkt ohne Werte; Python überspringt beide.
+    if (!root || doc.querySelector('parsererror')) { unreadable.push(bare); continue; }
 
     const attr = (tag, key) => {
       const el = firstTag(root, tag);
@@ -3213,6 +3589,8 @@ export function parseCartoPoints(files) {
     points.push({
       id: root.getAttribute('ID') || bare,
       parent: cartoParentOf(name),
+      // Like `MappingPoint.map_name`: which surface the point belongs beside.
+      mapName: cartoMapOf(bare),
       xyz: cartoPositionOf(files, bare.replace('_Point_Export.xml', ''),
                            cartoParentOf(name)),
       bipolarMv: cartoNumber(attr('Voltages', 'Bipolar')),
@@ -3237,11 +3615,26 @@ export function parseCartoPoints(files) {
   // Ordnung, die die andere Seite nicht teilt, ist damit nicht nur kosmetisch.
   // Sie kam als Anzeigeordnung (2abd79a) und kein Test hielt sie.
   if (unreadable.length) {
+    // Beim Punkt genannt, nicht beim Dateinamen: vor `_P<n>` steht der Name
+    // der Karte, den der Untersucher tippt, und im Fenster der Anwendung geht
+    // diese Zeile ins Protokoll (shared/bridge.js), wohin nichts aus der
+    // Studie gehört.
+    const which = unreadable.map(n => (n.match(/_(P[0-9]+)_Point_Export\.xml$/) || [])[1])
+                            .filter(Boolean);
     console.warn(`[epview] ${unreadable.length} von ${names.length} `
-               + `Punktdateien nicht lesbar: ${unreadable.slice(0, 5).join(', ')}`);
+               + `Punktdateien nicht lesbar`
+               + (which.length ? `: ${which.slice(0, 5).join(', ')}` : ''));
   }
   return points;
 }
+
+/* Die Dateien, die ein Export je Punkt trägt und erst ein Klick braucht: das
+ * Elektrogramm, rund 1,9 MB je Punkt, und der Kontaktkraftverlauf, den hier
+ * niemand liest. Sie werden beim Laden nicht gelesen — aus einem Ordner bleibt
+ * das File stehen, aus einem ZIP der gepackte Eintrag. Vorher kamen alle in den
+ * Speicher, bevor die Karte erschien: bei zweitausend Punkten 3,8 GB, und
+ * gebraucht wurde davon nur, was jemand anklickte. */
+const CARTO_ON_DEMAND = /_(ECG_Export|ContactForce)\.txt$/i;
 
 // Ein Elektrogramm auf Abruf. Der Aufrufer bekommt die Funktion, nicht die
 // Daten — das ist der ganze Punkt: erst beim Klick wird gelesen.
@@ -3254,15 +3647,27 @@ export function cartoEgmReader(files) {
     byName.set(cartoParentOf(name) + ' ' + name.replace(/^.*\//, ''), name);
   }
   const cache = new Map();
+  const remember = (key, bytes) => {
+    const egm = parseCartoEcg(decodeLatin1(bytes));
+    cache.set(key, egm);
+    return egm;
+  };
   return (point) => {
     if (!point || !point.egmName) return null;
     const key = (point.parent || '') + ' ' + point.egmName;
     if (cache.has(key)) return cache.get(key);
     const entry = byName.get(key);
     if (!entry) return null;
-    const egm = parseCartoEcg(decodeLatin1(files[entry]));
-    cache.set(key, egm);
-    return egm;
+    const source = files[entry];
+    if (ArrayBuffer.isView(source)) return remember(key, source);
+    // Ein ZIP-Eintrag wird erst jetzt entpackt, und das geht synchron.
+    if (typeof source === 'function') return remember(key, source());
+    // Ein File aus einem Ordner wird erst jetzt gelesen, und das geht nur
+    // asynchron. Die Aufrufer warten ohnehin, weil Rhythmia genauso antwortet.
+    const pending = source.arrayBuffer().then(buf => remember(key, new Uint8Array(buf)));
+    cache.set(key, pending);
+    pending.catch(() => cache.delete(key));
+    return pending;
   };
 }
 
@@ -3276,6 +3681,10 @@ export function cartoEgmReader(files) {
  * `AdjustedPositions.txt` leer, also sind alle 22 Stellen messbar und keine
  * zeichenbar — und das wird als Notiz zurückgegeben, weil ein leerer Bildschirm
  * sich als „keine Ablation" liest.
+ *
+ * The same goes for rows that name no site (`skipped`): with all of them
+ * skipped the screen would stay empty, and with some of them skipped fewer
+ * sites and less delivery time would look complete.
  */
 export function cartoAblation(files) {
   const find = (name) => {
@@ -3284,23 +3693,34 @@ export function cartoAblation(files) {
     return key ? decodeLatin1(files[key]) : '';
   };
   const sitesText = find('AblationSites.txt');
-  if (!sitesText) return { group: null, sites: [], note: null };
+  if (!sitesText) return { group: null, sites: [], note: null, skipped: 0 };
 
   const sites = readVisitag({
     sites: sitesText,
     data: find('AblationData.txt'),
     positions: find('AdjustedPositions.txt'),
   });
-  if (!sites.length) return { group: null, sites: [], note: null };
+  const skipped = sites.skipped || 0;
+  if (!sites.length && !skipped) return { group: null, sites: [], note: null, skipped: 0 };
 
   const placed = sites.filter(s => s.xyz);
   const summary = summariseAblation(sites);
-  const note = placed.length
-    ? null
-    : `${sites.length} Ablationsstelle(n) gelesen, keine davon verortet — `
-      + `AdjustedPositions.txt enthält keine Zeilen. `
+  const notes = [];
+  if (skipped) {
+    const why = 'Session, ChannelID oder SiteIndex ist keine ganze Zahl';
+    notes.push(sites.length
+      ? `${skipped} Zeile(n) aus AblationSites.txt übersprungen — ${why}; `
+        + `Stellenzahl und Abgabedauer enthalten sie nicht.`
+      : `Keine Ablationsstelle lesbar: alle ${skipped} Zeile(n) aus `
+        + `AblationSites.txt übersprungen — ${why}.`);
+  }
+  if (sites.length && !placed.length) {
+    notes.push(`${sites.length} Ablationsstelle(n) gelesen, keine davon verortet — `
+      + `AdjustedPositions.txt enthält für keine davon eine Position. `
       + `${summary.totalDeliveryS != null
-          ? Math.round(summary.totalDeliveryS) + ' s Abgabe' : ''}`;
+          ? Math.round(summary.totalDeliveryS) + ' s Abgabe' : ''}`);
+  }
+  const note = notes.length ? notes.join(' ') : null;
 
   const group = placed.length ? {
     id: 'carto-ablation', label: 'Ablation', category: 'ablation',
@@ -3311,13 +3731,31 @@ export function cartoAblation(files) {
       ablation: s,
     })),
   } : null;
-  return { group, sites, note };
+  return { group, sites, note, skipped };
 }
 
 // fflate.unzipSync wird injiziert (Browser: per import; Node-Test: nur .mesh direkt)
 export function parseCarto(bytes, unzipSync) {
   if (!unzipSync) throw new Error('ZIP-Entpacker (fflate) nicht verfügbar.');
-  return parseCartoEntries(unzipSync(bytes));
+  // Die Signaldateien bleiben gepackt; an ihrer Stelle steht, was genau diesen
+  // einen Eintrag entpackt, wenn sein Punkt angeklickt wird.
+  const later = {};
+  const files = unzipSync(bytes, { filter: (entry) => {
+    if (!CARTO_ON_DEMAND.test(entry.name)) return true;
+    later[entry.name] = () => unzipSync(bytes, { filter: e => e.name === entry.name })[entry.name];
+    return false;
+  } });
+  return parseCartoEntries({ ...files, ...later });
+}
+
+// macOS bookkeeping, not export data: Finder's "Compress" adds an AppleDouble
+// twin (__MACOSX/Export/._1-LA.mesh) for files with extended attributes, and a
+// folder copied through a FAT stick carries `._` twins beside the real files.
+// Read as a mesh, each became an empty extra map in the selector. Same rule as
+// `_is_macos_metadata` in carto_to_3d.py.
+function isMacMetadata(name) {
+  const parts = name.split('/');
+  return parts.slice(0, -1).includes('__MACOSX') || parts[parts.length - 1].startsWith('._');
 }
 
 /** Ein CARTO-Export als Name→Bytes, gleich ob aus dem ZIP oder aus einem Ordner.
@@ -3330,6 +3768,7 @@ export function parseCartoEntries(files) {
   const meshes = [];
   for (const name of Object.keys(files)) {
     if (!name.toLowerCase().endsWith('.mesh')) continue;
+    if (isMacMetadata(name)) continue;
     const text = decodeLatin1(files[name]);
     meshes.push(parseCartoMesh(text, name.replace(/^.*\//, '').replace(/\.mesh$/i, '')));
   }
@@ -3359,6 +3798,11 @@ export function parseCartoEntries(files) {
     // Gemessen und nicht verortbar ist ein eigener Zustand. Ohne diese Notiz
     // sähe der Nutzer nichts und schlösse daraus, es gebe keine Ablation.
     if (ablation.note) mesh.ablationNote = ablation.note;
+    // Rows that named no site. The note above is not rendered anywhere; this
+    // count is, as a row of the metrics panel and in a sentence of the
+    // viewer's own catalogue under it (map.msg.ablationSkipped), which
+    // follows the chosen language where this German note would not.
+    mesh.ablationSkipped = ablation.skipped;
     // An die bestehende Marker-Ebene angehängt statt daneben gebaut: Sichtbar-
     // keit, Größe und Projektion gelten dann für beides gleich.
     mesh.tagGroups = (mesh.tagGroups || []).concat(tagGroups);
@@ -3371,16 +3815,60 @@ export function parseCartoEntries(files) {
  *  Liefern dieselbe Form wie die Studien-Parser, plus `colors`/`scalarNames`.
  * ===================================================================== */
 
+/* A face index token is an optional sign and ASCII decimal digits, nothing
+ * else; anything else becomes NaN for faceBuf to refuse. parseInt stopped at
+ * the first character that is no digit, so a corrupted token was a different,
+ * valid vertex — '1q' and '1e1' vertex 1, '10.5' vertex 10 — and only a token
+ * whose first character was hit came out NaN. Python's int() in plyio refuses
+ * the same tokens; it also takes '1_0' and non-ASCII digits, which this does
+ * not: refusing a file Python reads is the safe side of that difference. */
+const PLAIN_INT = /^[+-]?[0-9]+$/;
+const plainInt = (token) => (PLAIN_INT.test(token) ? Number(token) : NaN);
+
 // Wachsender Uint32-Puffer für Face-Indizes: spart das Zwischenspiel aus
 // JS-Array + Kopie am Ende (P-10). `cap` ist eine Schätzung, keine Grenze.
 function faceBuf(cap) {
   let a = new Uint32Array(Math.max(3, (cap * 3) | 0)), n = 0;
+  // The indices as the file wrote them: in the Uint32 buffer -1 has already
+  // become 4294967295.
+  let lowest = Infinity, highest = -Infinity;
+  // A token that is no plain integer ("x", "1q", or the empty end of a file
+  // cut off inside a face) arrives here as NaN (plainInt), as does a binary
+  // corner stored as a fraction. NaN passes neither `<` nor `>`, so the range
+  // above never sees it, and the Uint32 buffer stores it as 0, a valid
+  // vertex: the face folds onto vertex 0 and the area shrinks without a word.
+  // The first such face, counted from 1, is kept so the refusal can name it.
+  let faceNo = 0, garbled = 0;
   return {
     push3(i, j, k) {
       if (n + 3 > a.length) { const b = new Uint32Array(Math.max(a.length * 2, n + 3)); b.set(a.subarray(0, n)); a = b; }
       a[n++] = i; a[n++] = j; a[n++] = k;
     },
-    fan(idx) { for (let j = 2; j < idx.length; j++) this.push3(idx[0], idx[j - 1], idx[j]); },
+    fan(idx) {
+      faceNo++;
+      for (const i of idx) {
+        if (!Number.isInteger(i)) { if (!garbled) garbled = faceNo; continue; }
+        if (i < lowest) lowest = i;
+        if (i > highest) highest = i;
+      }
+      for (let j = 2; j < idx.length; j++) this.push3(idx[0], idx[j - 1], idx[j]);
+    },
+    /* A face naming a vertex the file does not have used to be read as it
+     * stood: the surface area came out NaN while the scar share and the
+     * openings beside it looked valid, and the mesh drew black. Such a file is
+     * broken, so it is refused. `base` is the file's own numbering (OBJ counts
+     * from 1), so the message names the number that is in the file. A garbled
+     * index is checked first: it is what a cut-off file leaves behind. */
+    within(count, format, base = 0) {
+      if (garbled) {
+        throw new Error(`${format}: Polygon ${garbled} nennt einen Vertex, der keine `
+                      + `ganze Zahl ist — die Datei ist beschädigt oder abgeschnitten.`);
+      }
+      const bad = lowest < 0 ? lowest : highest >= count ? highest : null;
+      if (bad === null) return;
+      throw new Error(`${format}: ein Polygon nennt Vertex ${bad + base}, `
+                    + `die Datei hat aber nur ${count} Vertices.`);
+    },
     done() { return a.slice(0, n); },
   };
 }
@@ -3463,6 +3951,30 @@ export function parsePLY(buffer) {
 
   const faces = faceBuf(fEl ? fEl.count : 0);
 
+  // A file that ends before the counts its header declares was cut off on the
+  // way. The ASCII path read on: the missing values became NaN vertices, the
+  // face loop stopped at the first count that was no number, and the map
+  // opened with holes or empty, as though complete. plyio.read_ply refuses
+  // the same file. The binary path ended in DataView's own English RangeError.
+  const cutOff = () => new Error(`PLY: Die Datei endet vor den ${vEl.count} Vertices `
+    + `und ${fEl ? fEl.count : 0} Flächen, die ihr Kopf ankündigt — abgeschnitten?`);
+  // A face naming a vertex the file does not have went to three.js as it
+  // stood, and a NaN index from a garbled token became vertex 0 through the
+  // Uint32Array. plyio.read_ply refuses it too, as write_ply does on writing.
+  // Checked where the corner is read, so the refusal names the polygon, the
+  // index as the file wrote it, and whether it was no number at all.
+  const corner = (i, f) => {
+    if (!Number.isInteger(i)) {
+      throw new Error(`PLY: Polygon ${f + 1} nennt einen Vertex, der keine ganze Zahl `
+                    + `ist — die Datei ist beschädigt oder abgeschnitten.`);
+    }
+    if (i >= 0 && i < vEl.count) return i;
+    throw new Error(`PLY: Polygon ${f + 1} nennt Vertex ${i}, die Datei hat aber nur `
+                  + `${vEl.count} Vertices.`);
+  };
+  const noCount = (f) => new Error(`PLY: Polygon ${f + 1} hat keine gültige Eckenzahl — `
+                                 + `die Datei ist beschädigt.`);
+
   if (format === 'ascii') {
     // P-9: `split(/\s+/)` auf dem Körper erzeugte bei 200k Vertices zwei
     // Millionen Einzelstrings vorab. Der Offset-Scanner liest an Ort und Stelle.
@@ -3472,23 +3984,32 @@ export function parsePLY(buffer) {
       while (sp < L && full.charCodeAt(sp) <= 32) sp++;
       const st = sp;
       while (sp < L && full.charCodeAt(sp) > 32) sp++;
-      return st === sp ? '' : full.slice(st, sp);
+      if (st === sp) throw cutOff();
+      return full.slice(st, sp);
     };
     for (let v = 0; v < vEl.count; v++) {
       for (const pr of vEl.props) assignVertex(pr.name, v, parseFloat(tok()), positions, normals, colors, scalars);
     }
     if (fEl) for (let f = 0; f < fEl.count; f++) {
-      const cnt = parseInt(tok(), 10);
-      if (!Number.isFinite(cnt)) break;
+      // A corrupted count read the way a corrupted corner did: '3q' was 3,
+      // and the face opened. Without a count the rest of the face cannot be
+      // told apart from the next one, so the file is refused here. A file
+      // that ends before it is refused by tok() as cut off.
+      const cnt = plainInt(tok());
+      if (!(cnt >= 0)) throw noCount(f);
       const idx = new Array(cnt);
-      for (let j = 0; j < cnt; j++) idx[j] = parseInt(tok(), 10);
+      for (let j = 0; j < cnt; j++) idx[j] = corner(plainInt(tok()), f);
       faces.fan(idx);
     }
   } else {
     const le = format.indexOf('little') >= 0;
     const dv = new DataView(buffer);
     let off = headerEnd;
+    const SIZE = { char: 1, int8: 1, uchar: 1, uint8: 1, short: 2, int16: 2,
+                   ushort: 2, uint16: 2, int: 4, int32: 4, uint: 4, uint32: 4,
+                   float: 4, float32: 4, double: 8, float64: 8 };
     const readScalar = (type) => {
+      if (off + (SIZE[type] || 0) > dv.byteLength) throw cutOff();
       let val;
       switch (type) {
         case 'char': case 'int8': val = dv.getInt8(off); off += 1; break;
@@ -3506,18 +4027,33 @@ export function parsePLY(buffer) {
     for (let v = 0; v < vEl.count; v++) {
       for (const pr of vEl.props) assignVertex(pr.name, v, readScalar(pr.type), positions, normals, colors, scalars);
     }
+    // A face may carry more lists than its corners: MeshLab writes per-corner
+    // texture coordinates as `property list uchar float texcoord`. Fanning
+    // every list turned those into triangles on vertex 0, and since a float
+    // is no vertex number the file was then refused as damaged. Only the
+    // corner list is fanned, found by the names writers give it; the others
+    // are read past. A face element whose lists all go by other names keeps
+    // its first list as corners, which is what such a file used to open with.
+    const lists = fEl ? fEl.props.filter(pr => pr.list) : [];
+    const corners = lists.find(pr => pr.name === 'vertex_indices' || pr.name === 'vertex_index')
+                 || lists[0];
     if (fEl) for (let f = 0; f < fEl.count; f++) {
       for (const pr of fEl.props) {
-        if (pr.list) {
+        if (pr === corners) {
           const cnt = readScalar(pr.countType);
+          if (!(cnt >= 0)) throw noCount(f);
           const idx = new Array(cnt);
-          for (let j = 0; j < cnt; j++) idx[j] = readScalar(pr.itemType);
+          for (let j = 0; j < cnt; j++) idx[j] = corner(readScalar(pr.itemType), f);
           faces.fan(idx);
+        } else if (pr.list) {
+          const cnt = readScalar(pr.countType);
+          for (let j = 0; j < cnt; j++) readScalar(pr.itemType);
         } else readScalar(pr.type);
       }
     }
   }
 
+  faces.within(vEl.count, 'PLY');
   return { positions, normals, colors, scalars, scalarNames, faces: faces.done(),
            tagGroups, latReference };
 }
@@ -3528,7 +4064,17 @@ export function parseOBJ(text) {
   const faces = faceBuf(0);
   let hasC = false, hasN = false;
   const lines = text.split(/\r?\n/);
+  // Named by polygon, as parsePLY names them, and by line, which is where an
+  // editor finds it; the index as the file wrote it.
+  const missing = (face, line, written, count) => new Error(
+    `OBJ: Polygon ${face} (Zeile ${line}) nennt Vertex ${written}, die Datei hat aber `
+    + `nur ${count} Vertices.`);
+  const garbled = (face, line) => new Error(
+    `OBJ: Polygon ${face} (Zeile ${line}) nennt einen Vertex, der keine ganze Zahl `
+    + `ist — die Datei ist beschädigt.`);
+  let highest = -1, highestAt = null, row = 0, polygon = 0;
   for (const ln of lines) {
+    row++;
     if (ln[0] === 'v' && ln[1] === ' ') {
       const p = ln.split(/\s+/);
       pos.push(+p[1], +p[2], +p[3]);
@@ -3536,11 +4082,30 @@ export function parseOBJ(text) {
     } else if (ln[0] === 'v' && ln[1] === 'n') {
       const p = ln.split(/\s+/); nor.push(+p[1], +p[2], +p[3]); hasN = true;
     } else if (ln[0] === 'f' && ln[1] === ' ') {
-      const p = ln.trim().split(/\s+/).slice(1).map(s => parseInt(s.split('/')[0], 10) - 1);
+      // OBJ counts from 1, and a negative index counts back from the last
+      // vertex read so far: `f -3 -2 -1` is the last three. `parseInt - 1`
+      // made -1 into -2, which the Uint32Array stored as 4294967294, and the
+      // surface vanished without a word ("NaN cm²"). 0 and a token that is no
+      // plain integer name no vertex, and used to become one: parseInt read
+      // '3q' as 3.
+      polygon++;
+      const have = pos.length / 3;
+      const p = ln.trim().split(/\s+/).slice(1).map((s) => {
+        const written = plainInt(s.split('/')[0]);
+        if (!Number.isInteger(written)) throw garbled(polygon, row);
+        const at = written < 0 ? have + written : written - 1;
+        if (!(at >= 0)) throw missing(polygon, row, written, have);
+        if (at > highest) { highest = at; highestAt = [polygon, row, written]; }
+        return at;
+      });
       faces.fan(p);
     }
   }
   const n = pos.length / 3;
+  // An absolute index is held against the whole file, as before: the faces
+  // index the finished vertex list, wherever in the file a vertex stands.
+  if (highest >= n) throw missing(...highestAt, n);
+  faces.within(n, 'OBJ', 1);
   const colors = hasC ? new Uint8Array(n*3) : null;
   if (hasC) for (let i = 0; i < n*3; i++) colors[i] = Math.round(col[i]*255);
   // OBJ-Normalen sind eine eigene indizierte Liste (v//vn). Diese vereinfachte,
@@ -3799,6 +4364,16 @@ function dirOf(file) {
   return cut < 0 ? '' : path.slice(0, cut);
 }
 
+/** The deepest folder all these files lie in — '' when there is none. */
+function commonDirOf(files) {
+  const paths = files.map(pathOf);
+  let base = paths.length ? dirOf(files[0]) : '';
+  while (base && !paths.every(p => p.startsWith(base + '/'))) {
+    base = base.slice(0, Math.max(0, base.lastIndexOf('/')));
+  }
+  return base;
+}
+
 /** Woran ein Verzeichnis als Studie eines Systems zu erkennen ist.
  *
  *  Reihenfolge zählt: ein CARTO-Export trägt `*_Points_Export.xml`, und ein
@@ -3890,9 +4465,22 @@ export async function loadRawFiles(files, unzipSync, onProgress) {
     // Fluoroskopie und Videos, und die gehören nicht in den Speicher, bloß weil
     // sie danebenliegen.
     const entries = {};
-    for (const f of files) {
-      if (!/\.(mesh|txt|xml|car)$/i.test(f.name)) continue;
-      entries[f.name] = new Uint8Array(await f.arrayBuffer());
+    const kept = files.filter(f => /\.(mesh|txt|xml|car)$/i.test(f.name));
+    // Keyed by the path below the opened folder, as a ZIP keys its entries,
+    // not by the bare name. With bare names two same-named files in different
+    // folders overwrote each other, and cartoParentOf found '' for every file,
+    // so the own-folder rule of cartoPositionOf and cartoEgmReader held for a
+    // ZIP and not for the same export opened as a folder: a point took the
+    // position of its namesake in the other export. Python's point_files keeps
+    // every file with its folder.
+    const base = commonDirOf(kept);
+    for (const f of kept) {
+      const key = base ? pathOf(f).slice(base.length + 1) : pathOf(f);
+      // Die Signaldateien bleiben ungelesen: `cartoEgmReader` liest eine erst,
+      // wenn ihr Punkt angeklickt wird. In der Anwendung holt `bridge.localFile`
+      // dann diese eine Datei, statt vorab alle zweitausend.
+      entries[key] = CARTO_ON_DEMAND.test(f.name)
+        ? f : new Uint8Array(await f.arrayBuffer());
     }
     return parseCartoEntries(entries);
   }

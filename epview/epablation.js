@@ -11,10 +11,21 @@
  * So the lesions can be measured and cannot be placed, and that is reported
  * rather than worked around: a lesion drawn at a guessed position is worse than
  * one not drawn.
+ *
+ * A position belongs to a site by time, not by channel. AdjustedPositions.txt
+ * is one row per sample (TimeStamp Session ChannelID X Y Z Valid), like
+ * AblationData.txt, and every lesion of a procedure is made with the same
+ * catheter — keyed by (Session, ChannelID) alone the last row wins and the
+ * whole line collapses onto one point, with every site counted as placed.
  */
 
 /** CARTO timestamps are milliseconds. */
 export const MS_PER_SECOND = 1000;
+
+/* A key cell is a whole number or names no site. Number() alone takes "1.0",
+ * "0x10" and "1e3", which Python's reader refuses, so the two would keep
+ * different sites. */
+const INTEGER = /^[+-]?[0-9]+$/;
 
 /** A whitespace-aligned VisiTag table: one header row, then rows. */
 export function parseTable(text) {
@@ -28,17 +39,25 @@ function statistics(values) {
   const usable = values.filter(Number.isFinite);
   if (!usable.length) return {};
   const sorted = [...usable].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
   return {
     mean: usable.reduce((a, b) => a + b, 0) / usable.length,
     // Der Median steht dabei, weil er für Abstände die ehrlichere Zahl ist:
     // die beiden Enden einer Kette haben nur einen Nachbarn und ziehen den
-    // Mittelwert nach oben.
-    median: sorted[Math.floor(sorted.length / 2)],
+    // Mittelwert nach oben. Bei gerader Anzahl die Mitte der beiden mittleren
+    // Werte — der obere allein läge immer auf der Seite, die der Ablation
+    // schmeichelt (größerer Impedanzabfall).
+    median: sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2,
     min: sorted[0], max: sorted[sorted.length - 1], n: usable.length,
   };
 }
 
-/** Sites with what was measured at each, from the three VisiTag files. */
+/** Sites with what was measured at each, from the three VisiTag files.
+ *
+ * The array carries `skipped`: how many rows of AblationSites.txt named no site
+ * because a key cell is not a whole number. A count beside the sites rather
+ * than a different return value, as `unassignedPointTables` sits beside the
+ * Rhythmia meshes — every caller reads this as a list of sites. */
 export function readVisitag({ sites, data = "", positions = "" }) {
   const { header, rows } = parseTable(sites);
   const at = Object.fromEntries(header.map((name, i) => [name, i]));
@@ -47,11 +66,16 @@ export function readVisitag({ sites, data = "", positions = "" }) {
   const placed = new Map();
   const positionTable = parseTable(positions);
   const pat = Object.fromEntries(positionTable.header.map((name, i) => [name, i]));
+  const timed = "TimeStamp" in pat;
   if (["Session", "ChannelID", "X", "Y", "Z"].every(name => name in pat)) {
     for (const row of positionTable.rows) {
       if ("Valid" in pat && !["1", "true", "True"].includes(row[pat.Valid])) continue;
-      placed.set(`${row[pat.Session]},${row[pat.ChannelID]}`,
-                 [Number(row[pat.X]), Number(row[pat.Y]), Number(row[pat.Z])]);
+      const xyz = [Number(row[pat.X]), Number(row[pat.Y]), Number(row[pat.Z])];
+      // A row that is not numbers would turn the mean of its window into NaN.
+      if (!xyz.every(Number.isFinite)) continue;
+      const key = `${row[pat.Session]},${row[pat.ChannelID]}`;
+      if (!placed.has(key)) placed.set(key, []);
+      placed.get(key).push({ time: timed ? Number(row[pat.TimeStamp]) : NaN, xyz });
     }
   }
 
@@ -73,7 +97,27 @@ export function readVisitag({ sites, data = "", positions = "" }) {
     }
   }
 
-  return rows.filter(row => row.length >= header.length).map(row => {
+  const complete = rows.filter(row => row.length >= header.length);
+  // Read anyway, a row with an unreadable key is a lesion with index NaN that
+  // looks like every other one. Skipped and counted, the gap is visible — and
+  // ablation.py skips the same rows.
+  const readable = complete.filter(row =>
+    [at.Session, at.ChannelID, at.SiteIndex].every(i => INTEGER.test(row[i])));
+  const skipped = complete.length - readable.length;
+  if (skipped) {
+    console.warn(`[epview] ${skipped} row(s) of `
+      + `AblationSites.txt skipped: Session, ChannelID or SiteIndex is not a whole number`);
+  }
+
+  // Over the readable rows only, as ablation.py counts the sites it read.
+  const sitesOn = new Map();
+  for (const row of readable) {
+    const key = `${row[at.Session]},${row[at.ChannelID]}`;
+    sitesOn.set(key, (sitesOn.get(key) || 0) + 1);
+  }
+  let ambiguous = 0;
+
+  const out = readable.map(row => {
     const key = `${row[at.Session]},${row[at.ChannelID]}`;
     // From the moment the stability filter was first satisfied, not from
     // arrival: the approach adds seconds, in the direction that flatters the
@@ -88,18 +132,46 @@ export function readVisitag({ sites, data = "", positions = "" }) {
       s => Number.isFinite(start) && Number.isFinite(end)
         && s.time >= start && s.time <= end);
 
+    // The site sits where the catheter was on average while it was made. A
+    // site with no row in its window stays unplaced: a row recorded between
+    // deliveries is where the catheter was moved through, not a lesion.
+    const rowsOf = placed.get(key) || [];
+    let near = [];
+    if (timed) {
+      near = rowsOf.filter(p => Number.isFinite(start) && Number.isFinite(end)
+        && p.time >= start && p.time <= end);
+    } else if (rowsOf.length && sitesOn.get(key) === 1) {
+      // No clock to match on, and nothing else on this channel it could be.
+      near = rowsOf;
+    } else if (rowsOf.length) {
+      ambiguous++;
+    }
+    const xyz = near.length
+      ? [0, 1, 2].map(k => near.reduce((sum, p) => sum + p.xyz[k], 0) / near.length)
+      : null;
+
     return {
       session: Number(row[at.Session]),
       channel: Number(row[at.ChannelID]),
       index: Number(row[at.SiteIndex]),
       durationS: duration,
-      xyz: placed.get(key) || null,
+      xyz,
       samples: samples.length,
       powerW: statistics(samples.map(s => s.power)),
       impedanceOhm: statistics(samples.map(s => s.impedance)),
       temperatureC: statistics(samples.map(s => s.temperature)),
     };
   });
+  if (ambiguous) {
+    try {
+      console.warn(`[epablation] AdjustedPositions.txt hat keine TimeStamp-Spalte; `
+        + `${ambiguous} Ablationsstelle(n) teilen sich einen Kanal und bleiben unverortet`);
+    } catch (e) {}
+  }
+  // The console is no place for this: the viewer shows what it was handed, and
+  // without the count fewer sites and less delivery time read as complete.
+  out.skipped = skipped;
+  return out;
 }
 
 /* Wie dicht die Läsionen liegen, und wo die Linie aufhört, eine zu sein.
@@ -118,6 +190,11 @@ const DEFAULT_GAP_MM = 6;
 function distance(a, b) {
   const dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
   return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+function distanceSquared(a, b) {
+  const dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+  return dx * dx + dy * dy + dz * dz;
 }
 
 /** Abstand jeder Läsion zur nächsten, in Millimetern, aufsteigend. */
@@ -164,23 +241,71 @@ export function segments(sites, maxGapMm = DEFAULT_GAP_MM) {
 }
 
 /**
- * Die Lücken: der kürzeste Weg zwischen je zwei Ketten, mit den beiden Stellen,
- * die ihn bilden. Das ist die Strecke, die geschlossen werden müsste.
+ * The holes: for each pair of chains the shortest link between them that no
+ * other lesion lies across, with the two sites that form it, ascending by
+ * length. That is the stretch somebody would have to close.
+ *
+ * A lesion lies across a link when it is inside the sphere that has the link
+ * as its diameter (|pa|² + |pb|² < |ab|², the Gabriel test), which is when it
+ * sees the two ends of the link at more than a right angle. Along a straight line
+ * every link from the first chain to the third has the middle chain inside its
+ * sphere, so that pair has no hole: the span of half the line is not one.
+ *
+ * The links of a pair are tried shortest first until one is clear, because the
+ * shortest is not always the hole. Round a ring the two chains beside a hole
+ * can be closer to each other the other way round, past the chains between
+ * them; that link is ruled out, and the longer one across the hole is clear.
+ * Trying only the shortest link lost exactly this hole. A minimum spanning tree
+ * over the chains loses the largest hole of every ring, since it drops the
+ * longest link of every cycle, and that is the number shown as "größte Lücke".
+ * The stricter lune test (a lesion closer than |ab| to both ends) drops ring
+ * holes wider than about a third of the ring as well.
+ *
+ * Every spanning-tree link is the shortest of its pair and passes the test (a
+ * lesion inside its sphere would close a cycle in which that link is the
+ * longest), so it is the one taken for its pair, and the holes always connect
+ * all chains.
+ *
+ * Limits. A lesion on a ring sees the ends of a hole at half the hole's arc.
+ * - A ring broken into only two chains has both its holes between the same
+ *   pair of chains and reports the smaller.
+ * - A hole of half the ring or more is not reported: every other lesion sees
+ *   its ends at a right angle or more.
+ * - Short of that, the lesion next to either end of a hole lies outside the
+ *   sphere by only a fraction of its spacing, a fraction that shrinks as the
+ *   hole approaches half the ring, so scatter in the positions can put it
+ *   inside, and then that hole is not reported either. The more scatter, the
+ *   smaller the holes this reaches.
+ * - An open line bent so far that some link between chains that do not follow
+ *   each other along it has no lesion inside its sphere reports that span as a
+ *   hole too; that errs towards a warning.
  */
 export function gaps(sites, maxGapMm = DEFAULT_GAP_MM) {
   const chains = segments(sites, maxGapMm);
   if (chains.length < 2) return [];
+  const placed = chains.flat();
+  const inside = (p, { from, to, span }) => p !== from && p !== to
+    && distanceSquared(p.xyz, from.xyz) + distanceSquared(p.xyz, to.xyz) < span;
+  // The lesion that ruled out the last link. The next link, of this pair or
+  // the next, mostly runs past the same lesions, so it is tested first; that
+  // keeps the walk near the cost of testing one link per pair.
+  let witness = null;
+  const clear = (link) => {
+    if (witness && inside(witness, link)) return false;
+    const found = placed.find(p => inside(p, link));
+    if (found) witness = found;
+    return !found;
+  };
   const out = [];
   for (let i = 0; i < chains.length; i++) {
     for (let j = i + 1; j < chains.length; j++) {
-      let best = null;
-      for (const a of chains[i]) {
-        for (const b of chains[j]) {
-          const d = distance(a.xyz, b.xyz);
-          if (!best || d < best.mm) best = { mm: d, from: a, to: b };
-        }
+      const links = [];
+      for (const from of chains[i]) {
+        for (const to of chains[j]) links.push({ span: distanceSquared(from.xyz, to.xyz), from, to });
       }
-      if (best) out.push(best);
+      links.sort((a, b) => a.span - b.span);
+      const hole = links.find(clear);
+      if (hole) out.push({ mm: Math.sqrt(hole.span), from: hole.from, to: hole.to });
     }
   }
   return out.sort((a, b) => a.mm - b.mm);

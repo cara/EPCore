@@ -262,16 +262,37 @@ function localFile(root, entry) {
  * die Oberfläche nicht rekonstruieren — der Leser dafür steht in Python. Ohne
  * Backend gibt es hier deshalb nichts zu holen, und `null` sagt genau das: auf
  * der öffentlichen Seite bleibt es bei „das kann nur die Anwendung".
+ *
+ * Resolves to `{ buffer, mapName, mapNames }`. An archive can hold several
+ * maps (sinus and paced, left and right atrium); `map` asks for one by name,
+ * and without it the server shows the first by name. Which one that was, and
+ * which others exist, come in two headers. Returning only the buffer dropped
+ * both, so the view showed one map and said nothing of the rest.
  */
-async function velocityMesh(path) {
+async function velocityMesh(path, map) {
   if (!await hasBackend()) return null;
-  const response = await fetch('/api/velocity/mesh?path=' + encodeURIComponent(path));
+  let url = '/api/velocity/mesh?path=' + encodeURIComponent(path);
+  if (map) url += '&map=' + encodeURIComponent(map);
+  const response = await fetch(url);
   if (!response.ok) {
     let detail = 'HTTP ' + response.status;
     try { detail = (await response.json()).detail || detail; } catch { /* kein JSON */ }
     throw new Error(detail);
   }
-  return response.arrayBuffer();
+  const mapNames = (response.headers.get('X-EPCore-Map-Names') || '')
+    .split(',').filter(Boolean).map(headerText);
+  return {
+    buffer: await response.arrayBuffer(),
+    mapName: headerText(response.headers.get('X-EPCore-Map-Name') || '') || null,
+    mapNames,
+  };
+}
+
+/** A header value the server percent-encoded: header values are Latin-1, and
+ * a map name is a folder name from the archive with no such limit. One that
+ * does not decode is shown as it came rather than failing the whole study. */
+function headerText(value) {
+  try { return decodeURIComponent(value); } catch { return value; }
 }
 
 /** Where a map point falls in the recording, or null if nothing is calibrated.

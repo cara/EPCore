@@ -77,7 +77,9 @@ export function meshClosure(positions, faces) {
     else if (forward !== 1) inconsistent++;   // both same way round
   }
   return {
-    closed: boundary === 0 && nonManifold === 0 && inconsistent === 0,
+    // No triangles pass both checks vacuously and enclose nothing: a point
+    // cloud is not a closed surface, although no edge is to blame.
+    closed: n > 0 && boundary === 0 && nonManifold === 0 && inconsistent === 0,
     boundaryEdges: boundary, nonManifoldEdges: nonManifold,
     inconsistentlyWoundEdges: inconsistent,
   };
@@ -132,6 +134,12 @@ function boundaryEdges(faces) {
  *
  * Walked rather than clustered, so two rings that share a vertex come out as
  * two rings. A reconstruction that pinched produces exactly that.
+ *
+ * At the shared vertex the walk has four rim edges to choose from, and which
+ * one it takes depends on the order the edges arrived in: it may carry on into
+ * the other hole and come back. Whenever the walk returns to a vertex it has
+ * already passed, what lies in between is therefore cut off as a ring of its
+ * own — otherwise the two holes came out as one figure of eight.
  */
 function boundaryRings(edges) {
   const neighbours = new Map();
@@ -149,12 +157,21 @@ function boundaryRings(edges) {
     const [start, next] = unused.values().next().value.split(",").map(Number);
     unused.delete(key(start, next));
     const ring = [start, next];
+    const at = new Map([[start, 0], [next, 1]]);
     for (;;) {
       const here = ring[ring.length - 1];
       const step = (neighbours.get(here) || []).find(n => unused.has(key(here, n)));
       if (step === undefined) break;
       unused.delete(key(here, step));
       if (step === ring[0]) break;
+      if (at.has(step)) {
+        const loop = ring.splice(at.get(step));
+        for (const v of loop) at.delete(v);
+        // Fewer than three corners enclose nothing: that is a triangle naming
+        // one vertex twice, not an opening.
+        if (loop.length >= 3) rings.push(loop);
+      }
+      at.set(step, ring.length);
       ring.push(step);
     }
     rings.push(ring);
@@ -268,6 +285,37 @@ export function lowVoltageArea(positions, faces, voltage, threshold = SCAR_MV) {
   };
 }
 
+/** The surface split by a window [lo, hi]: below it, inside it, above it, and
+ *  the area without a value. Named as the map view's area panel reads them.
+ *
+ *  Cut along both isolines, as `lowVoltageArea` cuts along one. Classifying a
+ *  whole triangle by the mean of its corners is the counting artefact the
+ *  header warns about, and under a "< 0.5 mV" heading it gave another number
+ *  than the metrics row's "< 0.5 mV" beside it. A value on a bound counts as
+ *  inside the window, as the colour scale draws it.
+ */
+export function areaBands(positions, faces, values, lo, hi) {
+  const areas = triangleAreas(positions, faces);
+  let total = 0, measured = 0, below = 0, above = 0, unmapped = 0;
+  const n = faces.length / 3;
+  for (let f = 0; f < n; f++) {
+    const area = areas[f];
+    total += area;
+    const a = values[faces[f * 3]], b = values[faces[f * 3 + 1]],
+          c = values[faces[f * 3 + 2]];
+    if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c)) {
+      unmapped += area;
+      continue;
+    }
+    measured += area;
+    below += fractionBelow(a, b, c, lo) * area;
+    // Above hi is below -hi on the negated values: strict, like `below`.
+    above += fractionBelow(-a, -b, -c, -hi) * area;
+  }
+  return { total, scar: below, border: Math.max(0, measured - below - above),
+           healthy: above, unmapped };
+}
+
 /** Area-weighted mean voltage over the measured surface, or null. */
 export function meanVoltage(positions, faces, voltage) {
   const areas = triangleAreas(positions, faces);
@@ -361,11 +409,28 @@ export function activationHistogram(positions, faces, lat, bins = 60, range = nu
     // Fläche eines Dreiecks, das 200 ms nach dem Fenster aktiviert, auf dem
     // letzten Balken und machte dort einen Berg, den es nicht gibt.
     if (max < lo || min > hi) continue;
-    total += area;
-    const from = Math.max(0, Math.min(bins - 1, Math.floor((min - lo) / width)));
-    const to = Math.max(0, Math.min(bins - 1, Math.floor((max - lo) / width)));
-    const share = area / (to - from + 1);
-    for (let b = from; b <= to; b++) counts[b] += share;
+    if (max === min) {
+      // No span to share out: the whole area belongs to the one moment, even
+      // when that moment is exactly the end of the window.
+      counts[Math.min(bins - 1, Math.floor((min - lo) / width))] += area;
+      total += area;
+      continue;
+    }
+    // Each bin gets the share of the span that lies inside it, and what lies
+    // outside the window goes to none. Booking a triangle that reaches over
+    // the edge wholly onto the edge bins built the same false peak as above,
+    // only smaller: five times the plateau at 50.3-60.3 ms on an evenly
+    // running wave.
+    const from = Math.max(0, Math.floor((min - lo) / width));
+    const to = Math.min(bins - 1, Math.floor((max - lo) / width));
+    for (let b = from; b <= to; b++) {
+      const start = lo + b * width, end = b === bins - 1 ? hi : lo + (b + 1) * width;
+      const overlap = Math.min(max, end) - Math.max(min, start);
+      if (!(overlap > 0)) continue;
+      const share = area * overlap / (max - min);
+      counts[b] += share;
+      total += share;
+    }
   }
 
   const out = [];

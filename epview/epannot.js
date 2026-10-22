@@ -325,13 +325,22 @@ export class AnnotationSet {
    * Absicht sich erraten lässt.
    */
   static fromJson(data) {
+    // The rest reads fields by name. A file of the wrong shape is refused by name, as the
+    // Python side does, rather than ending in a TypeError.
+    if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+      const seen = Array.isArray(data) ? 'eine Liste' : String(data);
+      throw new AnnotationError(`eine Annotationsdatei ist ein JSON-Objekt, nicht ${seen}`);
+    }
     if (data.epcore_annotations !== VERSION) {
       throw new AnnotationError(
         `diese Annotationsdatei ist Version ${data.epcore_annotations}; dieses EPCore `
         + `liest bis ${VERSION}`);
     }
     const study = data.study || {};
-    if (!KEYSPACES[study.vendor]) {
+    // A property lookup coerces its key, so ["carto"] would read as "carto" and the page
+    // would save the list back into a file Python refuses. Own keys only, too: an
+    // inherited name such as "constructor" is not a vendor.
+    if (typeof study.vendor !== 'string' || !Object.hasOwn(KEYSPACES, study.vendor)) {
       throw new AnnotationError(`unbekannter Hersteller ${JSON.stringify(study.vendor)}`);
     }
     if (study.keyspace !== KEYSPACES[study.vendor]) {
@@ -340,17 +349,63 @@ export class AnnotationSet {
         + `(${JSON.stringify(study.keyspace)})`);
     }
     const entries = data.log || [];
+    if (!Array.isArray(entries)) {
+      throw new AnnotationError('der Verlauf (log) ist keine Liste');
+    }
     if (data.revision !== entries.length) {
       throw new AnnotationError(
         `Revision ${data.revision} gegen ${entries.length} Verlaufseinträge: die Datei `
         + 'widerspricht sich');
     }
 
+    // `apply` numbers the next edit after the count, and the replay goes by seq. In a log
+    // numbered [1, 5] the operator's next edit becomes 3 and sorts under the older 5, so
+    // it never takes effect, not even after a save; with a repeated number the replay
+    // order falls back to the order the entries happen to be listed in.
+    entries.forEach((raw, index) => {
+      if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+        throw new AnnotationError(`Verlaufseintrag ${index + 1} ist kein Eintrag`);
+      }
+      if (!Number.isInteger(raw.seq)) {
+        throw new AnnotationError(
+          `Verlaufseintrag ${index + 1} trägt keine ganzzahlige seq (${JSON.stringify(raw.seq)})`);
+      }
+      // A key that is not text would be coerced silently once it names an object property,
+      // so `5` would match a stored "5". Python refuses it; so does this side.
+      if (typeof raw.key !== 'string') {
+        throw new AnnotationError(
+          `Verlaufseintrag ${index + 1} benennt keinen Punkt (${JSON.stringify(raw.key)})`);
+      }
+    });
+    const seqs = entries.map((raw) => raw.seq).sort((a, b) => a - b);
+    if (seqs.some((seq, index) => seq !== index + 1)) {
+      const shown = seqs.slice(0, 6).join(', ') + (seqs.length > 6 ? ', …' : '');
+      throw new AnnotationError(
+        `der Verlauf ist [${shown}] nummeriert statt 1 bis ${entries.length}: die Datei `
+        + 'widerspricht sich');
+    }
+
     const out = new AnnotationSet(study.vendor, study.fp || '');
-    for (const raw of [...entries].sort((a, b) => (a.seq || 0) - (b.seq || 0))) {
+    for (const raw of [...entries].sort((a, b) => a.seq - b.seq)) {
       if (!OPERATIONS.includes(raw.op)) {
         throw new AnnotationError(
           `Eintrag ${raw.seq} ist ein ${JSON.stringify(raw.op)}, den dieser Stand nicht kennt`);
+      }
+      if (raw.op === 'set_lat') {
+        // `apply` takes whatever value and basis it is handed, so this is the only gate,
+        // and Python refuses the same entries: a value of "2044" replays consistently,
+        // passes the state check, and crashes `diff` there. Number.isFinite does not
+        // coerce, so a string, a list, a boolean and null are all refused.
+        if (!Number.isFinite(raw.value)) {
+          throw new AnnotationError(
+            `Eintrag ${raw.seq} setzt den Zeitpunkt ${JSON.stringify(raw.value)}, `
+            + 'keine endliche Zahl');
+        }
+        if (typeof raw.basis !== 'string' || !BASES.includes(raw.basis)) {
+          throw new AnnotationError(
+            `Eintrag ${raw.seq} nennt als Herkunft seines Zeitpunkts `
+            + `${JSON.stringify(raw.basis)}; dieser Stand kennt ${BASES.join(', ')}`);
+        }
       }
       out.log.push({
         seq: raw.seq, op: raw.op, key: raw.key,
@@ -459,6 +514,41 @@ export function listRows(set, keys, points, { filter = 'changed', selection = ne
     });
   }
   return rows;
+}
+
+/** The state of every touched point, as text — what "saved" and "derived" compare against.
+ *
+ * Content, not the length of the log: undo pops the log, so undo followed by a
+ * different edit brings the length back to where it was at the last save or
+ * recompute, and a length check then called a changed state saved and an
+ * outdated derived map current. Keys are sorted at every level, so the same state
+ * always reads the same, whatever order the log built it in.
+ */
+export function snapshotOf(set) {
+  const out = {};
+  if (!set) return out;
+  for (const [key, state] of Object.entries(set.materialise())) out[key] = canonicalJson(state);
+  return out;
+}
+
+/** How many points stand otherwise now than in `snapshot` (from `snapshotOf`). */
+export function changedSince(set, snapshot) {
+  const before = snapshot || {};
+  const now = snapshotOf(set);
+  let changed = 0;
+  for (const key of new Set([...Object.keys(before), ...Object.keys(now)])) {
+    if (before[key] !== now[key]) changed++;
+  }
+  return changed;
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
 }
 
 /** Die Herstellerwerte eines Punktes als Fingerabdruck.

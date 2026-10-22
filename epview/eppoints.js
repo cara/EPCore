@@ -8,7 +8,7 @@
  * over it: a point annotated outside its window belongs to a different beat,
  * and a point off the wall is a measurement of blood.
  */
-import { meshClosure } from './epmetrics.js?v=d400d396e5fb';
+import { meshClosure } from './epmetrics.js?v=9c18153262e8';
 
 /** How far outside the surface a point may sit and still count as on it, mm. */
 export const ON_SURFACE_MM = 3.0;
@@ -206,13 +206,17 @@ export function pickAnnotation(samples, window = null,
 
   if (criterion === 'peak') {
     const inside = Array.from(values).slice(first, last + 1).sort((a, b) => a - b);
-    const median = inside[Math.floor(inside.length / 2)];
+    // The mean of the two middle values on an even count, as np.median takes it:
+    // the upper one alone moves the baseline, and with it which sample lies
+    // furthest from it, so the browser and Python annotated different samples.
+    const mid = inside.length >> 1;
+    const median = inside.length % 2 ? inside[mid] : (inside[mid - 1] + inside[mid]) / 2;
     let best = first, most = -Infinity;
     for (let i = first; i <= last; i++) {
       const away = Math.abs(values[i] - median);
       if (away > most) { most = away; best = i; }
     }
-    return best;
+    return most > 0 ? best : null;   // a flat window; its first sample is not a peak
   }
 
   let best = -1, lowest = 0;
@@ -223,7 +227,26 @@ export function pickAnnotation(samples, window = null,
   return best < 0 ? null : best;   // nichts fällt in diesem Fenster
 }
 
-/** Squared distance from a point to one triangle, clamped into it. */
+/** Squared distance from a point to the segment from s to e. */
+function closestOnSegment(px, py, pz, sx, sy, sz, ex, ey, ez) {
+  const dx = ex - sx, dy = ey - sy, dz = ez - sz;
+  const length = dx * dx + dy * dy + dz * dz;
+  const t = length > 0
+    ? Math.min(1, Math.max(0, ((px - sx) * dx + (py - sy) * dy + (pz - sz) * dz) / length))
+    : 0;
+  const qx = sx + t * dx, qy = sy + t * dy, qz = sz + t * dz;
+  return (qx - px) ** 2 + (qy - py) ** 2 + (qz - pz) ** 2;
+}
+
+/** Squared distance from a point to the nearest point of one triangle.
+ *
+ * The foot of the perpendicular when that falls inside the triangle, otherwise
+ * the nearest point of one of its edges. Clamping the barycentric coordinates
+ * lands on the triangle but not on its nearest point — beyond a corner it
+ * overestimates by millimetres — and the edges as segments also measure a
+ * degenerate triangle, whose plane is undefined. The same rule as
+ * `_closest_on_triangles` in points.py.
+ */
 function closestOnTriangle(px, py, pz, ax, ay, az, bx, by, bz, cx, cy, cz) {
   const abx = bx - ax, aby = by - ay, abz = bz - az;
   const acx = cx - ax, acy = cy - ay, acz = cz - az;
@@ -234,18 +257,21 @@ function closestOnTriangle(px, py, pz, ax, ay, az, bx, by, bz, cx, cy, cz) {
   const d01 = abx * acx + aby * acy + abz * acz;
   const d11 = acx * acx + acy * acy + acz * acz;
   const denominator = d00 * d11 - d01 * d01;
-  let u = 0, v = 0;
-  if (denominator !== 0) {
-    u = (d11 * d1 - d01 * d2) / denominator;
-    v = (d00 * d2 - d01 * d1) / denominator;
+  let best = Infinity;
+  if (denominator > 0) {
+    const u = (d11 * d1 - d01 * d2) / denominator;
+    const v = (d00 * d2 - d01 * d1) / denominator;
+    if (u >= 0 && v >= 0 && u + v <= 1) {
+      const qx = ax + u * abx + v * acx;
+      const qy = ay + u * aby + v * acy;
+      const qz = az + u * abz + v * acz;
+      best = (qx - px) ** 2 + (qy - py) ** 2 + (qz - pz) ** 2;
+    }
   }
-  u = Math.min(1, Math.max(0, u));
-  v = Math.min(1, Math.max(0, v));
-  if (u + v > 1) { const scale = u + v; u /= scale; v /= scale; }
-  const qx = ax + u * abx + v * acx;
-  const qy = ay + u * aby + v * acy;
-  const qz = az + u * abz + v * acz;
-  return (qx - px) ** 2 + (qy - py) ** 2 + (qz - pz) ** 2;
+  return Math.min(best,
+    closestOnSegment(px, py, pz, ax, ay, az, bx, by, bz),
+    closestOnSegment(px, py, pz, bx, by, bz, cx, cy, cz),
+    closestOnSegment(px, py, pz, cx, cy, cz, ax, ay, az));
 }
 
 /** How far each point is from the surface, in mm.
