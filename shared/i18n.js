@@ -17,7 +17,7 @@
  * attribute paints early, as before.
  */
 
-import { CATALOGUES, LANGUAGES, LANGUAGE_NAMES } from './i18n.generated.js?v=11fb75a4e8d9';
+import { CATALOGUES, LANGUAGES, LANGUAGE_NAMES } from './i18n.generated.js?v=7ab3e6d427ee';
 
 const STORAGE_KEY = 'epcore.language';
 const DEFAULT = 'de';

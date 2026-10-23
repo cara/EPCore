@@ -5,7 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CARTO 3 Anonymisierer</title>
 <link href="../vendor/fonts/fonts.css" rel="stylesheet">
+<!-- Before the stylesheet, or the page paints dark and turns light a frame
+     later. Classic and inline because a module runs deferred; the shared
+     version is shared/theme.js. -->
+<script>
+  try {
+    var t = localStorage.getItem('epcore.theme') || localStorage.getItem('eptrace-theme');
+    if (t === 'light') document.documentElement.dataset.theme = 'light';
+  } catch (e) { /* storage disabled */ }
+</script>
 <link href="../shared/epcore.css" rel="stylesheet">
+<script type="module" src="../shared/theme.js?v=7ab3e6d427ee"></script>
 <style>
   body {
     max-width: 920px;
@@ -34,30 +44,58 @@
     width: 26em; max-width: 100%; font-family: monospace;
   }
   textarea {
+    /* Painted here: epcore.css themes inputs, not textareas, and the
+       browser's dark default put the example text at 2.43:1. */
+    background: var(--bg-2); color: var(--text);
     width: 100%; box-sizing: border-box; padding: 0.5em;
     border: 1px solid var(--bg-3); border-radius: 3px;
     font-family: monospace; font-size: 0.9em;
   }
+  textarea::placeholder { color: var(--text-faint); opacity: 1; }
   button {
     padding: 0.7em 1.5em; font-size: 1em; cursor: pointer;
     border-radius: 4px; border: 1px solid var(--bg-3); background: var(--bg-3);
     margin-right: 0.5em;
   }
-  button:hover { background: #d6dbdf; }
-  button.primary { background: #2ecc71; color: var(--bg-1); border-color: #27ae60; }
+  button:hover {
+    /* Tokens: the light page's grey hover sat under the dark theme's light
+       label at 1.07:1. Same hover as the hub's secondary button. */
+    background: var(--bg-2);
+    border-color: var(--accent-dim);
+  }
+  button.primary { background: #2ecc71; color: #0a1016; border-color: #27ae60; }
   button.primary:hover { background: #27ae60; }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   pre {
     background: var(--bg-2); padding: 0.8em; border-radius: 3px; overflow: auto;
-    max-height: 18em; font-size: 0.85em; var(--bg-1)-space: pre-wrap; word-break: break-all;
+    max-height: 18em; font-size: 0.85em; white-space: pre-wrap; word-break: break-all;
   }
   table { border-collapse: collapse; width: 100%; margin-top: 0.5em; font-size: 0.9em; }
   th, td { padding: 0.4em 0.6em; text-align: left; border-bottom: 1px solid var(--line); }
+  td.file, td.long {
+    /* A path, an ID or a hash has no break opportunity of its own: unbroken,
+       it sized the table past the page and pushed "Ersatz" off-screen. Only
+       such cells, which renderPreview marks, break anywhere. A cell that may
+       break anywhere has next to no minimum width, and automatic table layout
+       hands its share to a long column, until "PatientName" breaks mid-word
+       in the column the operator reads. */
+    overflow-wrap: anywhere;
+  }
   th { background: var(--bg-2); }
   td.field { font-family: monospace; color: var(--accent); }
   td.original, td.replacement { font-family: monospace; }
   td.original { color: var(--bad); }
-  td.replacement { color: #27ae60; }
+  td.replacement { color: var(--accent); }
+  td.file { font-family: monospace; font-size: 0.85em; }
+  @media (max-width: 48em) {
+    td {
+      /* Narrower than this, a field name, a name and its replacement no
+         longer fit whole side by side: 18, 22 and 16 characters beside a
+         CARTO path already need 600 px. A word broken in two beats a table
+         that runs off the page. */
+      overflow-wrap: anywhere;
+    }
+  }
   ul.files { padding-left: 1.5em; }
   ul.files li { font-family: monospace; }
   .row { display: flex; gap: 1em; flex-wrap: wrap; }
@@ -109,19 +147,19 @@
     <label><input type="checkbox" id="opt-physician" checked> Ärzte- &amp; Personalnamen</label>
     <label><input type="checkbox" id="opt-institution" checked> Klinik- &amp; Standortnamen</label>
     <label><input type="checkbox" id="opt-comments" checked> Kommentare &amp; Notizen leeren</label>
-    <label><input type="checkbox" id="opt-dates"> Datum/Zeitstempel auf Jahr kürzen</label>
-    <label><input type="checkbox" id="opt-meshname"> MeshName/MeshID ersetzen (kann Patientenname enthalten)</label>
+    <label><input type="checkbox" id="opt-dates" checked> Datum/Zeitstempel auf Jahr kürzen</label>
+    <label><input type="checkbox" id="opt-meshname" checked> MeshName/MeshID und StudyName/StudyID ersetzen (können den Patientennamen enthalten)</label>
   </fieldset>
 </div>
 
 <fieldset>
   <legend>Eigene zu ersetzende Begriffe</legend>
-  <p style="margin: 0.2em 0; font-size: 0.9em; color: #7f8c8d;">
+  <p style="margin: 0.2em 0; font-size: 0.9em; color: var(--text-dim);">
     Eine Zeichenkette pro Zeile (z.&nbsp;B. Patientenname). Wird in allen
     Textdateien des Archivs durch <code>[REDACTED]</code> ersetzt.
     Case-insensitive. Binärdateien werden NICHT durchsucht.
   </p>
-  <textarea id="custom-patterns" rows="3"
+  <textarea id="custom-patterns" rows="3" aria-label="Eigene zu ersetzende Begriffe"
     placeholder="Müller, Hans&#10;1965-03-15&#10;Smith_Mapping_2024"></textarea>
 </fieldset>
 
@@ -682,6 +720,7 @@ const PROFILES = {
             "birthday",
             "date_of_birth",
             "dateofbirth",
+            "dob",
             "email",
             "family_name",
             "familyname",
@@ -699,6 +738,8 @@ const PROFILES = {
             "labname",
             "last_name",
             "lastname",
+            "medical_record_number",
+            "medicalrecordnumber",
             "middle_initial",
             "middle_name",
             "middleinitial",
@@ -716,6 +757,8 @@ const PROFILES = {
             "performingphysician",
             "perfphysician",
             "phone",
+            "phone_number",
+            "phonenumber",
             "physicianname",
             "referringphysician",
             "refphysician",
@@ -780,6 +823,11 @@ const PROFILES = {
             },
             {
               "group": 8,
+              "element": 156,
+              "name": "ConsultingPhysicianName"
+            },
+            {
+              "group": 8,
               "element": 4112,
               "name": "StationName"
             },
@@ -820,6 +868,11 @@ const PROFILES = {
             },
             {
               "group": 16,
+              "element": 33,
+              "name": "IssuerOfPatientID"
+            },
+            {
+              "group": 16,
               "element": 48,
               "name": "PatientBirthDate"
             },
@@ -845,8 +898,33 @@ const PROFILES = {
             },
             {
               "group": 16,
+              "element": 4101,
+              "name": "PatientBirthName"
+            },
+            {
+              "group": 16,
+              "element": 4112,
+              "name": "PatientAge"
+            },
+            {
+              "group": 16,
               "element": 4160,
               "name": "PatientAddress"
+            },
+            {
+              "group": 16,
+              "element": 4192,
+              "name": "PatientMotherBirthName"
+            },
+            {
+              "group": 16,
+              "element": 4224,
+              "name": "MilitaryRank"
+            },
+            {
+              "group": 16,
+              "element": 4240,
+              "name": "MedicalRecordLocator"
             },
             {
               "group": 16,
@@ -860,13 +938,133 @@ const PROFILES = {
             },
             {
               "group": 16,
+              "element": 8576,
+              "name": "Occupation"
+            },
+            {
+              "group": 16,
+              "element": 8624,
+              "name": "AdditionalPatientHistory"
+            },
+            {
+              "group": 16,
+              "element": 8855,
+              "name": "ResponsiblePerson"
+            },
+            {
+              "group": 16,
               "element": 16384,
               "name": "PatientComments"
+            },
+            {
+              "group": 20,
+              "element": 260,
+              "name": "SecondaryReviewerName"
+            },
+            {
+              "group": 20,
+              "element": 8198,
+              "name": "EvaluatorName"
+            },
+            {
+              "group": 50,
+              "element": 4146,
+              "name": "RequestingPhysician"
             },
             {
               "group": 56,
               "element": 768,
               "name": "CurrentPatientLocation"
+            },
+            {
+              "group": 64,
+              "element": 6,
+              "name": "ScheduledPerformingPhysicianName"
+            },
+            {
+              "group": 64,
+              "element": 4112,
+              "name": "NamesOfIntendedRecipientsOfResults"
+            },
+            {
+              "group": 64,
+              "element": 8200,
+              "name": "OrderEnteredBy"
+            },
+            {
+              "group": 64,
+              "element": 16439,
+              "name": "HumanPerformerName"
+            },
+            {
+              "group": 64,
+              "element": 41063,
+              "name": "DocumentAuthorTrial"
+            },
+            {
+              "group": 64,
+              "element": 41077,
+              "name": "VerifyingObserverName"
+            },
+            {
+              "group": 64,
+              "element": 41251,
+              "name": "PersonName"
+            },
+            {
+              "group": 64,
+              "element": 41735,
+              "name": "CurrentObserverTrial"
+            },
+            {
+              "group": 64,
+              "element": 41810,
+              "name": "VerbalSourceTrial"
+            },
+            {
+              "group": 112,
+              "element": 132,
+              "name": "ContentCreatorName"
+            },
+            {
+              "group": 114,
+              "element": 106,
+              "name": "SelectorPNValue"
+            },
+            {
+              "group": 12294,
+              "element": 166,
+              "name": "ROIInterpreter"
+            },
+            {
+              "group": 12302,
+              "element": 8,
+              "name": "ReviewerName"
+            },
+            {
+              "group": 16392,
+              "element": 258,
+              "name": "InterpretationRecorder"
+            },
+            {
+              "group": 16392,
+              "element": 266,
+              "name": "InterpretationTranscriber"
+            },
+            {
+              "group": 16392,
+              "element": 268,
+              "name": "InterpretationAuthor"
+            },
+            {
+              "group": 16392,
+              "element": 276,
+              "name": "PhysicianApprovingInterpretation"
+            },
+            {
+              "group": 16392,
+              "element": 281,
+              "name": "DistributionName"
             }
           ],
           "date_tags": [
@@ -889,6 +1087,61 @@ const PROFILES = {
               "group": 8,
               "element": 35,
               "name": "ContentDate"
+            },
+            {
+              "group": 8,
+              "element": 18,
+              "name": "InstanceCreationDate"
+            },
+            {
+              "group": 64,
+              "element": 580,
+              "name": "PerformedProcedureStepStartDate"
+            },
+            {
+              "group": 64,
+              "element": 2,
+              "name": "ScheduledProcedureStepStartDate"
+            },
+            {
+              "group": 24,
+              "element": 4608,
+              "name": "DateOfLastCalibration"
+            },
+            {
+              "group": 8,
+              "element": 48,
+              "name": "StudyTime"
+            },
+            {
+              "group": 8,
+              "element": 49,
+              "name": "SeriesTime"
+            },
+            {
+              "group": 8,
+              "element": 50,
+              "name": "AcquisitionTime"
+            },
+            {
+              "group": 8,
+              "element": 51,
+              "name": "ContentTime"
+            },
+            {
+              "group": 8,
+              "element": 19,
+              "name": "InstanceCreationTime"
+            },
+            {
+              "group": 64,
+              "element": 581,
+              "name": "PerformedProcedureStepStartTime"
+            },
+            {
+              "group": 64,
+              "element": 3,
+              "name": "ScheduledProcedureStepStartTime"
             }
           ]
         }
@@ -1547,6 +1800,10 @@ const RESIDUE_TEXT = {
   "anon.residue.title": "BEKANNTER REST — diese Ausgabe ist NICHT vollständig anonymisiert. Datum und Uhrzeit der Prozedur stehen weiterhin darin:",
   "anon.residue.xml_time_fields": "in XML-Zeitfeldern, die nicht ersetzt werden: {names}"
 };
+const FREETEXT_TEXT = {
+  "anon.freetext.kept": "Von Hand eingegebener Text wurde nicht verändert: {fields}. Solche Beschriftungen tippt der Bediener; sie können einen Namen enthalten, und nichts hier hat sie gelesen. Vor dem Weitergeben prüfen.",
+  "anon.freetext.more": "und {count} weitere(s) Feld(er)"
+};
 // The scrub itself, so the three mapping pages cannot carry three versions of
 // it. They did, and they had drifted: measured over the union of every field
 // any of them knew, CARTO left 7 identifiers in place, EnSite 8, Rhythmia 14 —
@@ -1589,19 +1846,119 @@ const SHARED_ENCRYPTED_ELEMENT =
   /(<(?:[\w.\-]+:)?(Encrypted\w*Info)\b[^>]*>)([^<]*)(<\/(?:[\w.\-]+:)?\2\s*>)/gi;
 const SHARED_REDACTED_ENCRYPTED = "[ENCRYPTED RECORD REMOVED BY EPCORE]";
 
+// What may stand behind a quoted INI value for its quotes to close it: the
+// rest of a tag and nothing else — more quoted attributes, then the end of the
+// tag, optionally with element text closed on the same line. Anything else is
+// the value going on: `"Roe" PatientID=98765`, `"Doe" >John Smith`. A check
+// that looked only at how the tail began wrote these back unread, and a second
+// pass called the copy clean. Group 1 is the attributes, group 3 the end of
+// the tag. Mirror of maps._TAG_TAIL and maps._TAG_TAIL_ATTRIBUTE.
+const SHARED_TAG_TAIL =
+  /^((?:[ \t]+(?:[\w.\-]+:)?[A-Za-z_][\w.\-]*[ \t]*=[ \t]*(["'])(?:(?!\2)[^<\r\n])*\2)*)([ \t]*(?:\/?>(?:[^<\r\n]*<\/[\w.:\-]+[ \t]*>)?)?[ \t]*)$/;
+const SHARED_TAG_TAIL_ATTRIBUTE =
+  /((?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)[ \t]*=[ \t]*)(["'])((?:(?!\3)[^<\r\n])*)\3/g;
+
+// Both quote styles: XML permits either, and vendors use both in one file.
+// Three rules, because each finds assignments the others cannot, and every
+// assignment any of them finds is decided, once. The first allows no quote at
+// all in a value: it cannot see PatientName="O'Connor, Sean", but it is the only
+// one that never swallows an assignment written inside another value,
+// Msg="Set PatientName='Mustermann'". The second lets a value hold the other
+// quote and stops it at "<", so a stray quote in element text cannot run on into
+// the next tag. The third takes the values that hold a "<", as a contact line in
+// a .txt or .log file does: PatientName="Muster <muster@klinik.example>".
+// The rules overlap, and one rule's match may hold an assignment only another
+// finds. Run one after another, a later rule would decide again what an
+// earlier one had, counting it twice as kept, and nothing reached an
+// assignment inside a value already matched whole. So all three read the same
+// text, and their finds are merged by where the value starts. Mirror of
+// maps._ATTRIBUTE_RULES and maps._attribute_assignments.
+const SHARED_ATTRIBUTE_RULES = [
+  /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)\s*=\s*(?:"([^"']*)"|'([^"']*)')/g,
+  /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)\s*=\s*(?:"([^"<]*)"|'([^'<]*)')/g,
+  /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)\s*=\s*(?:"([^"<]*<[^"]*)"|'([^'<]*<[^']*)')/g,
+];
+
+// A fourth rule, read overlapping: after each find the search goes on from
+// where the value starts, not from where it ends. A stray quote of the
+// identifier's own kind, Kind=" unbalanced PatientName="Doe, John", makes
+// every rule above take the identifier's opening quote for the end of Kind's
+// value; the search went on behind it, and the name stayed while a second
+// pass found nothing either. Its value stays on one line and holds no "<", so
+// it adds no reach the rules above lack. Mirror of maps._ATTRIBUTE_OVERLAPPING.
+const SHARED_ATTRIBUTE_OVERLAPPING =
+  /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)\s*=\s*(?:"([^"<\r\n]*)"|'([^'<\r\n]*)')/g;
+
+// [value start, name, value] for every assignment a rule finds, once each and
+// in text order. A value runs to the next quote of its own kind under every
+// rule, so where it starts names it. The first rule's find is kept, so what it
+// decided before the other two existed it decides the same way now, and the
+// overlapping rule, read last, only adds an assignment none of the others
+// reached.
+function sharedAttributeAssignments(text) {
+  const found = new Map();
+  const keep = m => {
+    // Tested against undefined, not for truth: an empty value matched too.
+    const value = m[2] !== undefined ? m[2] : m[3];
+    // The match ends with the value and its closing quote.
+    const start = m.index + m[0].length - 1 - value.length;
+    if (!found.has(start)) found.set(start, [start, m[1], value]);
+    return start;
+  };
+  for (const rule of SHARED_ATTRIBUTE_RULES) {
+    for (const m of text.matchAll(rule)) keep(m);
+  }
+  const overlapping = new RegExp(SHARED_ATTRIBUTE_OVERLAPPING);
+  let m;
+  while ((m = overlapping.exec(text)) !== null) {
+    // The value starts behind the name and its "=", so this moves on.
+    overlapping.lastIndex = keep(m);
+  }
+  return [...found.values()].sort((a, b) => a[0] - b[0]);
+}
+
 function sharedEscapeXml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+// What "somebody typed this" looks like: letters, long enough to be a word,
+// and not a time or a number. Mirror of maps.looks_hand_typed; the counts it
+// gives are compared with Python's in tests/conformance.
+const SHARED_HAND_TYPED = /[A-Za-zÄÖÜäöüßÀ-ÿ]/;
+const SHARED_ONLY_NUMBERS = /^[\d:.\-\s/]+$/;
+
+function sharedLooksHandTyped(value) {
+  const stripped = String(value == null ? "" : value).trim();
+  // Counted in code points, as Python's len() counts them.
+  if (Array.from(stripped).length < 3 || !SHARED_HAND_TYPED.test(stripped)) {
+    return false;
+  }
+  return !SHARED_ONLY_NUMBERS.test(stripped);
 }
 
 /** Replace every known identifier in one file's text.
  *
  *  `escapeValue` lets a page that works in another encoding convert the
  *  replacement before it is written; Rhythmia scrubs latin-1 strings.
+ *  `customMatcher` does the same for a custom pattern: it turns the typed
+ *  text into the global RegExp that finds it. Rhythmia needs it because the
+ *  "i" flag cannot pair "Ü" with "ü" once each is two UTF-8 bytes read as
+ *  latin-1.
+ *
+ *  `kept`, a Map, counts per field name the hand-typed values this pass left
+ *  as they were — a map's labels, kept on purpose because they make it
+ *  readable, but written by the operator and read by nothing here. Without it
+ *  a study whose only names sit in labels showed "no personal fields found".
+ *  A Map rather than an object: an object puts integer-like keys first, and
+ *  the note lists fields in the order Python's dict does.
  */
-function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
+function scrubKnownFields(text, opts, found, fileLabel, escapeValue,
+                          customMatcher, kept) {
   const repMap = sharedReplacementMap(opts);
   const esc = escapeValue || sharedEscapeXml;
+  const matcher = customMatcher || (pattern =>
+    new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"));
   // `count` matters for custom patterns: one entry can stand for many
   // occurrences, and countReplacements sums it. Leaving it off made a report
   // that said "1 replacement" where three strings had gone.
@@ -1614,6 +1971,11 @@ function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
   const decide = (name, current) => {
     const key = normaliseFieldName(name);
     const stripped = String(current).trim();
+    // Before the date rule, where Python counts too: the same input has to
+    // name the same fields on both sides.
+    if (kept && !repMap.has(key) && sharedLooksHandTyped(stripped)) {
+      kept.set(name, (kept.get(name) || 0) + 1);
+    }
     if (opts.dates !== false && SHARED_DATE_FIELDS.has(key)) {
       const year = String(current).match(/\b(19|20)\d{2}\b/);
       const next = `${year ? year[0] : SHARED.fallback_year}-01-01`;
@@ -1649,30 +2011,86 @@ function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
   // and a namespace prefix is what a vendor adds when their schema grows. The
   // prefix is outside the backreference: a closing tag may legally carry a
   // different one.
+  //
+  // The text may hold CDATA sections: <PatientName><![CDATA[Doe^John]]> never
+  // matched a value that stopped at the first "<", and the name stayed. A
+  // section runs to its first "]]>", so a match cannot reach into the next
+  // element. The value is read through the wrapper and the replacement goes
+  // in as escaped text, the same value to any XML reader, encoded by `esc` as
+  // it always was. Mirror of maps._ELEMENT / maps._CDATA.
   out = out.replace(
-    /(<(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)(?:\s[^<>]*)?>)([^<]*)(<\/(?:[\w.\-]+:)?\2\s*>)/g,
-    (m, open, name, content, close) => {
+    /(<(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)(?:\s[^<>]*)?>)([^<]*(?:<!\[CDATA\[(?:(?!\]\]>)[\s\S])*\]\]>[^<]*)*)(<\/(?:[\w.\-]+:)?\2\s*>)/g,
+    (m, open, name, raw, close) => {
+      const content = raw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
       const next = decide(name, content);
       if (next === null) return m;
       note(name, content, next);
       return open + esc(next) + close;
     });
 
-  // Both quote styles: XML permits either and vendors use both in one file.
+  // Every assignment once, in text order (sharedAttributeAssignments).
   if (opts.attrs !== false) {
-    out = out.replace(
-      /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)(\s*=\s*)(["'])([^"']*)\3/g,
-      (m, name, sep, quote, content) => {
-        const next = decide(name, content);
-        if (next === null) return m;
-        note(`${name}=…`, content, next);
-        return `${name}${sep}${quote}${esc(next)}${quote}`;
-      });
+    const pieces = [];
+    let done = 0;
+    for (const [start, name, content] of sharedAttributeAssignments(out)) {
+      // Inside a value already replaced: whatever it held went with it.
+      if (start < done) continue;
+      const next = decide(name, content);
+      if (next === null) continue;
+      note(`${name}=…`, content, next);
+      // Only the value is ours to change. Everything before it, namespace
+      // prefix included, stays as it was: rebuilding it from the name alone
+      // turned v:PatientName into PatientName, another attribute to a
+      // namespace-aware reader and a duplicate one where the element carried
+      // both.
+      pieces.push(out.slice(done, start), esc(next));
+      done = start + content.length;
+    }
+    pieces.push(out.slice(done));
+    out = pieces.join("");
   }
 
+  // The value is the whole rest of the line, every ";" in it included.
+  // Windows' INI reader takes no inline comment, so "Doe; John", "Doe ; John"
+  // and ";Doe" are each one value; read as value and comment, the scrub kept
+  // "; John", or all of ";Doe", and a second pass read the same comment. Only
+  // the trailing blanks are not the value. A comment line stays one: the key
+  // cannot hold a ";", and a key the table does not name is left as it was.
+  // The key starts with something other than a blank. Had it been allowed to
+  // start with one, a blank-led line without "=" was walked again for every
+  // split of its leading run between indent and key: right-justified numeric
+  // rows scrubbed at about 1 s/MB. Mirror of maps._ini_pattern.
   out = out.replace(
-    /^([ \t]*)([^=\r\n;[<]+?)([ \t]*=[ \t]*)([^\r\n;]*?)([ \t]*(?:;[^\r\n]*)?)$/gm,
+    /^([ \t]*)([^=\r\n;[< \t][^=\r\n;[<]*?)([ \t]*=[ \t]*)([^\r\n]*?)([ \t]*)$/gm,
     (m, indent, name, sep, content, trailer) => {
+      // A quoted value followed by nothing but the rest of a tag is replaced
+      // inside its quotes: on a tag written one attribute per line this pass
+      // sees `    LastName="Doe" />`, and taken whole the quotes, the "/>" and
+      // any attribute behind the first went. Written as the attribute pass
+      // writes it, so a value that pass replaced is left as it is. What stays
+      // behind the quotes is read too, never passed through: each attribute
+      // in it goes through the table whether or not the attribute pass ran.
+      // Any other tail is the value going on and is replaced whole. Mirror of
+      // maps._QUOTED_VALUE / maps._TAG_TAIL.
+      const quoted = content.match(/^(["'])((?:(?!\1)[^<\r\n])*)\1/);
+      const tail = quoted && content.slice(quoted[0].length).match(SHARED_TAG_TAIL);
+      if (tail) {
+        const [whole, quote, inner] = quoted;
+        const next = decide(name.trim(), inner);
+        let head = whole;
+        if (next !== null && inner !== esc(next)) {
+          note(name.trim(), inner.trim(), next);
+          head = `${quote}${esc(next)}${quote}`;
+        }
+        const attributes = tail[1].replace(SHARED_TAG_TAIL_ATTRIBUTE,
+          (a, before, attr, q, current) => {
+            const value = decide(attr, current);
+            if (value === null || current === esc(value)) return a;
+            note(`${attr}=…`, current, value);
+            return `${before}${q}${esc(value)}${q}`;
+          });
+        return `${indent}${name}${sep}${head}${attributes}${tail[3]}${trailer}`;
+      }
       const next = decide(name.trim(), content);
       if (next === null) return m;
       note(name.trim(), String(content).trim(), next);
@@ -1682,7 +2100,7 @@ function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
   for (const raw of (opts.customPatterns || "").split(/\r?\n/)) {
     const pattern = raw.trim();
     if (!pattern) continue;
-    const re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    const re = matcher(pattern);
     let count = 0;
     out = out.replace(re, () => { count++; return "[REDACTED]"; });
     if (count) note("(custom)", pattern, "[REDACTED]", count);
@@ -1721,6 +2139,27 @@ function sharedKnownResidueLines(items) {
           fill("anon.residue.action")];
 }
 
+// What an operator typed and nothing here read, as one line for the result —
+// from the German catalogue strings inlined as FREETEXT_TEXT. Mirror of
+// classic._note_free_text: the busiest six fields, then how many more, because
+// a setting repeated five hundred times would otherwise bury the field that
+// holds a sentence. Empty when nothing was kept.
+function sharedFreeTextLine(kept) {
+  if (!kept || !kept.size) return "";
+  const fill = (key, values) => {
+    const text = FREETEXT_TEXT[key] !== undefined ? FREETEXT_TEXT[key] : `⟦${key}⟧`;
+    return Object.entries(values).reduce(
+      (out, [name, value]) => out.split(`{${name}}`).join(String(value)), text);
+  };
+  // Stable, so fields with equal counts keep the order they were met in, as
+  // Python's sorted() keeps them.
+  const top = [...kept].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  let fields = top.map(([field, count]) => `${count} × <${field}>`).join(", ");
+  const more = kept.size - top.length;
+  if (more > 0) fields += " " + fill("anon.freetext.more", { count: more });
+  return fill("anon.freetext.kept", { fields });
+}
+
 /* PROFILES:END */
 
 let coreLog = () => {};
@@ -1733,20 +2172,173 @@ let coreLog = () => {};
 // zurückschreiben — sonst wird jedes Byte >= 0x80 zu U+FFFD (Datenverlust)
 // und eigene Suchbegriffe mit Umlaut greifen nicht mehr.
 function decodeTextBytes(bytes) {
+  // UTF-16 first, by its mark. Read as UTF-8 and then latin-1, which never
+  // fails, it had a NUL between every letter: no field matched and the entry
+  // went back unchanged under "Fertig!" with the name still in it.
+  const utf16 = utf16Mark(bytes);
+  if (utf16 && utf16MarkFits(bytes, utf16)) {
+    const text = decodeUtf16(bytes, utf16);
+    if (text === null) throw unreadableText("UTF-16 mit Marke, aber abgeschnitten, " +
+      "mit halbem Surrogatpaar oder UTF-32");
+    return { text, encoding: utf16 };
+  }
+  if (utf16) {
+    // A mark the body does not bear out. Trusted, an 8-bit body became CJK —
+    // any even number of bytes is well-formed UTF-16 — nothing matched, and the
+    // entry went back with the name in it under "Fertig!". Read as the bytes
+    // are: FF and FE are never UTF-8, so that is byte for byte, the mark kept
+    // in the text and written back. A NUL there is UTF-16 in the other byte
+    // order, UTF-32 or broken: nothing to scrub byte for byte.
+    if (bytes.indexOf(0) >= 0) {
+      throw unreadableText("Byte-Order-Marke für UTF-16, aber der Inhalt ist " +
+        "weder UTF-16 in dieser Byte-Reihenfolge noch 8-Bit-Text");
+    }
+    return { text: cp1252Decode(bytes), encoding: "latin1" };
+  }
+  if (isWideText(bytes)) throw unreadableText("UTF-16 ohne Byte-Order-Marke oder UTF-32");
   try {
     const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     return { text, encoding: "utf-8" };
   } catch (e) {
-    return { text: new TextDecoder("latin1").decode(bytes), encoding: "latin1" };
+    return { text: cp1252Decode(bytes), encoding: "latin1" };
   }
 }
 
+// 8-bit text is read as windows-1252 and written back through the exact
+// inverse, so every byte value survives the round trip unchanged.
+//
+// Windows-1252, because that is what the operator types against: a custom
+// search term "Šimek" is U+0160, which is byte 0x8A only in windows-1252. Read
+// one character per byte (U+008A), the term no longer matched and the name
+// stayed in the file. Entry names that are not flagged UTF-8 go through the
+// same function, because the rename needles come from content values: decoded
+// differently, a name found as "Šimek_LA" in a MeshName never matched the
+// entry "Šimek_LA.mesh".
+//
+// Exact inverse, because a Windows-typed dash or quote, and every byte of a
+// binary .mesh that its suffix sends down this path, must come back as it
+// was. The five bytes windows-1252 leaves undefined (0x81 0x8D 0x8F 0x90 0x9D)
+// stay as their C1 code points, which keeps the decode one to one; only a
+// character no byte decodes to is written as "?". The bytes written are
+// therefore the same as Python's latin-1 round trip (maps.anonymize_directory).
+//
+// Not TextDecoder("latin1"): browsers decode that label as windows-1252 but
+// node decodes it as ISO-8859-1, so the tests would check a different decoder
+// than the one that runs. The table is index-windows-1252 of the WHATWG
+// Encoding Standard for bytes 0x80-0x9F; tests/js/browser_latin1.js holds a
+// copy, and anonymize_carto.test.js checks the two agree.
+const CP1252_80_9F = [
+  0x20ac, 0x0081, 0x201a, 0x0192, 0x201e, 0x2026, 0x2020, 0x2021,
+  0x02c6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008d, 0x017d, 0x008f,
+  0x0090, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014,
+  0x02dc, 0x2122, 0x0161, 0x203a, 0x0153, 0x009d, 0x017e, 0x0178,
+];
+const CP1252_ENCODE = new Map(CP1252_80_9F.map((cp, i) => [cp, 0x80 + i]));
+
+// Chunked, because apply() takes a bounded number of arguments.
+function cp1252Decode(bytes) {
+  const CHUNK = 0x8000;
+  const units = new Uint16Array(Math.min(bytes.length, CHUNK));
+  let out = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    const n = Math.min(CHUNK, bytes.length - i);
+    for (let j = 0; j < n; j++) {
+      const b = bytes[i + j];
+      units[j] = b >= 0x80 && b <= 0x9f ? CP1252_80_9F[b - 0x80] : b;
+    }
+    out += String.fromCharCode.apply(null, units.subarray(0, n));
+  }
+  return out;
+}
+
 function encodeTextBytes(text, encoding) {
+  if (encoding === "utf-16le" || encoding === "utf-16be") return encodeUtf16(text, encoding);
   if (encoding !== "latin1") return new TextEncoder().encode(text);
   const out = new Uint8Array(text.length);
   for (let i = 0; i < text.length; i++) {
     const c = text.charCodeAt(i);
-    out[i] = c > 0xff ? 0x3f /* '?' */ : c;
+    if (c < 0x80 || (c >= 0xa0 && c <= 0xff)) {
+      out[i] = c;
+    } else {
+      const b = CP1252_ENCODE.get(c);
+      out[i] = b === undefined ? 0x3f /* '?' */ : b;
+    }
+  }
+  return out;
+}
+
+// The rule is the Python side's (maps.looks_like_text, maps.decode_text), so
+// the page and the app read the same bytes as the same text.
+
+// The encoding a UTF-16 byte-order mark announces, or null.
+function utf16Mark(bytes) {
+  if (bytes.length < 2) return null;
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) return "utf-16le";
+  if (bytes[0] === 0xfe && bytes[1] === 0xff) return "utf-16be";
+  return null;
+}
+
+// Whether the text behind a UTF-16 mark reads as UTF-16 in that byte order.
+// Any even number of 8-bit bytes is well-formed UTF-16, so a decode that
+// succeeds proves nothing. The first code unit that is not a blank decides:
+// text these exports hold opens with markup, a section, a key or a number, all
+// below U+0100. Two 8-bit bytes give a unit below U+0100 only beside a NUL, and
+// UTF-16 in the other byte order gives U+3C00 for "<". A head of blanks only
+// keeps the mark: it holds nothing to scrub. Mirror of maps._mark_codec, over
+// the same first 4096 bytes.
+function utf16MarkFits(bytes, encoding) {
+  const le = encoding === "utf-16le";
+  const end = Math.min(bytes.length, 4096) - 1;
+  for (let i = 2; i < end; i += 2) {
+    const unit = le ? bytes[i] | (bytes[i + 1] << 8) : (bytes[i] << 8) | bytes[i + 1];
+    if (unit === 0x09 || unit === 0x0a || unit === 0x0d || unit === 0x20
+        || unit === 0xfeff) continue;
+    return (unit >= 0x20 && unit < 0x7f) || (unit >= 0xa0 && unit <= 0xff);
+  }
+  return true;
+}
+
+// The text with its mark kept as U+FEFF, so it goes back out in the order it
+// came in; null if the bytes do not decode (cut inside a code unit, half a
+// surrogate pair) or hold a NUL code unit near the start, which is what UTF-32,
+// whose mark begins with the same two bytes, looks like read as UTF-16.
+function decodeUtf16(bytes, encoding) {
+  let text;
+  try {
+    text = new TextDecoder(encoding, { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch (e) {
+    return null;
+  }
+  // The first 4096 bytes, as far as the Python side looks.
+  return text.slice(0, 2048).includes("\u0000") ? null : text;
+}
+
+// Text in 16- or 32-bit units without a mark. ASCII in UTF-16 has a NUL in
+// every second byte, in UTF-32 in three of four; a NUL-padded record or a stray
+// terminator has a handful, or none once the padding at the end is cut, and is
+// 8-bit text every pattern here reads. One in eight sits far from both.
+function isWideText(bytes) {
+  const head = bytes.subarray(0, 4096);
+  let end = head.length;
+  while (end > 0 && head[end - 1] === 0) end--;
+  let nul = 0;
+  for (let i = 0; i < end; i++) if (head[i] === 0) nul++;
+  return nul * 8 > end;
+}
+
+function unreadableText(why) {
+  return new Error(`Text in einer Kodierung, die hier nicht gelesen werden kann ` +
+    `(${why}) — Datei NICHT anonymisiert. Nichts wurde geschrieben.`);
+}
+
+// Two bytes a code unit, in the byte order it came in. The mark is in the text.
+function encodeUtf16(text, encoding) {
+  const le = encoding === "utf-16le";
+  const out = new Uint8Array(text.length * 2);
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    out[2 * i] = le ? c & 0xff : c >> 8;
+    out[2 * i + 1] = le ? c >> 8 : c & 0xff;
   }
   return out;
 }
@@ -1774,19 +2366,52 @@ function crc32(bytes) {
 // ===========================================================================
 // Minimaler ZIP-Reader/Writer (Methode 0 = stored, 8 = deflate)
 // ===========================================================================
-async function readZipEntries(bytes) {
-  // End of Central Directory finden (Signatur 0x06054b50, "PK\5\6")
-  let eocd = -1;
+// End of Central Directory finden (Signatur 0x06054b50, "PK\5\6"), or -1.
+function findEocd(bytes) {
   const maxBack = Math.min(bytes.length, 65557);
   for (let i = bytes.length - 22; i >= bytes.length - maxBack && i >= 0; i--) {
     if (bytes[i] === 0x50 && bytes[i+1] === 0x4b
         && bytes[i+2] === 0x05 && bytes[i+3] === 0x06) {
-      eocd = i; break;
+      return i;
     }
   }
+  return -1;
+}
+
+// Where the central directory has to end: at the end record, or at a ZIP64
+// end record a writer put in front of it with its locator. APPNOTE allows that
+// pair with no 32-bit field saturated, and Info-ZIP writes it for a stream it
+// could not size beforehand (`cat x | zip a.zip -`); measured from the end
+// record, such an archive looked 76 bytes short and was refused as a
+// self-extractor. The record counts only where it physically sits, with its
+// signature and a size that runs up to the locator: directly before the
+// locator, where Python's zipfile looks, or where the locator says when it
+// carries extensible data. The locator's offset alone is not enough, it is the
+// archive's own and short by any stub in front.
+function directoryEnd(dv, eocd) {
+  const locator = eocd - 20;
+  if (locator < 56 || dv.getUint32(locator, true) !== 0x07064b50) return eocd;
+  const said = dv.getBigUint64(locator + 8, true);
+  const candidates = [locator - 56];
+  if (said < BigInt(locator - 56)) candidates.push(Number(said));
+  for (const at of candidates) {
+    if (dv.getUint32(at, true) === 0x06064b50
+        && dv.getBigUint64(at + 4, true) === BigInt(locator - at - 12)) return at;
+  }
+  return eocd;
+}
+
+async function readZipEntries(bytes) {
+  const eocd = findEocd(bytes);
   if (eocd < 0) throw new Error("Kein gültiges ZIP-Archiv (EOCD nicht gefunden).");
 
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  // One part of a set split over several files: its directory points into
+  // parts this file does not hold. A raw study ships as such a set, and
+  // study.carto_raw_reason refuses one as raw.
+  if (dv.getUint16(eocd + 4, true) !== 0 || dv.getUint16(eocd + 6, true) !== 0) {
+    throw refuseRaw("mehrteiliges Archiv, die übrigen Teile fehlen hier");
+  }
   const numEntries = dv.getUint16(eocd + 10, true);
   const cdOffset = dv.getUint32(eocd + 16, true);
 
@@ -1799,10 +2424,21 @@ async function readZipEntries(bytes) {
       "einzeln anonymisieren.");
   }
 
+  // The directory ends where the end records start. When it sits further on
+  // than it says, bytes were put in front of the archive (a self-extractor's
+  // stub) and every recorded offset is short by that much. Read anyway, it
+  // failed on a header at an offset nobody could place; the hub's detection
+  // does not read such an archive either.
+  const prefix = directoryEnd(dv, eocd) - dv.getUint32(eocd + 12, true) - cdOffset;
+  if (prefix > 0) {
+    throw new Error(`Vor dem ZIP-Archiv stehen ${prefix} Byte, die nicht dazugehören ` +
+      "(etwa ein selbstentpackendes Programm). Nichts wurde geschrieben — das " +
+      "Archiv entpacken und als gewöhnliches ZIP neu packen.");
+  }
+
   const entries = [];
   let cur = cdOffset;
   const utf8 = new TextDecoder("utf-8", { fatal: false });
-  const cp437 = new TextDecoder("latin1"); // Näherung für Nicht-UTF-8-Namen
 
   for (let i = 0; i < numEntries; i++) {
     if (dv.getUint32(cur, true) !== 0x02014b50) {
@@ -1820,9 +2456,12 @@ async function readZipEntries(bytes) {
     const commentLen = dv.getUint16(cur + 32, true);
     const externalAttrs = dv.getUint32(cur + 38, true);
     const localOffset = dv.getUint32(cur + 42, true);
-    // Bit 11 = Name ist UTF-8; sonst historisch CP437.
-    const nameDec = (flags & 0x800) ? utf8 : cp437;
-    const name = nameDec.decode(bytes.subarray(cur + 46, cur + 46 + nameLen));
+    // Bit 11 marks a UTF-8 name. An unflagged name is decoded like 8-bit
+    // content (cp1252Decode) rather than as the CP437 the ZIP spec names: the
+    // rename needles are content values, and a name decoded any other way
+    // would not match them.
+    const rawName = bytes.subarray(cur + 46, cur + 46 + nameLen);
+    const name = (flags & 0x800) ? utf8.decode(rawName) : cp1252Decode(rawName);
 
     // Local-Header parsen, um Datenoffset zu bekommen
     const lh = localOffset;
@@ -1991,8 +2630,9 @@ function escapeXml(s) {
 // Anonymisiert einen Text (egal ob INI, XML oder gemischt)
 // One implementation, generated above. Three lived here, in this file and
 // its two siblings, and they had drifted apart.
-function anonymizeText(text, opts, found, fileLabel) {
-  return scrubKnownFields(text, opts, found, fileLabel);
+function anonymizeText(text, opts, found, fileLabel, kept) {
+  return scrubKnownFields(text, opts, found, fileLabel, undefined, undefined,
+                          kept);
 }
 
 // ===========================================================================
@@ -2005,6 +2645,16 @@ const TEXT_EXTENSIONS = new Set([
 
 function isTextEntry(name, data) {
   const ext = (name.split(".").pop() || "").toLowerCase();
+  // A UTF-16 mark that decodes says text whatever the name. One that does not
+  // is text only by its name, and decodeTextBytes then refuses it; anything
+  // else that merely starts with those two bytes passes through as binary.
+  // A mark its body does not bear out (utf16MarkFits) is 8-bit text read byte
+  // for byte, and a NUL in it says binary whatever the name — unless the name
+  // says text, which decodeTextBytes then refuses. As maps.looks_like_text.
+  const utf16 = utf16Mark(data);
+  if (utf16 && utf16MarkFits(data, utf16)) {
+    return decodeUtf16(data, utf16) !== null || TEXT_EXTENSIONS.has(ext);
+  }
   if (TEXT_EXTENSIONS.has(ext)) return true;
   // Heuristik: erste 1024 Bytes prüfen
   const sample = data.subarray(0, Math.min(1024, data.length));
@@ -2030,26 +2680,127 @@ function sanitizeNameFragment(s) {
   return String(s).replace(/[^\w.\-]/g, "_") || "ANON";
 }
 
+// What stands between the words of a value. A record writes "Mustermann,
+// Erika", DICOM "Mustermann^Erika", a file name "Mustermann_Erika": matched as
+// written, the record's spelling renamed nothing and the name stayed in the
+// entry's name. A run of these in a rule's value matches any run of them in a
+// name; not ".", which also begins a file's ending. Mirror of
+// maps._NAME_SEPARATORS.
+const NAME_SEPARATORS = /[\t ,^_\-]+/;
+
+// A rule's value as it is looked for in a name. Mirror of maps._needle.
+function nameNeedle(value) {
+  return new RegExp(String(value).split(NAME_SEPARATORS).map(escapeRe)
+    .join(NAME_SEPARATORS.source), "gi");
+}
+
+// The letters a word of a name is made of: the letter range above less "×"
+// and "÷". Anything else (a separator, a digit, ".", another script) ends a
+// word. Mirror of maps._WORD_LETTER.
+const WORD_LETTER = /[A-Za-zÀ-ÖØ-öø-ɏ]/;
+const isUpper = c => /\p{Lu}/u.test(c);
+const isLower = c => /\p{Ll}/u.test(c);
+
+// Whether a word of `name` ends between name[i - 1] and name[i]: at either
+// end, beside anything that is not a letter, and at a CamelCase joint
+// ("Erika|Mustermann", and "ECG|Mustermann" where capitals run into a
+// capitalised word). Mirror of maps._word_break.
+function nameWordBreak(name, i) {
+  if (i <= 0 || i >= name.length) return true;
+  const before = name[i - 1], after = name[i];
+  if (!WORD_LETTER.test(before) || !WORD_LETTER.test(after)) return true;
+  if (isLower(before) && isUpper(after)) return true;
+  return isUpper(before) && isUpper(after) && i + 1 < name.length
+    && isLower(name[i + 1]);
+}
+
+// Words CARTO writes into the names of its own files, and by which EPView
+// finds them: 1-LA_P1_Point_Export.xml, ..._Eleclectrode_Positions_
+// OnAnnotation.txt (the vendor's spelling), ..._Sensor_Positions_
+// OnAnnotation.txt. No value makes a rule of one of them: for a patient
+// called Point, every point file became 1-LA_P1_Patient_Export.xml, which no
+// reader looks for. Every CARTO export carries these words, so they identify
+// nobody; a path holding such a name as a word of its own keeps it. Mirror of
+// maps._VENDOR_WORDS.
+const VENDOR_WORDS = new Set(["point", "export", "positions", "eleclectrode",
+  "electrode", "sensor", "onannotation", "annotation"]);
+
+// [start, end] of each place a rule's value stands in a name: only where it
+// starts and ends on a word break, unless the rule is an operator's own
+// pattern, which is found anywhere, as in the contents. Found inside any word,
+// "Port" (of Hans Port) made the folder Export and every *_Point_Export.xml
+// into ExPatient, and "Siti" cut into Positions. A rejected place is passed
+// by one character only, so a place that begins inside it is still seen.
+// Mirror of maps._find.
+function findInName(rule, name) {
+  const re = nameNeedle(rule.needle);
+  const spans = [];
+  let m;
+  while ((m = re.exec(name)) !== null) {
+    const start = m.index, end = m.index + m[0].length;
+    if (rule.anywhere || (nameWordBreak(name, start) && nameWordBreak(name, end))) {
+      spans.push([start, end]);
+      re.lastIndex = end;
+    } else {
+      re.lastIndex = start + 1;
+    }
+  }
+  return spans;
+}
+
 function buildNameRules(opts, found) {
   const rules = [];
   const seen = new Set();
-  const add = (needle, replacement) => {
+  // A value that was given the patient's pseudonym held the patient's name,
+  // whichever field it stood in: [what its first word becomes, every other].
+  // A full name is written last name first, as sharedReplacementMap writes
+  // it. An empty pseudonym names nothing: every blanked comment would be taken
+  // for a name. Mirror of maps._person_pseudonyms.
+  const person = new Map([
+    [`${opts.lastName}, ${opts.firstName}`, [opts.lastName, opts.firstName]],
+    [opts.lastName, [opts.lastName, opts.lastName]],
+    [opts.firstName, [opts.firstName, opts.firstName]],
+  ].filter(([pseudonym]) => String(pseudonym).trim() !== ""));
+  const add = (needle, replacement, anywhere = false) => {
     const s = String(needle == null ? "" : needle).trim();
     // Kurze oder rein numerische Treffer würden Dateinamen zerschreddern.
     if (s.length < 4 || !/[A-Za-zÀ-ɏ]/.test(s)) return;
-    const key = s.toLowerCase();
+    if (!anywhere && VENDOR_WORDS.has(s.toLowerCase())) return;
+    // Two spellings that match the same names are one value.
+    const key = s.toLowerCase().replace(new RegExp(NAME_SEPARATORS.source, "g"), " ");
     if (seen.has(key)) return;
     seen.add(key);
-    rules.push({ needle: s, replacement: sanitizeNameFragment(replacement) });
+    rules.push({ needle: s, replacement: sanitizeNameFragment(replacement), anywhere });
   };
 
   for (const pat of (opts.customPatterns || "").split(/\r?\n/)
        .map(s => s.trim()).filter(Boolean)) {
-    add(pat, "REDACTED");
+    add(pat, "REDACTED", true);
   }
   for (const f of found) {
     if (f.field === "(custom)" || f.field === "(Dateiname)") continue;
     add(f.original, f.replacement);
+    // Each word of a name as well, after the whole: an entry spells the name
+    // its own way, puts the first name first, or holds the last name alone.
+    const fragments = person.get(f.replacement);
+    if (!fragments) continue;
+    String(f.original == null ? "" : f.original).split(NAME_SEPARATORS)
+      .filter(Boolean)
+      .forEach((word, i) => add(word, fragments[i === 0 ? 0 : 1]));
+  }
+  // Distinct originals that share one replacement get distinct names, numbered
+  // in the order they were met: every map's MeshName becomes "AnonMesh" in the
+  // text, and folded into one name in the archive, 1-LA.mesh and 2-RA.mesh
+  // collided. The suffix that kept them apart went after the vendor's own
+  // ending (AnonMesh_P1_Point_Export_2.xml), and EPView, which finds points by
+  // that ending, saw the first map only.
+  const byReplacement = new Map();
+  for (const r of rules) {
+    if (!byReplacement.has(r.replacement)) byReplacement.set(r.replacement, []);
+    byReplacement.get(r.replacement).push(r);
+  }
+  for (const [replacement, group] of byReplacement) {
+    if (group.length > 1) group.forEach((r, i) => { r.replacement = `${replacement}${i + 1}`; });
   }
   rules.sort((a, b) => b.needle.length - a.needle.length);
   return rules;
@@ -2058,7 +2809,9 @@ function buildNameRules(opts, found) {
 function anonymizeEntryName(name, rules, found) {
   let out = name;
   for (const r of rules) {
-    out = out.replace(new RegExp(escapeRe(r.needle), "gi"), r.replacement);
+    for (const [start, end] of findInName(r, out).reverse()) {
+      out = out.slice(0, start) + r.replacement + out.slice(end);
+    }
   }
   if (out !== name) {
     found.push({ field: "(Dateiname)", original: name, replacement: out,
@@ -2067,42 +2820,305 @@ function anonymizeEntryName(name, rules, found) {
   return out;
 }
 
+const baseName = name => name.slice(name.lastIndexOf("/") + 1);
+
+// What the scrub reports that is not a value it found in a field. Mirror of
+// maps._NOT_A_VALUE.
+const NOT_A_VALUE = new Set(["(custom)", "(Dateiname)", "(Dateiverweis)"]);
+
+// The kinds whose value is a person's name. Mirror of maps._PERSON_KINDS.
+const PERSON_KINDS = new Set(["full_name", "first_name", "last_name"]);
+
+// A full name's words as written, and in the other order: the first word last
+// ("Mustermann, Erika" as "Erika Mustermann") and the last word first. Mirror
+// of maps._orders.
+function nameOrders(words) {
+  if (words.length < 2) return [words];
+  return [words, [...words.slice(1), words[0]],
+          [words[words.length - 1], ...words.slice(0, -1)]];
+}
+
+// Each word of the patient's name the contents gave up, lower-cased, and the
+// whole name in either order: what nameResidual looks for in the entries'
+// names. Read from the field each value stood in, not from the rename's rules,
+// which leave out a word under four letters (it would shred file names):
+// "Li, Wu" kept its whole name in "Wu_Li_notes.txt", "Lee, Ann" in "Ann Lee
+// notes.txt", and the page said "Fertig!". findInName looks for a word only
+// where it stands as one, so a short word does not bite into a longer one. An
+// initial (one letter) is not looked for; nor is a word the vendor writes in
+// its own file names or one a replacement holds, but the whole name is.
+// Mirror of maps.name_tokens.
+function nameTokens(found) {
+  const written = found.filter(f => !NOT_A_VALUE.has(f.field))
+    .map(f => String(f.replacement == null ? "" : f.replacement));
+  const tokens = [];
+  const want = token => {
+    if (tokens.includes(token) || VENDOR_WORDS.has(token)
+        || written.some(w => findInName({ needle: token }, w).length)) return;
+    tokens.push(token);
+  };
+  for (const f of found) {
+    if (NOT_A_VALUE.has(f.field)) continue;
+    const rule = SHARED.field_rules[normaliseFieldName(f.field)];
+    if (!rule || !PERSON_KINDS.has(rule.kind)) continue;
+    const words = String(f.original == null ? "" : f.original).toLowerCase()
+      .split(NAME_SEPARATORS)
+      .filter(w => (w.match(/[A-Za-zÀ-ɏ]/g) || []).length >= 2);
+    words.forEach(want);
+    if (words.length > 1) nameOrders(words).forEach(order => want(order.join(" ")));
+  }
+  return tokens;
+}
+
+// The entry names that still hold a value the rename went by, or one of
+// `tokens`, in any of their folders or in the file's own name. A value one of
+// the replacements holds is not looked for: it cannot be told from the
+// pseudonym written in its place. Mirror of maps.name_residual, which asks
+// the same of every file's and folder's own name.
+function nameResidual(names, rules, tokens) {
+  const written = rules.map(r => r.replacement);
+  const wanted = rules.filter(r => !written.some(w => findInName(r, w).length));
+  const words = tokens.filter(t => !written.some(w => findInName({ needle: t }, w).length));
+  if (!wanted.length && !words.length) return [];
+  return names.filter(name => name.split("/").some(part =>
+    part && (anonymizeEntryName(part, wanted, []) !== part
+             || words.some(t => findInName({ needle: t }, part).length))));
+}
+
+// The result line for such entries. A word under four letters is not renamed,
+// so the operator is told how to take it out: as an own term, spelled as the
+// name spells it there.
+function nameResidueNote(names) {
+  if (!names.length) return "";
+  const shown = names.slice(0, 5).join(", ") +
+    (names.length > 5 ? ` und ${names.length - 5} weitere` : "");
+  return `NICHT verifiziert: ${names.length} Name(n) im Archiv tragen noch ` +
+    `einen Teil des Patientennamens (${shown}). Nicht weitergeben, bevor er ` +
+    `heraus ist: den Namen so, wie er dort steht, unter „Eigene zu ersetzende ` +
+    `Begriffe“ eintragen und erneut anonymisieren, oder von Hand prüfen.`;
+}
+
+// Entries name each other: a point file says which ECG export is its own
+// (<ECG FileName="1-LA_P1_ECG_Export.txt"/>). Renaming the entry and not the
+// reference left the patient's name in the reference and pointed it at a file
+// that no longer existed, so no electrogram of the copy could be opened. The
+// reference is rewritten as the content pass left it — a custom pattern has
+// already turned its name into "[REDACTED]" there — and only where it stands
+// as a whole file name, so 1-LA.mesh does not bite into 11-LA.mesh.
+//
+// Every entry is read once, whatever the number of renamed names. Walking each
+// name over each entry, with a new RegExp and a new scrub of the name every
+// time, cost (renamed names x text bytes): MeshName renaming renames every
+// point file of a map, and a 400-point export took 16 s with it and 2.3 s
+// without, with thousands of points per real map still ahead. So the spellings are
+// worked out once per archive (referenceIndex), and an entry is scanned once
+// (rewriteReferences).
+//
+// What makes one scan enough: a match stands between characters that cannot be
+// part of a file name, and such a character never case-folds into one that
+// can. The longest run of file-name characters inside a spelling is therefore
+// a whole run in the text as well. The scan looks each run of the text up
+// among those, and checks the full spelling around it.
+
+// [\w.-] as the lookarounds read it: without the u flag, \w is ASCII.
+const FILE_NAME_CHAR = new Uint8Array(128);
+for (const c of "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") {
+  FILE_NAME_CHAR[c.charCodeAt(0)] = 1;
+}
+const isFileNameChar = code => code < 128 && FILE_NAME_CHAR[code] === 1;
+
+function referenceIndex(renamed, opts) {
+  const spellings = [];
+  const byRun = new Map();
+  const runLengths = new Set();
+  // A spelling without a single file-name character has no run to look up.
+  // No CARTO name is like that (each carries its ending), but one that was
+  // would be searched for on its own rather than missed.
+  const loose = [];
+  for (const [from, to] of renamed) {
+    for (const spelled of new Set([from, anonymizeText(from, opts, null, "")])) {
+      if (!spelled) continue;
+      const sp = { spelled, to, rank: spellings.length, length: spelled.length,
+                   // Sticky and case-blind like the lookaround pattern was, so
+                   // a non-ASCII letter matches exactly what it matched there.
+                   re: new RegExp(escapeRe(spelled), "iy") };
+      spellings.push(sp);
+      let start = -1, end = -1;
+      for (let i = 0; i < spelled.length;) {
+        if (!isFileNameChar(spelled.charCodeAt(i))) { i++; continue; }
+        let j = i + 1;
+        while (j < spelled.length && isFileNameChar(spelled.charCodeAt(j))) j++;
+        if (j - i > end - start) { start = i; end = j; }
+        i = j;
+      }
+      if (start < 0) {
+        sp.all = new RegExp(`(?<![\\w.\\-])${escapeRe(spelled)}(?![\\w.\\-])`, "gi");
+        loose.push(sp);
+        continue;
+      }
+      sp.runAt = start;
+      // The run is ASCII, so lower-casing it folds exactly as /i does.
+      const key = spelled.slice(start, end).toLowerCase();
+      runLengths.add(end - start);
+      if (!byRun.has(key)) byRun.set(key, []);
+      byRun.get(key).push(sp);
+    }
+  }
+  return { spellings, byRun, runLengths, loose };
+}
+
+function rewriteReferences(text, index, found, fileLabel) {
+  if (!index.spellings.length) return text;
+  const n = text.length;
+  const hits = [];
+  const standsWhole = (sp, at) => {
+    const stop = at + sp.length;
+    if (at < 0 || stop > n) return false;
+    if (at > 0 && isFileNameChar(text.charCodeAt(at - 1))) return false;
+    if (stop < n && isFileNameChar(text.charCodeAt(stop))) return false;
+    sp.re.lastIndex = at;
+    return sp.re.test(text);
+  };
+  for (let i = 0; i < n;) {
+    if (!isFileNameChar(text.charCodeAt(i))) { i++; continue; }
+    let j = i + 1;
+    while (j < n && isFileNameChar(text.charCodeAt(j))) j++;
+    if (index.runLengths.has(j - i)) {
+      const candidates = index.byRun.get(text.slice(i, j).toLowerCase());
+      if (candidates) {
+        for (const sp of candidates) {
+          if (standsWhole(sp, i - sp.runAt)) hits.push({ at: i - sp.runAt, sp });
+        }
+      }
+    }
+    i = j;
+  }
+  for (const sp of index.loose) {
+    sp.all.lastIndex = 0;
+    // Overlapping occurrences too: which one is taken is decided below.
+    for (let m; (m = sp.all.exec(text));) {
+      hits.push({ at: m.index, sp });
+      sp.all.lastIndex = m.index + 1;
+    }
+  }
+  if (!hits.length) return text;
+  // Leftmost first, then the longest spelling, then the name met first: what a
+  // single alternation of every spelling, longest first, would take. Names are
+  // replaced in one pass, so one renamed to another's old name is not renamed
+  // a second time.
+  hits.sort((a, b) => a.at - b.at || b.sp.length - a.sp.length || a.sp.rank - b.sp.rank);
+  const counts = new Map();
+  let out = "";
+  let done = 0;
+  for (const { at, sp } of hits) {
+    if (at < done) continue;
+    out += text.slice(done, at) + sp.to;
+    done = at + sp.length;
+    counts.set(sp, (counts.get(sp) || 0) + 1);
+  }
+  for (const sp of [...counts.keys()].sort((a, b) => a.rank - b.rank)) {
+    found.push({ field: "(Dateiverweis)", original: sp.spelled, replacement: sp.to,
+      file: fileLabel, count: counts.get(sp) });
+  }
+  return out + text.slice(done);
+}
+
+// One text against a list of [from, to]; processFile builds the index once.
+function renameReferences(text, renamed, opts, found, fileLabel) {
+  return rewriteReferences(text, referenceIndex(renamed, opts), found, fileLabel);
+}
+
+// ===========================================================================
+// CARTO-Rohstudie: verweigern statt als Export behandeln
+// ===========================================================================
+// A raw/native study shares the .zip and .mesh suffixes with the text export,
+// but its identity sits in an SQL Server database (EmptyPack_Data.mdf) and in
+// binary meshes no text pass reaches. Taken for an export, it went out as
+// ANON-001.zip with the database inside, after "0 Ersetzung(en) … Fertig!".
+// The markers are study.carto_raw_reason's; the application refuses the same
+// input before it copies anything.
+const BIN_MESH_MAGIC = "#TriangulatedMeshBinVersion";
+
+function isBinaryMesh(bytes) {
+  if (bytes.length < BIN_MESH_MAGIC.length) return false;
+  for (let i = 0; i < BIN_MESH_MAGIC.length; i++) {
+    if (bytes[i] !== BIN_MESH_MAGIC.charCodeAt(i)) return false;
+  }
+  return true;
+}
+
+function cartoRawReason(entries) {
+  if (entries.some(e => /\.(mdf|ldf)$/i.test(e.name))) {
+    return "EmptyPack_Data.mdf im Archiv — die SQL-Server-Datenbank der Studie";
+  }
+  // Ein Export ist unverschlüsselt; AES-Einträge (Methode 99) heißen Rohdaten.
+  if (entries.some(e => e.compMethod === 99)) return "AES-verschlüsselte Einträge";
+  return null;
+}
+
+function refuseRaw(reason) {
+  return new Error(`Das ist eine CARTO-Rohstudie, kein Text-Export (${reason}). ` +
+    "Ihre Patientendaten stehen in einer Datenbank und in Binärdateien, die " +
+    "hier nicht anonymisiert werden können. Nichts wurde geschrieben — in " +
+    "CARTO einen Export der Karten erzeugen und diesen anonymisieren.");
+}
+
 // ===========================================================================
 // Verarbeitung: ZIP-Archiv ODER einzelne .mesh-Datei
 // ===========================================================================
 async function processFile(file, opts) {
   const buf = new Uint8Array(await file.arrayBuffer());
   const found = [];
+  // Hand-typed values the scrub left as they were, counted over every entry.
+  const freeText = new Map();
 
-  // ZIP-Magic prüfen: "PK\3\4"
-  const isZip = buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b
-                && buf[2] === 0x03 && buf[3] === 0x04;
+  // A zip by its name or its structure, not by its first four bytes alone. A
+  // self-extractor or the last part of a spanned set holds an archive that
+  // does not open with "PK\3\4": taken for text, it was scrubbed byte by
+  // byte, written back with stale sizes and checksums and saved as a .mesh
+  // under "Fertig!". As a zip, readZipEntries reads it or says why not.
+  const isZip = /\.zip$/i.test(file.name) || findEocd(buf) >= 0
+    || (buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b
+        && buf[2] === 0x03 && buf[3] === 0x04);
 
   if (isZip) {
     coreLog(`ZIP-Archiv erkannt: ${file.name}`);
     const entries = await readZipEntries(buf);
     coreLog(`  ${entries.length} Datei(en) im Archiv:`);
+    const raw = cartoRawReason(entries);
+    if (raw) throw refuseRaw(raw);
 
     const newEntries = [];
 
+    // The entries' DOS timestamps are not carried over: the console writes
+    // the archive during the procedure, so its date and time would stand in
+    // every entry header of the anonymised copy. Without them writeZip writes
+    // 1980-01-01 00:00, the earliest DOS time. The Python side drops container
+    // times for the same reason (gzip MTIME zeroed by
+    // archive.drop_container_time, tar members stamped with the run's time).
+    coreLog(`  Zeitstempel der Einträge werden auf 1980-01-01 gesetzt.`);
+
     for (const e of entries) {
       const data = await decompressEntry(e);
+      if (/\.mesh$/i.test(e.name) && isBinaryMesh(data)) {
+        throw refuseRaw("binäres Mesh 4.6 im Archiv");
+      }
       const text = isTextEntry(e.name, data);
       coreLog(`    ${e.name}  (${data.length} bytes, ${text ? "Text" : "Binär"})`);
 
       if (text && data.length > 0) {
-        // Kodierung pro Eintrag bestimmen und identisch zurückschreiben.
+        // Kodierung pro Eintrag bestimmen und identisch zurückschreiben —
+        // erst nach dem Umbenennen, das die Verweise auf andere Einträge mit
+        // umschreibt.
         const { text: decoded, encoding } = decodeTextBytes(data);
-        const anon = anonymizeText(decoded, opts, found, e.name);
+        const anon = anonymizeText(decoded, opts, found, e.name, freeText);
         newEntries.push({
-          name: e.name, data: encodeTextBytes(anon, encoding),
-          lastModTime: e.lastModTime, lastModDate: e.lastModDate,
+          name: e.name, text: anon, encoding,
           externalAttrs: e.externalAttrs,
         });
       } else {
         newEntries.push({
           name: e.name, data,
-          lastModTime: e.lastModTime, lastModDate: e.lastModDate,
           externalAttrs: e.externalAttrs,
           preferStored: e.compMethod === 0,
         });
@@ -2112,32 +3128,64 @@ async function processFile(file, opts) {
     // Erst jetzt umbenennen: die Regeln entstehen aus den Inhaltstreffern.
     const rules = buildNameRules(opts, found);
     const usedNames = new Set();
+    const renamed = new Map();
     for (const ne of newEntries) {
-      let name = anonymizeEntryName(ne.name, rules, found);
+      const name = anonymizeEntryName(ne.name, rules, found);
+      // Refused rather than numbered after the fact: a suffix behind the
+      // vendor's ending is a file no reader looks for, and one in front of it
+      // a guess at which of the two is meant.
       if (usedNames.has(name)) {
-        // Kollision durch Umbenennung: eindeutig halten.
-        const dot = name.lastIndexOf(".");
-        const base = dot > 0 ? name.slice(0, dot) : name;
-        const ext = dot > 0 ? name.slice(dot) : "";
-        let i = 2;
-        while (usedNames.has(`${base}_${i}${ext}`)) i++;
-        name = `${base}_${i}${ext}`;
+        throw new Error(`Nach dem Umbenennen trügen zwei Einträge denselben ` +
+          `Namen (${name}). Das Archiv wird nicht geschrieben — bitte die ` +
+          `Option „MeshName/MeshID ersetzen“ oder die eigenen Begriffe ` +
+          `anpassen.`);
       }
       usedNames.add(name);
+      if (baseName(name) !== baseName(ne.name)) {
+        renamed.set(baseName(ne.name), baseName(name));
+      }
       ne.name = name;
+    }
+    // The self-check on the names, as the application runs it: the words of
+    // the name are looked for on their own, not only by the rules the rename
+    // went by.
+    const nameResidue = nameResidual(newEntries.map(ne => ne.name), rules,
+                                     nameTokens(found));
+    // Longest first, so a name never bites into a longer one that holds it.
+    const references = referenceIndex(
+      [...renamed].sort((a, b) => b[0].length - a[0].length), opts);
+    for (const ne of newEntries) {
+      if (ne.text === undefined) continue;
+      const text = rewriteReferences(ne.text, references, found, ne.name);
+      ne.data = encodeTextBytes(text, ne.encoding);
+      delete ne.text;
     }
 
     coreLog(`  ${countReplacements(found)} Ersetzung(en) durchgeführt.`);
+    if (freeText.size) coreLog(`  ${sharedFreeTextLine(freeText)}`);
+    if (nameResidue.length) coreLog(`  ${nameResidueNote(nameResidue)}`);
+    // Compressing every entry again takes seconds on a large export, and the
+    // log sat still on the last entry meanwhile.
+    coreLog("  Archiv wird geschrieben …");
     const outBytes = await writeZip(newEntries);
     coreLog(`  Ausgabegröße: ${(outBytes.length / 1024).toFixed(1)} KB`);
-    return { bytes: outBytes, found, isZip: true };
+    return { bytes: outBytes, found, freeText, isZip: true, nameResidue };
   } else {
+    if (isBinaryMesh(buf)) throw refuseRaw("binäres Mesh 4.6");
+    // The same test an archive entry gets. A middle part of a spanned set has
+    // no header of its own; read as latin-1 it "scrubbed" without complaint.
+    if (!isTextEntry(file.name, buf)) {
+      throw new Error(`${file.name} ist weder ein ZIP-Archiv noch eine ` +
+        "Textdatei. Nichts wurde geschrieben.");
+    }
     // Einzelne .mesh-Datei: Kodierung wie im ZIP-Pfad bestimmen.
     const { text, encoding } = decodeTextBytes(buf);
     coreLog(`Einzelne Textdatei: ${file.name} (${text.length} Zeichen, ${encoding})`);
-    const anon = anonymizeText(text, opts, found, file.name);
+    const anon = anonymizeText(text, opts, found, file.name, freeText);
     coreLog(`  ${countReplacements(found)} Ersetzung(en).`);
-    return { bytes: encodeTextBytes(anon, encoding), found, isZip: false };
+    if (freeText.size) coreLog(`  ${sharedFreeTextLine(freeText)}`);
+    return { bytes: encodeTextBytes(anon, encoding), found, freeText, isZip: false,
+             nameResidue: [] };
   }
 }
 
@@ -2147,10 +3195,20 @@ function countReplacements(found) {
   return found.reduce((s, f) => s + (f.count || 1), 0);
 }
 
+// The download: the pseudonym, and the ending of the file that came in. A
+// single file went out as .mesh whatever it had been.
+function outputName(patientId, inputName, isZip) {
+  const ending = isZip ? ".zip" : (/\.[A-Za-z0-9]+$/.exec(inputName) || [""])[0];
+  return (patientId || "ANON").replace(/[^\w.\-]/g, "_") + ending;
+}
+
 // === SCRUB-CORE END ===
 // === SCRUB-CORE EXPORTS: buildReplacementMap, anonymizeText, processFile,
 //     readZipEntries, writeZip, decompressEntry, isTextEntry, decodeTextBytes,
-//     encodeTextBytes, buildNameRules, anonymizeEntryName, countReplacements ===
+//     encodeTextBytes, buildNameRules, anonymizeEntryName, renameReferences,
+//     referenceIndex, rewriteReferences,
+//     countReplacements, cartoRawReason, isBinaryMesh, outputName,
+//     sharedFreeTextLine, nameTokens, nameResidual, nameResidueNote ===
 
 // ===========================================================================
 // Optionen + UI
@@ -2178,11 +3236,37 @@ function escapeHtml(s) {
 // Kern-Code loggt über diesen Haken (damit er DOM-frei testbar bleibt).
 coreLog = log;
 
-function renderPreview(found) {
+// Under the table and under "nothing found" alike: a study whose only names
+// sit in hand-typed labels otherwise reads as one with no names in it.
+function freeTextNote(kept) {
+  const line = sharedFreeTextLine(kept);
+  return line ? `<div class="warn">${escapeHtml(line)}</div>` : "";
+}
+
+// A run of 24 characters without a space is a path, an ID or a hash, not a
+// name or a field: only such a cell is marked to break anywhere (see the
+// td.long rule). Names stay whole, so a long column cannot squeeze them.
+function cellClass(name, value) {
+  return /\S{24,}/.test(String(value == null ? "" : value)) ? `${name} long` : name;
+}
+
+function renderPreview(found, kept, nameResidue = []) {
+  const residue = nameResidueNote(nameResidue);
+  if (residue) {
+    // First, where the eye lands, and whatever else the preview shows.
+    renderPreviewBody(found, kept);
+    preview.innerHTML = `<div class="warn">${escapeHtml(residue)}</div>` +
+      preview.innerHTML;
+    return;
+  }
+  renderPreviewBody(found, kept);
+}
+
+function renderPreviewBody(found, kept) {
   if (!found.length) {
-    preview.innerHTML = '<p style="color:#7f8c8d">Keine personenbezogenen ' +
+    preview.innerHTML = '<p style="color:var(--text-dim)">Keine personenbezogenen ' +
       'Felder gefunden. Falls die Datei trotzdem PII enthält, fügen Sie ' +
-      'diese unter "Eigene zu ersetzende Begriffe" hinzu.</p>';
+      'diese unter "Eigene zu ersetzende Begriffe" hinzu.</p>' + freeTextNote(kept);
     return;
   }
   const agg = new Map();
@@ -2196,37 +3280,49 @@ function renderPreview(found) {
     "<th>Ersatz</th><th>Anzahl</th></tr></thead><tbody>";
   for (const [, f] of agg) {
     html += "<tr>" +
-      `<td style="font-family:monospace;font-size:0.85em">${escapeHtml(f.file || "")}</td>` +
-      `<td class="field">${escapeHtml(f.field)}</td>` +
-      `<td class="original">${escapeHtml(f.original) || "<em>(leer)</em>"}</td>` +
-      `<td class="replacement">${escapeHtml(f.replacement) || "<em>(leer)</em>"}</td>` +
+      `<td class="file">${escapeHtml(f.file || "")}</td>` +
+      `<td class="${cellClass("field", f.field)}">${escapeHtml(f.field)}</td>` +
+      `<td class="${cellClass("original", f.original)}">${escapeHtml(f.original) || "<em>(leer)</em>"}</td>` +
+      `<td class="${cellClass("replacement", f.replacement)}">${escapeHtml(f.replacement) || "<em>(leer)</em>"}</td>` +
       `<td>${f.count}</td></tr>`;
   }
   html += "</tbody></table>";
-  preview.innerHTML = html;
+  preview.innerHTML = html + freeTextNote(kept);
+}
+
+// One run at a time. Both buttons stayed live through a long run, and a
+// second click started a second scrub of the same file beside the first, with
+// a second download at the end. Set before the first await, so the click
+// that follows already meets a disabled button.
+function setBusy(busy) {
+  $("analyze").disabled = busy;
+  $("process").disabled = busy;
 }
 
 $("analyze").addEventListener("click", async () => {
   if (!selectedFile) { alert("Bitte zuerst eine Datei wählen."); return; }
+  setBusy(true);
   clearLog(); preview.innerHTML = "";
   try {
     const r = await processFile(selectedFile, getOptions());
-    renderPreview(r.found);
+    renderPreview(r.found, r.freeText, r.nameResidue);
   } catch (e) {
     log("FEHLER: " + e.message); console.error(e);
+  } finally {
+    setBusy(false);
   }
 });
 
 $("process").addEventListener("click", async () => {
   if (!selectedFile) { alert("Bitte zuerst eine Datei wählen."); return; }
+  setBusy(true);
   clearLog(); preview.innerHTML = "";
   try {
     const opts = getOptions();
     const r = await processFile(selectedFile, opts);
-    renderPreview(r.found);
+    renderPreview(r.found, r.freeText, r.nameResidue);
 
-    const ext = r.isZip ? ".zip" : ".mesh";
-    const safeName = (opts.patientId || "ANON").replace(/[^\w.\-]/g, "_") + ext;
+    const safeName = outputName(opts.patientId, selectedFile.name, r.isZip);
     const blob = new Blob([r.bytes], {
       type: r.isZip ? "application/zip" : "text/plain",
     });
@@ -2237,9 +3333,15 @@ $("process").addEventListener("click", async () => {
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 5000);
 
-    log(`\nFertig! "${safeName}" wurde heruntergeladen.`);
+    // Not "Fertig!" over a name the check found: the application calls such
+    // a copy not ok.
+    log(r.nameResidue.length
+      ? `\nHeruntergeladen: "${safeName}" — aber ${nameResidueNote(r.nameResidue)}`
+      : `\nFertig! "${safeName}" wurde heruntergeladen.`);
   } catch (e) {
     log("FEHLER: " + e.message); console.error(e);
+  } finally {
+    setBusy(false);
   }
 });
 </script>

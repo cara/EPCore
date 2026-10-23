@@ -503,6 +503,7 @@ export const PROFILES = {
             "birthday",
             "date_of_birth",
             "dateofbirth",
+            "dob",
             "email",
             "family_name",
             "familyname",
@@ -520,6 +521,8 @@ export const PROFILES = {
             "labname",
             "last_name",
             "lastname",
+            "medical_record_number",
+            "medicalrecordnumber",
             "middle_initial",
             "middle_name",
             "middleinitial",
@@ -537,6 +540,8 @@ export const PROFILES = {
             "performingphysician",
             "perfphysician",
             "phone",
+            "phone_number",
+            "phonenumber",
             "physicianname",
             "referringphysician",
             "refphysician",
@@ -601,6 +606,11 @@ export const PROFILES = {
             },
             {
               "group": 8,
+              "element": 156,
+              "name": "ConsultingPhysicianName"
+            },
+            {
+              "group": 8,
               "element": 4112,
               "name": "StationName"
             },
@@ -641,6 +651,11 @@ export const PROFILES = {
             },
             {
               "group": 16,
+              "element": 33,
+              "name": "IssuerOfPatientID"
+            },
+            {
+              "group": 16,
               "element": 48,
               "name": "PatientBirthDate"
             },
@@ -666,8 +681,33 @@ export const PROFILES = {
             },
             {
               "group": 16,
+              "element": 4101,
+              "name": "PatientBirthName"
+            },
+            {
+              "group": 16,
+              "element": 4112,
+              "name": "PatientAge"
+            },
+            {
+              "group": 16,
               "element": 4160,
               "name": "PatientAddress"
+            },
+            {
+              "group": 16,
+              "element": 4192,
+              "name": "PatientMotherBirthName"
+            },
+            {
+              "group": 16,
+              "element": 4224,
+              "name": "MilitaryRank"
+            },
+            {
+              "group": 16,
+              "element": 4240,
+              "name": "MedicalRecordLocator"
             },
             {
               "group": 16,
@@ -681,13 +721,133 @@ export const PROFILES = {
             },
             {
               "group": 16,
+              "element": 8576,
+              "name": "Occupation"
+            },
+            {
+              "group": 16,
+              "element": 8624,
+              "name": "AdditionalPatientHistory"
+            },
+            {
+              "group": 16,
+              "element": 8855,
+              "name": "ResponsiblePerson"
+            },
+            {
+              "group": 16,
               "element": 16384,
               "name": "PatientComments"
+            },
+            {
+              "group": 20,
+              "element": 260,
+              "name": "SecondaryReviewerName"
+            },
+            {
+              "group": 20,
+              "element": 8198,
+              "name": "EvaluatorName"
+            },
+            {
+              "group": 50,
+              "element": 4146,
+              "name": "RequestingPhysician"
             },
             {
               "group": 56,
               "element": 768,
               "name": "CurrentPatientLocation"
+            },
+            {
+              "group": 64,
+              "element": 6,
+              "name": "ScheduledPerformingPhysicianName"
+            },
+            {
+              "group": 64,
+              "element": 4112,
+              "name": "NamesOfIntendedRecipientsOfResults"
+            },
+            {
+              "group": 64,
+              "element": 8200,
+              "name": "OrderEnteredBy"
+            },
+            {
+              "group": 64,
+              "element": 16439,
+              "name": "HumanPerformerName"
+            },
+            {
+              "group": 64,
+              "element": 41063,
+              "name": "DocumentAuthorTrial"
+            },
+            {
+              "group": 64,
+              "element": 41077,
+              "name": "VerifyingObserverName"
+            },
+            {
+              "group": 64,
+              "element": 41251,
+              "name": "PersonName"
+            },
+            {
+              "group": 64,
+              "element": 41735,
+              "name": "CurrentObserverTrial"
+            },
+            {
+              "group": 64,
+              "element": 41810,
+              "name": "VerbalSourceTrial"
+            },
+            {
+              "group": 112,
+              "element": 132,
+              "name": "ContentCreatorName"
+            },
+            {
+              "group": 114,
+              "element": 106,
+              "name": "SelectorPNValue"
+            },
+            {
+              "group": 12294,
+              "element": 166,
+              "name": "ROIInterpreter"
+            },
+            {
+              "group": 12302,
+              "element": 8,
+              "name": "ReviewerName"
+            },
+            {
+              "group": 16392,
+              "element": 258,
+              "name": "InterpretationRecorder"
+            },
+            {
+              "group": 16392,
+              "element": 266,
+              "name": "InterpretationTranscriber"
+            },
+            {
+              "group": 16392,
+              "element": 268,
+              "name": "InterpretationAuthor"
+            },
+            {
+              "group": 16392,
+              "element": 276,
+              "name": "PhysicianApprovingInterpretation"
+            },
+            {
+              "group": 16392,
+              "element": 281,
+              "name": "DistributionName"
             }
           ],
           "date_tags": [
@@ -710,6 +870,61 @@ export const PROFILES = {
               "group": 8,
               "element": 35,
               "name": "ContentDate"
+            },
+            {
+              "group": 8,
+              "element": 18,
+              "name": "InstanceCreationDate"
+            },
+            {
+              "group": 64,
+              "element": 580,
+              "name": "PerformedProcedureStepStartDate"
+            },
+            {
+              "group": 64,
+              "element": 2,
+              "name": "ScheduledProcedureStepStartDate"
+            },
+            {
+              "group": 24,
+              "element": 4608,
+              "name": "DateOfLastCalibration"
+            },
+            {
+              "group": 8,
+              "element": 48,
+              "name": "StudyTime"
+            },
+            {
+              "group": 8,
+              "element": 49,
+              "name": "SeriesTime"
+            },
+            {
+              "group": 8,
+              "element": 50,
+              "name": "AcquisitionTime"
+            },
+            {
+              "group": 8,
+              "element": 51,
+              "name": "ContentTime"
+            },
+            {
+              "group": 8,
+              "element": 19,
+              "name": "InstanceCreationTime"
+            },
+            {
+              "group": 64,
+              "element": 581,
+              "name": "PerformedProcedureStepStartTime"
+            },
+            {
+              "group": 64,
+              "element": 3,
+              "name": "ScheduledProcedureStepStartTime"
             }
           ]
         }

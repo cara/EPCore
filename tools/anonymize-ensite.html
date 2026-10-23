@@ -5,7 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EnSite Anonymisierer</title>
 <link href="../vendor/fonts/fonts.css" rel="stylesheet">
+<!-- Before the stylesheet, or the page paints dark and turns light a frame
+     later. Classic and inline because a module runs deferred; the shared
+     version is shared/theme.js. -->
+<script>
+  try {
+    var t = localStorage.getItem('epcore.theme') || localStorage.getItem('eptrace-theme');
+    if (t === 'light') document.documentElement.dataset.theme = 'light';
+  } catch (e) { /* storage disabled */ }
+</script>
 <link href="../shared/epcore.css" rel="stylesheet">
+<script type="module" src="../shared/theme.js?v=7ab3e6d427ee"></script>
 <style>
   body {
     max-width: 920px;
@@ -34,30 +44,57 @@
     width: 26em; max-width: 100%; font-family: monospace;
   }
   textarea {
+    /* Painted here: epcore.css themes inputs, not textareas, and the
+       browser's dark default put the example text at 2.43:1. */
+    background: var(--bg-2); color: var(--text);
     width: 100%; box-sizing: border-box; padding: 0.5em;
     border: 1px solid var(--bg-3); border-radius: 3px;
     font-family: monospace; font-size: 0.9em;
   }
+  textarea::placeholder { color: var(--text-faint); opacity: 1; }
   button {
     padding: 0.7em 1.5em; font-size: 1em; cursor: pointer;
     border-radius: 4px; border: 1px solid var(--bg-3); background: var(--bg-3);
     margin-right: 0.5em;
   }
-  button:hover { background: #d6dbdf; }
-  button.primary { background: #2ecc71; color: var(--bg-1); border-color: #27ae60; }
+  button:hover {
+    /* Tokens: the light page's grey hover sat under the dark theme's light
+       label at 1.07:1. Same hover as the hub's secondary button. */
+    background: var(--bg-2);
+    border-color: var(--accent-dim);
+  }
+  button.primary { background: #2ecc71; color: #0a1016; border-color: #27ae60; }
   button.primary:hover { background: #27ae60; }
   button:disabled { opacity: 0.5; cursor: not-allowed; }
   pre {
     background: var(--bg-2); padding: 0.8em; border-radius: 3px; overflow: auto;
-    max-height: 18em; font-size: 0.85em; var(--bg-1)-space: pre-wrap; word-break: break-all;
+    max-height: 18em; font-size: 0.85em; white-space: pre-wrap; word-break: break-all;
   }
   table { border-collapse: collapse; width: 100%; margin-top: 0.5em; font-size: 0.9em; }
   th, td { padding: 0.4em 0.6em; text-align: left; border-bottom: 1px solid var(--line); }
+  td.file, td.long {
+    /* A path, an ID or a hash has no break opportunity of its own: unbroken,
+       it sized the table past the page and pushed "Ersatz" off-screen. Only
+       such cells, which renderPreview marks, break anywhere. A cell that may
+       break anywhere has next to no minimum width, and automatic table layout
+       hands its share to a long column, until "PatientName" breaks mid-word
+       in the column the operator reads. */
+    overflow-wrap: anywhere;
+  }
   th { background: var(--bg-2); }
   td.field { font-family: monospace; color: var(--accent); }
   td.original, td.replacement { font-family: monospace; }
   td.original { color: var(--bad); }
-  td.replacement { color: #27ae60; }
+  td.replacement { color: var(--accent); }
+  @media (max-width: 48em) {
+    td {
+      /* Narrower than this, a field name, a name and its replacement no
+         longer fit whole side by side: 18, 22 and 16 characters beside a
+         CARTO path already need 600 px. A word broken in two beats a table
+         that runs off the page. */
+      overflow-wrap: anywhere;
+    }
+  }
   ul.files { padding-left: 1.5em; }
   ul.files li { font-family: monospace; }
   .row { display: flex; gap: 1em; flex-wrap: wrap; }
@@ -102,19 +139,19 @@
     <label><input type="checkbox" id="opt-physician" checked> Ärzte- &amp; Personalnamen</label>
     <label><input type="checkbox" id="opt-institution" checked> Klinik- &amp; Standortnamen</label>
     <label><input type="checkbox" id="opt-comments" checked> Kommentare &amp; Notizen leeren</label>
-    <label><input type="checkbox" id="opt-dates"> Datum/Zeitstempel auf Jahr kürzen</label>
+    <label><input type="checkbox" id="opt-dates" checked> Datum/Zeitstempel auf Jahr kürzen</label>
     <label><input type="checkbox" id="opt-attrs" checked> Auch Attribute (z.&nbsp;B. <code>PatientID="…"</code>)</label>
   </fieldset>
 </div>
 
 <fieldset>
   <legend>Eigene zu ersetzende Begriffe</legend>
-  <p style="margin: 0.2em 0; font-size: 0.9em; color: #7f8c8d;">
+  <p style="margin: 0.2em 0; font-size: 0.9em; color: var(--text-dim);">
     Eine Zeichenkette pro Zeile (z.&nbsp;B. Patientenname, Studienkennung).
     Wird im gesamten XML-Text durch <code>[REDACTED]</code> ersetzt.
     Case-insensitive.
   </p>
-  <textarea id="custom-patterns" rows="3"
+  <textarea id="custom-patterns" rows="3" aria-label="Eigene zu ersetzende Begriffe"
     placeholder="Müller, Hans&#10;1965-03-15&#10;Smith_Mapping_2024"></textarea>
 </fieldset>
 
@@ -672,6 +709,7 @@ const PROFILES = {
             "birthday",
             "date_of_birth",
             "dateofbirth",
+            "dob",
             "email",
             "family_name",
             "familyname",
@@ -689,6 +727,8 @@ const PROFILES = {
             "labname",
             "last_name",
             "lastname",
+            "medical_record_number",
+            "medicalrecordnumber",
             "middle_initial",
             "middle_name",
             "middleinitial",
@@ -706,6 +746,8 @@ const PROFILES = {
             "performingphysician",
             "perfphysician",
             "phone",
+            "phone_number",
+            "phonenumber",
             "physicianname",
             "referringphysician",
             "refphysician",
@@ -770,6 +812,11 @@ const PROFILES = {
             },
             {
               "group": 8,
+              "element": 156,
+              "name": "ConsultingPhysicianName"
+            },
+            {
+              "group": 8,
               "element": 4112,
               "name": "StationName"
             },
@@ -810,6 +857,11 @@ const PROFILES = {
             },
             {
               "group": 16,
+              "element": 33,
+              "name": "IssuerOfPatientID"
+            },
+            {
+              "group": 16,
               "element": 48,
               "name": "PatientBirthDate"
             },
@@ -835,8 +887,33 @@ const PROFILES = {
             },
             {
               "group": 16,
+              "element": 4101,
+              "name": "PatientBirthName"
+            },
+            {
+              "group": 16,
+              "element": 4112,
+              "name": "PatientAge"
+            },
+            {
+              "group": 16,
               "element": 4160,
               "name": "PatientAddress"
+            },
+            {
+              "group": 16,
+              "element": 4192,
+              "name": "PatientMotherBirthName"
+            },
+            {
+              "group": 16,
+              "element": 4224,
+              "name": "MilitaryRank"
+            },
+            {
+              "group": 16,
+              "element": 4240,
+              "name": "MedicalRecordLocator"
             },
             {
               "group": 16,
@@ -850,13 +927,133 @@ const PROFILES = {
             },
             {
               "group": 16,
+              "element": 8576,
+              "name": "Occupation"
+            },
+            {
+              "group": 16,
+              "element": 8624,
+              "name": "AdditionalPatientHistory"
+            },
+            {
+              "group": 16,
+              "element": 8855,
+              "name": "ResponsiblePerson"
+            },
+            {
+              "group": 16,
               "element": 16384,
               "name": "PatientComments"
+            },
+            {
+              "group": 20,
+              "element": 260,
+              "name": "SecondaryReviewerName"
+            },
+            {
+              "group": 20,
+              "element": 8198,
+              "name": "EvaluatorName"
+            },
+            {
+              "group": 50,
+              "element": 4146,
+              "name": "RequestingPhysician"
             },
             {
               "group": 56,
               "element": 768,
               "name": "CurrentPatientLocation"
+            },
+            {
+              "group": 64,
+              "element": 6,
+              "name": "ScheduledPerformingPhysicianName"
+            },
+            {
+              "group": 64,
+              "element": 4112,
+              "name": "NamesOfIntendedRecipientsOfResults"
+            },
+            {
+              "group": 64,
+              "element": 8200,
+              "name": "OrderEnteredBy"
+            },
+            {
+              "group": 64,
+              "element": 16439,
+              "name": "HumanPerformerName"
+            },
+            {
+              "group": 64,
+              "element": 41063,
+              "name": "DocumentAuthorTrial"
+            },
+            {
+              "group": 64,
+              "element": 41077,
+              "name": "VerifyingObserverName"
+            },
+            {
+              "group": 64,
+              "element": 41251,
+              "name": "PersonName"
+            },
+            {
+              "group": 64,
+              "element": 41735,
+              "name": "CurrentObserverTrial"
+            },
+            {
+              "group": 64,
+              "element": 41810,
+              "name": "VerbalSourceTrial"
+            },
+            {
+              "group": 112,
+              "element": 132,
+              "name": "ContentCreatorName"
+            },
+            {
+              "group": 114,
+              "element": 106,
+              "name": "SelectorPNValue"
+            },
+            {
+              "group": 12294,
+              "element": 166,
+              "name": "ROIInterpreter"
+            },
+            {
+              "group": 12302,
+              "element": 8,
+              "name": "ReviewerName"
+            },
+            {
+              "group": 16392,
+              "element": 258,
+              "name": "InterpretationRecorder"
+            },
+            {
+              "group": 16392,
+              "element": 266,
+              "name": "InterpretationTranscriber"
+            },
+            {
+              "group": 16392,
+              "element": 268,
+              "name": "InterpretationAuthor"
+            },
+            {
+              "group": 16392,
+              "element": 276,
+              "name": "PhysicianApprovingInterpretation"
+            },
+            {
+              "group": 16392,
+              "element": 281,
+              "name": "DistributionName"
             }
           ],
           "date_tags": [
@@ -879,6 +1076,61 @@ const PROFILES = {
               "group": 8,
               "element": 35,
               "name": "ContentDate"
+            },
+            {
+              "group": 8,
+              "element": 18,
+              "name": "InstanceCreationDate"
+            },
+            {
+              "group": 64,
+              "element": 580,
+              "name": "PerformedProcedureStepStartDate"
+            },
+            {
+              "group": 64,
+              "element": 2,
+              "name": "ScheduledProcedureStepStartDate"
+            },
+            {
+              "group": 24,
+              "element": 4608,
+              "name": "DateOfLastCalibration"
+            },
+            {
+              "group": 8,
+              "element": 48,
+              "name": "StudyTime"
+            },
+            {
+              "group": 8,
+              "element": 49,
+              "name": "SeriesTime"
+            },
+            {
+              "group": 8,
+              "element": 50,
+              "name": "AcquisitionTime"
+            },
+            {
+              "group": 8,
+              "element": 51,
+              "name": "ContentTime"
+            },
+            {
+              "group": 8,
+              "element": 19,
+              "name": "InstanceCreationTime"
+            },
+            {
+              "group": 64,
+              "element": 581,
+              "name": "PerformedProcedureStepStartTime"
+            },
+            {
+              "group": 64,
+              "element": 3,
+              "name": "ScheduledProcedureStepStartTime"
             }
           ]
         }
@@ -1537,6 +1789,10 @@ const RESIDUE_TEXT = {
   "anon.residue.title": "BEKANNTER REST — diese Ausgabe ist NICHT vollständig anonymisiert. Datum und Uhrzeit der Prozedur stehen weiterhin darin:",
   "anon.residue.xml_time_fields": "in XML-Zeitfeldern, die nicht ersetzt werden: {names}"
 };
+const FREETEXT_TEXT = {
+  "anon.freetext.kept": "Von Hand eingegebener Text wurde nicht verändert: {fields}. Solche Beschriftungen tippt der Bediener; sie können einen Namen enthalten, und nichts hier hat sie gelesen. Vor dem Weitergeben prüfen.",
+  "anon.freetext.more": "und {count} weitere(s) Feld(er)"
+};
 // The scrub itself, so the three mapping pages cannot carry three versions of
 // it. They did, and they had drifted: measured over the union of every field
 // any of them knew, CARTO left 7 identifiers in place, EnSite 8, Rhythmia 14 —
@@ -1579,19 +1835,119 @@ const SHARED_ENCRYPTED_ELEMENT =
   /(<(?:[\w.\-]+:)?(Encrypted\w*Info)\b[^>]*>)([^<]*)(<\/(?:[\w.\-]+:)?\2\s*>)/gi;
 const SHARED_REDACTED_ENCRYPTED = "[ENCRYPTED RECORD REMOVED BY EPCORE]";
 
+// What may stand behind a quoted INI value for its quotes to close it: the
+// rest of a tag and nothing else — more quoted attributes, then the end of the
+// tag, optionally with element text closed on the same line. Anything else is
+// the value going on: `"Roe" PatientID=98765`, `"Doe" >John Smith`. A check
+// that looked only at how the tail began wrote these back unread, and a second
+// pass called the copy clean. Group 1 is the attributes, group 3 the end of
+// the tag. Mirror of maps._TAG_TAIL and maps._TAG_TAIL_ATTRIBUTE.
+const SHARED_TAG_TAIL =
+  /^((?:[ \t]+(?:[\w.\-]+:)?[A-Za-z_][\w.\-]*[ \t]*=[ \t]*(["'])(?:(?!\2)[^<\r\n])*\2)*)([ \t]*(?:\/?>(?:[^<\r\n]*<\/[\w.:\-]+[ \t]*>)?)?[ \t]*)$/;
+const SHARED_TAG_TAIL_ATTRIBUTE =
+  /((?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)[ \t]*=[ \t]*)(["'])((?:(?!\3)[^<\r\n])*)\3/g;
+
+// Both quote styles: XML permits either, and vendors use both in one file.
+// Three rules, because each finds assignments the others cannot, and every
+// assignment any of them finds is decided, once. The first allows no quote at
+// all in a value: it cannot see PatientName="O'Connor, Sean", but it is the only
+// one that never swallows an assignment written inside another value,
+// Msg="Set PatientName='Mustermann'". The second lets a value hold the other
+// quote and stops it at "<", so a stray quote in element text cannot run on into
+// the next tag. The third takes the values that hold a "<", as a contact line in
+// a .txt or .log file does: PatientName="Muster <muster@klinik.example>".
+// The rules overlap, and one rule's match may hold an assignment only another
+// finds. Run one after another, a later rule would decide again what an
+// earlier one had, counting it twice as kept, and nothing reached an
+// assignment inside a value already matched whole. So all three read the same
+// text, and their finds are merged by where the value starts. Mirror of
+// maps._ATTRIBUTE_RULES and maps._attribute_assignments.
+const SHARED_ATTRIBUTE_RULES = [
+  /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)\s*=\s*(?:"([^"']*)"|'([^"']*)')/g,
+  /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)\s*=\s*(?:"([^"<]*)"|'([^'<]*)')/g,
+  /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)\s*=\s*(?:"([^"<]*<[^"]*)"|'([^'<]*<[^']*)')/g,
+];
+
+// A fourth rule, read overlapping: after each find the search goes on from
+// where the value starts, not from where it ends. A stray quote of the
+// identifier's own kind, Kind=" unbalanced PatientName="Doe, John", makes
+// every rule above take the identifier's opening quote for the end of Kind's
+// value; the search went on behind it, and the name stayed while a second
+// pass found nothing either. Its value stays on one line and holds no "<", so
+// it adds no reach the rules above lack. Mirror of maps._ATTRIBUTE_OVERLAPPING.
+const SHARED_ATTRIBUTE_OVERLAPPING =
+  /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)\s*=\s*(?:"([^"<\r\n]*)"|'([^'<\r\n]*)')/g;
+
+// [value start, name, value] for every assignment a rule finds, once each and
+// in text order. A value runs to the next quote of its own kind under every
+// rule, so where it starts names it. The first rule's find is kept, so what it
+// decided before the other two existed it decides the same way now, and the
+// overlapping rule, read last, only adds an assignment none of the others
+// reached.
+function sharedAttributeAssignments(text) {
+  const found = new Map();
+  const keep = m => {
+    // Tested against undefined, not for truth: an empty value matched too.
+    const value = m[2] !== undefined ? m[2] : m[3];
+    // The match ends with the value and its closing quote.
+    const start = m.index + m[0].length - 1 - value.length;
+    if (!found.has(start)) found.set(start, [start, m[1], value]);
+    return start;
+  };
+  for (const rule of SHARED_ATTRIBUTE_RULES) {
+    for (const m of text.matchAll(rule)) keep(m);
+  }
+  const overlapping = new RegExp(SHARED_ATTRIBUTE_OVERLAPPING);
+  let m;
+  while ((m = overlapping.exec(text)) !== null) {
+    // The value starts behind the name and its "=", so this moves on.
+    overlapping.lastIndex = keep(m);
+  }
+  return [...found.values()].sort((a, b) => a[0] - b[0]);
+}
+
 function sharedEscapeXml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+// What "somebody typed this" looks like: letters, long enough to be a word,
+// and not a time or a number. Mirror of maps.looks_hand_typed; the counts it
+// gives are compared with Python's in tests/conformance.
+const SHARED_HAND_TYPED = /[A-Za-zÄÖÜäöüßÀ-ÿ]/;
+const SHARED_ONLY_NUMBERS = /^[\d:.\-\s/]+$/;
+
+function sharedLooksHandTyped(value) {
+  const stripped = String(value == null ? "" : value).trim();
+  // Counted in code points, as Python's len() counts them.
+  if (Array.from(stripped).length < 3 || !SHARED_HAND_TYPED.test(stripped)) {
+    return false;
+  }
+  return !SHARED_ONLY_NUMBERS.test(stripped);
 }
 
 /** Replace every known identifier in one file's text.
  *
  *  `escapeValue` lets a page that works in another encoding convert the
  *  replacement before it is written; Rhythmia scrubs latin-1 strings.
+ *  `customMatcher` does the same for a custom pattern: it turns the typed
+ *  text into the global RegExp that finds it. Rhythmia needs it because the
+ *  "i" flag cannot pair "Ü" with "ü" once each is two UTF-8 bytes read as
+ *  latin-1.
+ *
+ *  `kept`, a Map, counts per field name the hand-typed values this pass left
+ *  as they were — a map's labels, kept on purpose because they make it
+ *  readable, but written by the operator and read by nothing here. Without it
+ *  a study whose only names sit in labels showed "no personal fields found".
+ *  A Map rather than an object: an object puts integer-like keys first, and
+ *  the note lists fields in the order Python's dict does.
  */
-function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
+function scrubKnownFields(text, opts, found, fileLabel, escapeValue,
+                          customMatcher, kept) {
   const repMap = sharedReplacementMap(opts);
   const esc = escapeValue || sharedEscapeXml;
+  const matcher = customMatcher || (pattern =>
+    new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"));
   // `count` matters for custom patterns: one entry can stand for many
   // occurrences, and countReplacements sums it. Leaving it off made a report
   // that said "1 replacement" where three strings had gone.
@@ -1604,6 +1960,11 @@ function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
   const decide = (name, current) => {
     const key = normaliseFieldName(name);
     const stripped = String(current).trim();
+    // Before the date rule, where Python counts too: the same input has to
+    // name the same fields on both sides.
+    if (kept && !repMap.has(key) && sharedLooksHandTyped(stripped)) {
+      kept.set(name, (kept.get(name) || 0) + 1);
+    }
     if (opts.dates !== false && SHARED_DATE_FIELDS.has(key)) {
       const year = String(current).match(/\b(19|20)\d{2}\b/);
       const next = `${year ? year[0] : SHARED.fallback_year}-01-01`;
@@ -1639,30 +2000,86 @@ function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
   // and a namespace prefix is what a vendor adds when their schema grows. The
   // prefix is outside the backreference: a closing tag may legally carry a
   // different one.
+  //
+  // The text may hold CDATA sections: <PatientName><![CDATA[Doe^John]]> never
+  // matched a value that stopped at the first "<", and the name stayed. A
+  // section runs to its first "]]>", so a match cannot reach into the next
+  // element. The value is read through the wrapper and the replacement goes
+  // in as escaped text, the same value to any XML reader, encoded by `esc` as
+  // it always was. Mirror of maps._ELEMENT / maps._CDATA.
   out = out.replace(
-    /(<(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)(?:\s[^<>]*)?>)([^<]*)(<\/(?:[\w.\-]+:)?\2\s*>)/g,
-    (m, open, name, content, close) => {
+    /(<(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)(?:\s[^<>]*)?>)([^<]*(?:<!\[CDATA\[(?:(?!\]\]>)[\s\S])*\]\]>[^<]*)*)(<\/(?:[\w.\-]+:)?\2\s*>)/g,
+    (m, open, name, raw, close) => {
+      const content = raw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
       const next = decide(name, content);
       if (next === null) return m;
       note(name, content, next);
       return open + esc(next) + close;
     });
 
-  // Both quote styles: XML permits either and vendors use both in one file.
+  // Every assignment once, in text order (sharedAttributeAssignments).
   if (opts.attrs !== false) {
-    out = out.replace(
-      /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)(\s*=\s*)(["'])([^"']*)\3/g,
-      (m, name, sep, quote, content) => {
-        const next = decide(name, content);
-        if (next === null) return m;
-        note(`${name}=…`, content, next);
-        return `${name}${sep}${quote}${esc(next)}${quote}`;
-      });
+    const pieces = [];
+    let done = 0;
+    for (const [start, name, content] of sharedAttributeAssignments(out)) {
+      // Inside a value already replaced: whatever it held went with it.
+      if (start < done) continue;
+      const next = decide(name, content);
+      if (next === null) continue;
+      note(`${name}=…`, content, next);
+      // Only the value is ours to change. Everything before it, namespace
+      // prefix included, stays as it was: rebuilding it from the name alone
+      // turned v:PatientName into PatientName, another attribute to a
+      // namespace-aware reader and a duplicate one where the element carried
+      // both.
+      pieces.push(out.slice(done, start), esc(next));
+      done = start + content.length;
+    }
+    pieces.push(out.slice(done));
+    out = pieces.join("");
   }
 
+  // The value is the whole rest of the line, every ";" in it included.
+  // Windows' INI reader takes no inline comment, so "Doe; John", "Doe ; John"
+  // and ";Doe" are each one value; read as value and comment, the scrub kept
+  // "; John", or all of ";Doe", and a second pass read the same comment. Only
+  // the trailing blanks are not the value. A comment line stays one: the key
+  // cannot hold a ";", and a key the table does not name is left as it was.
+  // The key starts with something other than a blank. Had it been allowed to
+  // start with one, a blank-led line without "=" was walked again for every
+  // split of its leading run between indent and key: right-justified numeric
+  // rows scrubbed at about 1 s/MB. Mirror of maps._ini_pattern.
   out = out.replace(
-    /^([ \t]*)([^=\r\n;[<]+?)([ \t]*=[ \t]*)([^\r\n;]*?)([ \t]*(?:;[^\r\n]*)?)$/gm,
+    /^([ \t]*)([^=\r\n;[< \t][^=\r\n;[<]*?)([ \t]*=[ \t]*)([^\r\n]*?)([ \t]*)$/gm,
     (m, indent, name, sep, content, trailer) => {
+      // A quoted value followed by nothing but the rest of a tag is replaced
+      // inside its quotes: on a tag written one attribute per line this pass
+      // sees `    LastName="Doe" />`, and taken whole the quotes, the "/>" and
+      // any attribute behind the first went. Written as the attribute pass
+      // writes it, so a value that pass replaced is left as it is. What stays
+      // behind the quotes is read too, never passed through: each attribute
+      // in it goes through the table whether or not the attribute pass ran.
+      // Any other tail is the value going on and is replaced whole. Mirror of
+      // maps._QUOTED_VALUE / maps._TAG_TAIL.
+      const quoted = content.match(/^(["'])((?:(?!\1)[^<\r\n])*)\1/);
+      const tail = quoted && content.slice(quoted[0].length).match(SHARED_TAG_TAIL);
+      if (tail) {
+        const [whole, quote, inner] = quoted;
+        const next = decide(name.trim(), inner);
+        let head = whole;
+        if (next !== null && inner !== esc(next)) {
+          note(name.trim(), inner.trim(), next);
+          head = `${quote}${esc(next)}${quote}`;
+        }
+        const attributes = tail[1].replace(SHARED_TAG_TAIL_ATTRIBUTE,
+          (a, before, attr, q, current) => {
+            const value = decide(attr, current);
+            if (value === null || current === esc(value)) return a;
+            note(`${attr}=…`, current, value);
+            return `${before}${q}${esc(value)}${q}`;
+          });
+        return `${indent}${name}${sep}${head}${attributes}${tail[3]}${trailer}`;
+      }
       const next = decide(name.trim(), content);
       if (next === null) return m;
       note(name.trim(), String(content).trim(), next);
@@ -1672,7 +2089,7 @@ function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
   for (const raw of (opts.customPatterns || "").split(/\r?\n/)) {
     const pattern = raw.trim();
     if (!pattern) continue;
-    const re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    const re = matcher(pattern);
     let count = 0;
     out = out.replace(re, () => { count++; return "[REDACTED]"; });
     if (count) note("(custom)", pattern, "[REDACTED]", count);
@@ -1711,29 +2128,184 @@ function sharedKnownResidueLines(items) {
           fill("anon.residue.action")];
 }
 
+// What an operator typed and nothing here read, as one line for the result —
+// from the German catalogue strings inlined as FREETEXT_TEXT. Mirror of
+// classic._note_free_text: the busiest six fields, then how many more, because
+// a setting repeated five hundred times would otherwise bury the field that
+// holds a sentence. Empty when nothing was kept.
+function sharedFreeTextLine(kept) {
+  if (!kept || !kept.size) return "";
+  const fill = (key, values) => {
+    const text = FREETEXT_TEXT[key] !== undefined ? FREETEXT_TEXT[key] : `⟦${key}⟧`;
+    return Object.entries(values).reduce(
+      (out, [name, value]) => out.split(`{${name}}`).join(String(value)), text);
+  };
+  // Stable, so fields with equal counts keep the order they were met in, as
+  // Python's sorted() keeps them.
+  const top = [...kept].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  let fields = top.map(([field, count]) => `${count} × <${field}>`).join(", ");
+  const more = kept.size - top.length;
+  if (more > 0) fields += " " + fill("anon.freetext.more", { count: more });
+  return fill("anon.freetext.kept", { fields });
+}
+
 /* PROFILES:END */
 
 
 // ---------------------------------------------------------------------------
 // Kodierung: XML-Deklaration auswerten statt blind UTF-8 anzunehmen
 // ---------------------------------------------------------------------------
+// What a browser's TextDecoder gives for bytes 0x80-0x9F under the labels
+// below: "iso-8859-1", "latin1" and "ascii" all mean windows-1252 there
+// (WHATWG Encoding, index-windows-1252). Written back as references, the en
+// dash 0x96 of a declared ISO-8859-1 file came back as "&#8211;", and in a
+// comment or CDATA, where references are not read, as those seven characters.
+// The five bytes windows-1252 leaves undefined decode to themselves.
+const WINDOWS_1252_80_9F = [
+  0x20ac, 0x0081, 0x201a, 0x0192, 0x201e, 0x2026, 0x2020, 0x2021,
+  0x02c6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008d, 0x017d, 0x008f,
+  0x0090, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014,
+  0x02dc, 0x2122, 0x0161, 0x203a, 0x0153, 0x009d, 0x017e, 0x0178,
+];
+const WINDOWS_1252_BYTE = new Map(WINDOWS_1252_80_9F.map((cp, i) => [cp, 0x80 + i]));
+
 // Einbyte-Kodierungen, die wir verlustfrei zurückschreiben können.
 const SINGLE_BYTE_ENCODINGS = new Set([
   "iso-8859-1", "iso8859-1", "latin1", "latin-1", "us-ascii", "ascii",
 ]);
 
+const XML_DECLARED_ENCODING = /<\?xml[^>]*?encoding\s*=\s*["']([\w.:-]+)["']/i;
+const NOT_ANONYMISED = "Datei NICHT anonymisiert";
+
+// The label a UTF-16 byte-order mark announces, or null.
+function utf16Label(buf) {
+  if (buf.length < 2) return null;
+  if (buf[0] === 0xff && buf[1] === 0xfe) return "utf-16le";
+  if (buf[0] === 0xfe && buf[1] === 0xff) return "utf-16be";
+  return null;
+}
+
+// utf-16, UTF-16, unicode, ucs-2, utf-16be …: whatever the browser decodes as
+// UTF-16, by the browser's own table of labels.
+function isUtf16Label(label) {
+  try {
+    return new TextDecoder(label).encoding.startsWith("utf-16");
+  } catch (e) {
+    return false;
+  }
+}
+
+// null when the bytes are not UTF-8. fatal:false would turn every byte of a
+// Windows export >= 0x80 into U+FFFD in the copy, and a custom term typed
+// with an umlaut would no longer match the name it is there to remove.
+function decodeUtf8Strict(bytes) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch (e) {
+    return null;
+  }
+}
+
+// One character per byte. Not TextDecoder("latin1"): browsers read that label
+// as windows-1252, which moves 0x80-0x9F to other code points, so the bytes
+// written back would not be the bytes that came in.
+function decodeLatin1Exact(bytes) {
+  let text = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    text += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  }
+  return text;
+}
+
+// Bytes that claim UTF-8 (or claim nothing) and are not: read and written
+// back byte for byte, as maps.py and the CARTO page do. The declaration, if
+// any, stays as it came; the file already disagreed with it.
+function decodeNotUtf8(buf, declared) {
+  return { text: decodeLatin1Exact(buf), encoding: "iso-8859-1", bom: false,
+           declared, notUtf8: true };
+}
+
 function decodeXmlBytes(buf) {
+  const info = decodeXmlBytesAs(buf);
+  // XML has no NUL character. One in the text means the bytes are not in the
+  // encoding they were read in — UTF-16 without its mark, UTF-32 — and no
+  // field regex matches across them: the page would report no personal
+  // fields over a file with the name in it. Refuse rather than download that.
+  if (info.text.indexOf("\u0000") >= 0) {
+    throw new Error("Kodierung nicht erkannt (NUL-Bytes, z. B. UTF-16 ohne " +
+                    `Byte-Order-Marke) — ${NOT_ANONYMISED}`);
+  }
+  return info;
+}
+
+// An XML document opens with markup, after blanks at most. Read as UTF-16, a
+// body that is not UTF-16 does not: 8-bit bytes taken two at a time give a
+// code unit "<" only next to a NUL, which 8-bit XML does not have, and UTF-16
+// in the other byte order gives U+3C00. fatal:true is no test of this: any
+// even number of 8-bit bytes is well-formed UTF-16.
+function looksLikeXml(text) {
+  const lead = text.search(/[^\t\n\r ﻿]/);
+  return lead >= 0 && text[lead] === "<" && text.indexOf(">", lead) > lead;
+}
+
+function decodeXmlBytesAs(buf) {
+  // UTF-16 by its mark. Read as UTF-8 there was a NUL between every letter.
+  const utf16 = utf16Label(buf);
+  if (utf16) {
+    let text = null;
+    try {
+      text = new TextDecoder(utf16, { fatal: true, ignoreBOM: true }).decode(buf.subarray(2));
+    } catch (e) {
+      // Written back, a lone surrogate would be U+FFFD: data the file had.
+    }
+    if (text !== null && looksLikeXml(text)) {
+      const m = text.slice(0, 512).match(XML_DECLARED_ENCODING);
+      return { text, encoding: utf16, bom: true, declared: m ? m[1] : null };
+    }
+    // The mark says UTF-16 and the body is not. Trusted, an 8-bit body became
+    // CJK with no NUL for the guard to catch, nothing matched, and the page
+    // reported no personal fields over a file with the name in it. Read it as
+    // the bytes are, as for a UTF-16 declaration over 8-bit bytes: FF and FE
+    // are never UTF-8, so that is byte for byte, the mark kept in the text and
+    // written back. A NUL there means 16- or 32-bit text in another byte order
+    // than the mark's, or broken: nothing to scrub byte for byte, so refuse.
+    const info = decodeNotUtf8(buf, null);
+    if (info.text.indexOf("\u0000") >= 0) {
+      throw new Error((text === null ? `Ungültiges ${utf16.toUpperCase()}`
+        : `Inhalt passt nicht zur ${utf16.toUpperCase()}-Byte-Order-Marke`) +
+        ` — ${NOT_ANONYMISED}`);
+    }
+    const m = info.text.slice(0, 512).match(XML_DECLARED_ENCODING);
+    info.declared = m ? m[1] : null;
+    info.markMismatch = utf16;
+    return info;
+  }
   if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
-    return {
-      text: new TextDecoder("utf-8", { fatal: false }).decode(buf.subarray(3)),
-      encoding: "utf-8", bom: true, declared: null,
-    };
+    const text = decodeUtf8Strict(buf.subarray(3));
+    // The mark goes along into the latin-1 text, so it is written back too.
+    if (text === null) return decodeNotUtf8(buf, null);
+    return { text, encoding: "utf-8", bom: true, declared: null };
   }
   // Deklaration ist per Definition ASCII-kompatibel -> latin1-Sniff genügt.
   const head = new TextDecoder("latin1").decode(buf.subarray(0, 512));
-  const m = head.match(/<\?xml[^>]*?encoding\s*=\s*["']([\w.:-]+)["']/i);
+  const m = head.match(XML_DECLARED_ENCODING);
   const declared = m ? m[1] : null;
   const label = (declared || "utf-8").toLowerCase();
+
+  // A UTF-16 label is only read here when the bytes are 8-bit: in UTF-16 every
+  // other byte of the declaration is NUL, and the latin-1 sniff above does not
+  // match. So it is a wrong declaration over 8-bit bytes, as a .NET XmlWriter
+  // over a StringWriter leaves in a file saved as UTF-8. Decoded as UTF-16 the
+  // byte pairs became CJK, no field matched, and the page reported no personal
+  // fields over a file with the name in it. Read the bytes as what they are.
+  const misdeclared = isUtf16Label(label);
+  if (label === "utf-8" || label === "utf8" || misdeclared) {
+    const text = decodeUtf8Strict(buf);
+    const info = text === null ? decodeNotUtf8(buf, declared)
+                               : { text, encoding: "utf-8", bom: false, declared };
+    if (misdeclared) info.misdeclared = true;
+    return info;
+  }
 
   let text;
   try {
@@ -1745,6 +2317,28 @@ function decodeXmlBytes(buf) {
   return { text, encoding: label, bom: false, declared };
 }
 
+// Said in the log because a guess here is otherwise invisible: the output
+// looks like a scrubbed file either way.
+function describeEncoding(info) {
+  if (info.markMismatch) {
+    return `8 Bit hinter einer ${info.markMismatch.toUpperCase()}-Byte-Order-Marke ` +
+      "(kein UTF-16; byteweise gelesen und zurückgeschrieben, Marke unverändert)";
+  }
+  if (info.notUtf8) {
+    return "ISO-8859-1 (kein gültiges UTF-8" +
+      (info.declared ? `, obwohl als ${info.declared} deklariert` : "") +
+      "; byteweise gelesen und zurückgeschrieben)";
+  }
+  if (info.misdeclared) {
+    return `UTF-8 (als ${info.declared} deklariert, aber 8 Bit ohne ` +
+      "Byte-Order-Marke; Deklaration unverändert)";
+  }
+  if (info.encoding === "utf-16le" || info.encoding === "utf-16be") {
+    return `${info.encoding.toUpperCase()} (BOM)`;
+  }
+  return info.declared || (info.bom ? "UTF-8 (BOM)" : "UTF-8 (angenommen)");
+}
+
 // Kodiert einen String in eine Einbyte-Kodierung. Zeichen > U+00FF gibt es
 // dort nicht — sie werden als numerische XML-Referenz geschrieben, damit das
 // Ergebnis gültiges XML bleibt (statt still zu U+FFFD zu werden).
@@ -1752,17 +2346,36 @@ function encodeLatin1Xml(text) {
   const out = [];
   for (let i = 0; i < text.length; i++) {
     const c = text.codePointAt(i);
-    if (c > 0xff) {
+    // A character the browser read from a byte goes back as that byte.
+    const b = c <= 0xff ? c : WINDOWS_1252_BYTE.get(c);
+    if (b === undefined) {
       for (const ch of `&#${c};`) out.push(ch.charCodeAt(0));
       if (c > 0xffff) i++; // Surrogatpaar
     } else {
-      out.push(c);
+      out.push(b);
     }
   }
   return new Uint8Array(out);
 }
 
+// UTF-16 in the byte order it came in, mark first. TextEncoder writes UTF-8 only.
+function encodeUtf16(text, encoding) {
+  const le = encoding === "utf-16le";
+  const out = new Uint8Array(2 + text.length * 2);
+  out.set(le ? [0xff, 0xfe] : [0xfe, 0xff]);
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    out[2 + 2 * i] = le ? c & 0xff : c >> 8;
+    out[3 + 2 * i] = le ? c >> 8 : c & 0xff;
+  }
+  return out;
+}
+
 function encodeXmlText(text, info) {
+  if (info && (info.encoding === "utf-16le" || info.encoding === "utf-16be")) {
+    // The declaration may say UTF-16 or nothing; in a marked file the mark decides.
+    return { bytes: encodeUtf16(text, info.encoding), encoding: info.encoding };
+  }
   if (info && SINGLE_BYTE_ENCODINGS.has(info.encoding)) {
     return { bytes: encodeLatin1Xml(text), encoding: info.encoding };
   }
@@ -1820,8 +2433,49 @@ function attrRegex(field) {
 // namespaced tags and both quote styles, which the shared one now does too
 // — that had to come first, or consolidating would have traded one gap for
 // another.
-function anonymizeXml(xml, opts, found) {
-  return scrubKnownFields(xml, opts, found, '');
+//
+// `kept` counts the hand-typed values the pass left (see scrubKnownFields).
+// `info` is what decodeXmlBytes returned. When it read the file byte for byte
+// (notUtf8 — one stray byte in a UTF-8 export is enough), the UTF-8 parts read
+// "MÃ¼ller", and the shared pass, which looks for the term as typed, misses
+// the name there. The second pass looks for that spelling too.
+function anonymizeXml(xml, opts, found, kept, info) {
+  const out = scrubKnownFields(xml, opts, found, '', undefined, undefined, kept);
+  return info && info.notUtf8 ? redactUtf8Spellings(out, opts, found) : out;
+}
+
+// A custom term as its UTF-8 bytes read one character per byte, every letter
+// in either case. Case is spelled out, not left to the "i" flag: that would
+// fold the lead byte "Ã" (C3) to "ã" (E3) and could not fold "Ã¼" (ü) to
+// "Ã\x9c" (Ü).
+function utf8SpellingPattern(term) {
+  const encoder = new TextEncoder();
+  let source = "";
+  for (const ch of term) {
+    // ß uppercases to SS, which "i" does not match either.
+    const variants = [...new Set([ch, ch.toLowerCase(), ch.toUpperCase()])]
+      .filter(v => [...v].length === 1)
+      .map(v => escapeRe(decodeLatin1Exact(encoder.encode(v))));
+    source += variants.length > 1 ? `(?:${variants.join("|")})` : variants[0];
+  }
+  return new RegExp(source, "g");
+}
+
+function redactUtf8Spellings(text, opts, found) {
+  let out = text;
+  for (const raw of (opts.customPatterns || "").split(/\r?\n/)) {
+    const pattern = raw.trim();
+    // ASCII reads the same either way; the shared pass has had it.
+    if (!/[^\x00-\x7f]/.test(pattern)) continue;
+    let count = 0;
+    out = out.replace(utf8SpellingPattern(pattern), () => { count++; return "[REDACTED]"; });
+    // Under the term as typed, so the preview adds it to that term's line.
+    if (count && found) {
+      found.push({ field: "(custom)", original: pattern, replacement: "[REDACTED]",
+                   file: '', count });
+    }
+  }
+  return out;
 }
 
 // Ein Eintrag in `found` kann für mehrere Vorkommen stehen (eigene Patterns
@@ -1832,7 +2486,8 @@ function countReplacements(found) {
 
 // === SCRUB-CORE END ===
 // === SCRUB-CORE EXPORTS: buildReplacementMap, anonymizeXml, countReplacements,
-//     decodeXmlBytes, encodeXmlText, encodeLatin1Xml, escapeXml, tagRegex, attrRegex ===
+//     decodeXmlBytes, encodeXmlText, encodeLatin1Xml, escapeXml, tagRegex, attrRegex,
+//     sharedFreeTextLine ===
 
 function getOptions() {
   return {
@@ -1853,11 +2508,25 @@ function escapeHtml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function renderPreview(found) {
+// Under the table and under "nothing found" alike: a file whose only names
+// sit in hand-typed labels otherwise reads as one with no names in it.
+function freeTextNote(kept) {
+  const line = sharedFreeTextLine(kept);
+  return line ? `<div class="warn">${escapeHtml(line)}</div>` : "";
+}
+
+// A run of 24 characters without a space is a path, an ID or a hash, not a
+// name or a field: only such a cell is marked to break anywhere (see the
+// td.long rule). Names stay whole, so a long column cannot squeeze them.
+function cellClass(name, value) {
+  return /\S{24,}/.test(String(value == null ? "" : value)) ? `${name} long` : name;
+}
+
+function renderPreview(found, kept) {
   if (!found.length) {
-    preview.innerHTML = '<p style="color:#7f8c8d">Keine personenbezogenen ' +
+    preview.innerHTML = '<p style="color:var(--text-dim)">Keine personenbezogenen ' +
       'Felder gefunden. Falls die Datei trotzdem PII enthält, fügen Sie ' +
-      'diese unter "Eigene zu ersetzende Begriffe" hinzu.</p>';
+      'diese unter "Eigene zu ersetzende Begriffe" hinzu.</p>' + freeTextNote(kept);
     return;
   }
   const agg = new Map();
@@ -1871,19 +2540,19 @@ function renderPreview(found) {
     "<th>Ersatz</th><th>Anzahl</th></tr></thead><tbody>";
   for (const [, f] of agg) {
     html += "<tr>" +
-      `<td class="field">${escapeHtml(f.field)}</td>` +
-      `<td class="original">${escapeHtml(f.original) || "<em>(leer)</em>"}</td>` +
-      `<td class="replacement">${escapeHtml(f.replacement) || "<em>(leer)</em>"}</td>` +
+      `<td class="${cellClass("field", f.field)}">${escapeHtml(f.field)}</td>` +
+      `<td class="${cellClass("original", f.original)}">${escapeHtml(f.original) || "<em>(leer)</em>"}</td>` +
+      `<td class="${cellClass("replacement", f.replacement)}">${escapeHtml(f.replacement) || "<em>(leer)</em>"}</td>` +
       `<td>${f.count}</td></tr>`;
   }
   html += "</tbody></table>";
-  preview.innerHTML = html;
+  preview.innerHTML = html + freeTextNote(kept);
 }
 
 async function readXml(f) {
   const info = decodeXmlBytes(new Uint8Array(await f.arrayBuffer()));
   log(`Eingabe: ${info.text.length.toLocaleString()} Zeichen` +
-      ` (Kodierung: ${info.declared || (info.bom ? "UTF-8 (BOM)" : "UTF-8 (angenommen)")})`);
+      ` (Kodierung: ${describeEncoding(info)})`);
   return info;
 }
 
@@ -1894,9 +2563,11 @@ $("analyze").addEventListener("click", async () => {
     const info = await readXml(selectedFile);
     const opts = getOptions();
     const found = [];
-    anonymizeXml(info.text, opts, found);
+    const kept = new Map();
+    anonymizeXml(info.text, opts, found, kept, info);
     log(`Ersetzungen: ${countReplacements(found)}`);
-    renderPreview(found);
+    if (kept.size) log(sharedFreeTextLine(kept));
+    renderPreview(found, kept);
   } catch (e) {
     log("FEHLER: " + e.message); console.error(e);
   }
@@ -1909,10 +2580,12 @@ $("process").addEventListener("click", async () => {
     const info = await readXml(selectedFile);
     const opts = getOptions();
     const found = [];
-    const out = anonymizeXml(info.text, opts, found);
+    const kept = new Map();
+    const out = anonymizeXml(info.text, opts, found, kept, info);
     log(`Ersetzungen: ${countReplacements(found)}`);
+    if (kept.size) log(sharedFreeTextLine(kept));
     log(`Ausgabe: ${out.length.toLocaleString()} Zeichen`);
-    renderPreview(found);
+    renderPreview(found, kept);
 
     const encoded = encodeXmlText(out, info);
     if (encoded.rewrote) {

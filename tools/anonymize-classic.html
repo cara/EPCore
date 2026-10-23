@@ -2,9 +2,20 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<title>EPTrace - Patient Data Anonymizer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EPTrace Anonymisierer</title>
 <link href="../vendor/fonts/fonts.css" rel="stylesheet">
+<!-- Before the stylesheet, or the page paints dark and turns light a frame
+     later. Classic and inline because a module runs deferred; the shared
+     version is shared/theme.js. -->
+<script>
+  try {
+    var t = localStorage.getItem('epcore.theme') || localStorage.getItem('eptrace-theme');
+    if (t === 'light') document.documentElement.dataset.theme = 'light';
+  } catch (e) { /* storage disabled */ }
+</script>
 <link href="../shared/epcore.css" rel="stylesheet">
+<script type="module" src="../shared/theme.js?v=7ab3e6d427ee"></script>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -34,11 +45,20 @@
     font-size: 14px;
     cursor: pointer;
   }
-  button:hover { background: #1f4a8c; }
+  button:hover {
+    /* The light page's dark blue sat under the dark label at 2.2:1. --text
+       is the far end from the label in either theme, as on the hub's own
+       picker button. */
+    background: var(--text);
+  }
   button:disabled { background: var(--text-faint); cursor: not-allowed; }
   button.secondary { background: var(--bg-3); 
     color: var(--text);}
   button.secondary:hover { background: #555c63; }
+  /* After the secondary rules, which would otherwise paint a refused ZIP
+     button as clickable. */
+  button.secondary:disabled { background: var(--text-faint); color: var(--bg-1);
+                              cursor: not-allowed; }
   select {
     font-size: 14px;
     padding: 7px 10px;
@@ -53,6 +73,11 @@
   td.arrow { color: var(--text-faint); width: 30px; text-align: center; }
   td.dst { color: var(--accent); font-family: ui-monospace, Menlo, monospace; }
   td.src { font-family: ui-monospace, Menlo, monospace; }
+  td.src, td.dst {
+    /* A study folder name is often one long word; unbroken, it pushes the
+       page sideways at phone width. */
+    overflow-wrap: anywhere;
+  }
   td.skipped { color: var(--text-faint); }
   .badge {
     display: inline-block;
@@ -67,15 +92,15 @@
   .badge.passthru { background: var(--line); color: var(--text-dim); }
   progress { width: 100%; height: 16px; }
   #log {
-    background: #1a1a24;
-    color: var(--line);
+    background: var(--bg-2);
+    color: var(--text);
     padding: 10px 14px;
     border-radius: 5px;
     font-family: ui-monospace, Menlo, monospace;
     font-size: 12px;
     height: 220px;
     overflow-y: auto;
-    var(--bg-1)-space: pre-wrap;
+    white-space: pre-wrap;
   }
   .privacy {
     background: var(--warn-wash);
@@ -95,7 +120,7 @@
 <body>
 <div class="container">
 
-<h1>EPTrace - Patient Data Anonymizer</h1>
+<h1>EPTrace Daten Anonymisierer</h1>
 <p class="lead">
   Anonymisiert EP-Aufnahmen verschiedener Lab-Systeme (Boston Scientific
   LabSystem PRO, GE CardioLab, Abbott EP-WorkMate Claris) lokal im Browser,
@@ -116,9 +141,9 @@
     Erkennung der Patientenverzeichnisse hängt davon ab.
   </p>
   <div class="row">
-    <select id="lab-system">
+    <select id="lab-system" aria-label="Lab-System">
       <option value="bostonScientific">Boston Scientific LabSystem PRO</option>
-      <option value="geCardioLab">GE CardioLab / Labsystem (Beta)</option>
+      <option value="geCardioLab">GE CardioLab / Labsystem</option>
       <option value="abbottClaris">Abbott EP-WorkMate Claris (Beta)</option>
     </select>
   </div>
@@ -190,9 +215,12 @@
   <div class="row">
     <button id="btn-download" class="secondary">Skript herunterladen (HTML)</button>
   </div>
+  <div id="download-status" class="muted" style="margin-top:8px"></div>
   <p class="muted" style="margin-top:8px">
+    <!-- The source repository is private. The public repository's gh-pages
+         branch holds the files the site serves, this page among them. -->
     Quellcode:
-    <a href="https://github.com/cara/EPTrace/blob/main/tools/anonymize-classic.html"
+    <a href="https://github.com/cara/EPCore/blob/gh-pages/tools/anonymize-classic.html"
        target="_blank" rel="noopener">tools/anonymize-classic.html</a>
   </p>
 </div>
@@ -705,6 +733,7 @@ const PROFILES = {
             "birthday",
             "date_of_birth",
             "dateofbirth",
+            "dob",
             "email",
             "family_name",
             "familyname",
@@ -722,6 +751,8 @@ const PROFILES = {
             "labname",
             "last_name",
             "lastname",
+            "medical_record_number",
+            "medicalrecordnumber",
             "middle_initial",
             "middle_name",
             "middleinitial",
@@ -739,6 +770,8 @@ const PROFILES = {
             "performingphysician",
             "perfphysician",
             "phone",
+            "phone_number",
+            "phonenumber",
             "physicianname",
             "referringphysician",
             "refphysician",
@@ -803,6 +836,11 @@ const PROFILES = {
             },
             {
               "group": 8,
+              "element": 156,
+              "name": "ConsultingPhysicianName"
+            },
+            {
+              "group": 8,
               "element": 4112,
               "name": "StationName"
             },
@@ -843,6 +881,11 @@ const PROFILES = {
             },
             {
               "group": 16,
+              "element": 33,
+              "name": "IssuerOfPatientID"
+            },
+            {
+              "group": 16,
               "element": 48,
               "name": "PatientBirthDate"
             },
@@ -868,8 +911,33 @@ const PROFILES = {
             },
             {
               "group": 16,
+              "element": 4101,
+              "name": "PatientBirthName"
+            },
+            {
+              "group": 16,
+              "element": 4112,
+              "name": "PatientAge"
+            },
+            {
+              "group": 16,
               "element": 4160,
               "name": "PatientAddress"
+            },
+            {
+              "group": 16,
+              "element": 4192,
+              "name": "PatientMotherBirthName"
+            },
+            {
+              "group": 16,
+              "element": 4224,
+              "name": "MilitaryRank"
+            },
+            {
+              "group": 16,
+              "element": 4240,
+              "name": "MedicalRecordLocator"
             },
             {
               "group": 16,
@@ -883,13 +951,133 @@ const PROFILES = {
             },
             {
               "group": 16,
+              "element": 8576,
+              "name": "Occupation"
+            },
+            {
+              "group": 16,
+              "element": 8624,
+              "name": "AdditionalPatientHistory"
+            },
+            {
+              "group": 16,
+              "element": 8855,
+              "name": "ResponsiblePerson"
+            },
+            {
+              "group": 16,
               "element": 16384,
               "name": "PatientComments"
+            },
+            {
+              "group": 20,
+              "element": 260,
+              "name": "SecondaryReviewerName"
+            },
+            {
+              "group": 20,
+              "element": 8198,
+              "name": "EvaluatorName"
+            },
+            {
+              "group": 50,
+              "element": 4146,
+              "name": "RequestingPhysician"
             },
             {
               "group": 56,
               "element": 768,
               "name": "CurrentPatientLocation"
+            },
+            {
+              "group": 64,
+              "element": 6,
+              "name": "ScheduledPerformingPhysicianName"
+            },
+            {
+              "group": 64,
+              "element": 4112,
+              "name": "NamesOfIntendedRecipientsOfResults"
+            },
+            {
+              "group": 64,
+              "element": 8200,
+              "name": "OrderEnteredBy"
+            },
+            {
+              "group": 64,
+              "element": 16439,
+              "name": "HumanPerformerName"
+            },
+            {
+              "group": 64,
+              "element": 41063,
+              "name": "DocumentAuthorTrial"
+            },
+            {
+              "group": 64,
+              "element": 41077,
+              "name": "VerifyingObserverName"
+            },
+            {
+              "group": 64,
+              "element": 41251,
+              "name": "PersonName"
+            },
+            {
+              "group": 64,
+              "element": 41735,
+              "name": "CurrentObserverTrial"
+            },
+            {
+              "group": 64,
+              "element": 41810,
+              "name": "VerbalSourceTrial"
+            },
+            {
+              "group": 112,
+              "element": 132,
+              "name": "ContentCreatorName"
+            },
+            {
+              "group": 114,
+              "element": 106,
+              "name": "SelectorPNValue"
+            },
+            {
+              "group": 12294,
+              "element": 166,
+              "name": "ROIInterpreter"
+            },
+            {
+              "group": 12302,
+              "element": 8,
+              "name": "ReviewerName"
+            },
+            {
+              "group": 16392,
+              "element": 258,
+              "name": "InterpretationRecorder"
+            },
+            {
+              "group": 16392,
+              "element": 266,
+              "name": "InterpretationTranscriber"
+            },
+            {
+              "group": 16392,
+              "element": 268,
+              "name": "InterpretationAuthor"
+            },
+            {
+              "group": 16392,
+              "element": 276,
+              "name": "PhysicianApprovingInterpretation"
+            },
+            {
+              "group": 16392,
+              "element": 281,
+              "name": "DistributionName"
             }
           ],
           "date_tags": [
@@ -912,6 +1100,61 @@ const PROFILES = {
               "group": 8,
               "element": 35,
               "name": "ContentDate"
+            },
+            {
+              "group": 8,
+              "element": 18,
+              "name": "InstanceCreationDate"
+            },
+            {
+              "group": 64,
+              "element": 580,
+              "name": "PerformedProcedureStepStartDate"
+            },
+            {
+              "group": 64,
+              "element": 2,
+              "name": "ScheduledProcedureStepStartDate"
+            },
+            {
+              "group": 24,
+              "element": 4608,
+              "name": "DateOfLastCalibration"
+            },
+            {
+              "group": 8,
+              "element": 48,
+              "name": "StudyTime"
+            },
+            {
+              "group": 8,
+              "element": 49,
+              "name": "SeriesTime"
+            },
+            {
+              "group": 8,
+              "element": 50,
+              "name": "AcquisitionTime"
+            },
+            {
+              "group": 8,
+              "element": 51,
+              "name": "ContentTime"
+            },
+            {
+              "group": 8,
+              "element": 19,
+              "name": "InstanceCreationTime"
+            },
+            {
+              "group": 64,
+              "element": 581,
+              "name": "PerformedProcedureStepStartTime"
+            },
+            {
+              "group": 64,
+              "element": 3,
+              "name": "ScheduledProcedureStepStartTime"
             }
           ]
         }
@@ -1570,6 +1813,10 @@ const RESIDUE_TEXT = {
   "anon.residue.title": "BEKANNTER REST — diese Ausgabe ist NICHT vollständig anonymisiert. Datum und Uhrzeit der Prozedur stehen weiterhin darin:",
   "anon.residue.xml_time_fields": "in XML-Zeitfeldern, die nicht ersetzt werden: {names}"
 };
+const FREETEXT_TEXT = {
+  "anon.freetext.kept": "Von Hand eingegebener Text wurde nicht verändert: {fields}. Solche Beschriftungen tippt der Bediener; sie können einen Namen enthalten, und nichts hier hat sie gelesen. Vor dem Weitergeben prüfen.",
+  "anon.freetext.more": "und {count} weitere(s) Feld(er)"
+};
 // The scrub itself, so the three mapping pages cannot carry three versions of
 // it. They did, and they had drifted: measured over the union of every field
 // any of them knew, CARTO left 7 identifiers in place, EnSite 8, Rhythmia 14 —
@@ -1612,19 +1859,119 @@ const SHARED_ENCRYPTED_ELEMENT =
   /(<(?:[\w.\-]+:)?(Encrypted\w*Info)\b[^>]*>)([^<]*)(<\/(?:[\w.\-]+:)?\2\s*>)/gi;
 const SHARED_REDACTED_ENCRYPTED = "[ENCRYPTED RECORD REMOVED BY EPCORE]";
 
+// What may stand behind a quoted INI value for its quotes to close it: the
+// rest of a tag and nothing else — more quoted attributes, then the end of the
+// tag, optionally with element text closed on the same line. Anything else is
+// the value going on: `"Roe" PatientID=98765`, `"Doe" >John Smith`. A check
+// that looked only at how the tail began wrote these back unread, and a second
+// pass called the copy clean. Group 1 is the attributes, group 3 the end of
+// the tag. Mirror of maps._TAG_TAIL and maps._TAG_TAIL_ATTRIBUTE.
+const SHARED_TAG_TAIL =
+  /^((?:[ \t]+(?:[\w.\-]+:)?[A-Za-z_][\w.\-]*[ \t]*=[ \t]*(["'])(?:(?!\2)[^<\r\n])*\2)*)([ \t]*(?:\/?>(?:[^<\r\n]*<\/[\w.:\-]+[ \t]*>)?)?[ \t]*)$/;
+const SHARED_TAG_TAIL_ATTRIBUTE =
+  /((?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)[ \t]*=[ \t]*)(["'])((?:(?!\3)[^<\r\n])*)\3/g;
+
+// Both quote styles: XML permits either, and vendors use both in one file.
+// Three rules, because each finds assignments the others cannot, and every
+// assignment any of them finds is decided, once. The first allows no quote at
+// all in a value: it cannot see PatientName="O'Connor, Sean", but it is the only
+// one that never swallows an assignment written inside another value,
+// Msg="Set PatientName='Mustermann'". The second lets a value hold the other
+// quote and stops it at "<", so a stray quote in element text cannot run on into
+// the next tag. The third takes the values that hold a "<", as a contact line in
+// a .txt or .log file does: PatientName="Muster <muster@klinik.example>".
+// The rules overlap, and one rule's match may hold an assignment only another
+// finds. Run one after another, a later rule would decide again what an
+// earlier one had, counting it twice as kept, and nothing reached an
+// assignment inside a value already matched whole. So all three read the same
+// text, and their finds are merged by where the value starts. Mirror of
+// maps._ATTRIBUTE_RULES and maps._attribute_assignments.
+const SHARED_ATTRIBUTE_RULES = [
+  /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)\s*=\s*(?:"([^"']*)"|'([^"']*)')/g,
+  /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)\s*=\s*(?:"([^"<]*)"|'([^'<]*)')/g,
+  /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)\s*=\s*(?:"([^"<]*<[^"]*)"|'([^'<]*<[^']*)')/g,
+];
+
+// A fourth rule, read overlapping: after each find the search goes on from
+// where the value starts, not from where it ends. A stray quote of the
+// identifier's own kind, Kind=" unbalanced PatientName="Doe, John", makes
+// every rule above take the identifier's opening quote for the end of Kind's
+// value; the search went on behind it, and the name stayed while a second
+// pass found nothing either. Its value stays on one line and holds no "<", so
+// it adds no reach the rules above lack. Mirror of maps._ATTRIBUTE_OVERLAPPING.
+const SHARED_ATTRIBUTE_OVERLAPPING =
+  /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)\s*=\s*(?:"([^"<\r\n]*)"|'([^'<\r\n]*)')/g;
+
+// [value start, name, value] for every assignment a rule finds, once each and
+// in text order. A value runs to the next quote of its own kind under every
+// rule, so where it starts names it. The first rule's find is kept, so what it
+// decided before the other two existed it decides the same way now, and the
+// overlapping rule, read last, only adds an assignment none of the others
+// reached.
+function sharedAttributeAssignments(text) {
+  const found = new Map();
+  const keep = m => {
+    // Tested against undefined, not for truth: an empty value matched too.
+    const value = m[2] !== undefined ? m[2] : m[3];
+    // The match ends with the value and its closing quote.
+    const start = m.index + m[0].length - 1 - value.length;
+    if (!found.has(start)) found.set(start, [start, m[1], value]);
+    return start;
+  };
+  for (const rule of SHARED_ATTRIBUTE_RULES) {
+    for (const m of text.matchAll(rule)) keep(m);
+  }
+  const overlapping = new RegExp(SHARED_ATTRIBUTE_OVERLAPPING);
+  let m;
+  while ((m = overlapping.exec(text)) !== null) {
+    // The value starts behind the name and its "=", so this moves on.
+    overlapping.lastIndex = keep(m);
+  }
+  return [...found.values()].sort((a, b) => a[0] - b[0]);
+}
+
 function sharedEscapeXml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+// What "somebody typed this" looks like: letters, long enough to be a word,
+// and not a time or a number. Mirror of maps.looks_hand_typed; the counts it
+// gives are compared with Python's in tests/conformance.
+const SHARED_HAND_TYPED = /[A-Za-zÄÖÜäöüßÀ-ÿ]/;
+const SHARED_ONLY_NUMBERS = /^[\d:.\-\s/]+$/;
+
+function sharedLooksHandTyped(value) {
+  const stripped = String(value == null ? "" : value).trim();
+  // Counted in code points, as Python's len() counts them.
+  if (Array.from(stripped).length < 3 || !SHARED_HAND_TYPED.test(stripped)) {
+    return false;
+  }
+  return !SHARED_ONLY_NUMBERS.test(stripped);
 }
 
 /** Replace every known identifier in one file's text.
  *
  *  `escapeValue` lets a page that works in another encoding convert the
  *  replacement before it is written; Rhythmia scrubs latin-1 strings.
+ *  `customMatcher` does the same for a custom pattern: it turns the typed
+ *  text into the global RegExp that finds it. Rhythmia needs it because the
+ *  "i" flag cannot pair "Ü" with "ü" once each is two UTF-8 bytes read as
+ *  latin-1.
+ *
+ *  `kept`, a Map, counts per field name the hand-typed values this pass left
+ *  as they were — a map's labels, kept on purpose because they make it
+ *  readable, but written by the operator and read by nothing here. Without it
+ *  a study whose only names sit in labels showed "no personal fields found".
+ *  A Map rather than an object: an object puts integer-like keys first, and
+ *  the note lists fields in the order Python's dict does.
  */
-function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
+function scrubKnownFields(text, opts, found, fileLabel, escapeValue,
+                          customMatcher, kept) {
   const repMap = sharedReplacementMap(opts);
   const esc = escapeValue || sharedEscapeXml;
+  const matcher = customMatcher || (pattern =>
+    new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"));
   // `count` matters for custom patterns: one entry can stand for many
   // occurrences, and countReplacements sums it. Leaving it off made a report
   // that said "1 replacement" where three strings had gone.
@@ -1637,6 +1984,11 @@ function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
   const decide = (name, current) => {
     const key = normaliseFieldName(name);
     const stripped = String(current).trim();
+    // Before the date rule, where Python counts too: the same input has to
+    // name the same fields on both sides.
+    if (kept && !repMap.has(key) && sharedLooksHandTyped(stripped)) {
+      kept.set(name, (kept.get(name) || 0) + 1);
+    }
     if (opts.dates !== false && SHARED_DATE_FIELDS.has(key)) {
       const year = String(current).match(/\b(19|20)\d{2}\b/);
       const next = `${year ? year[0] : SHARED.fallback_year}-01-01`;
@@ -1672,30 +2024,86 @@ function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
   // and a namespace prefix is what a vendor adds when their schema grows. The
   // prefix is outside the backreference: a closing tag may legally carry a
   // different one.
+  //
+  // The text may hold CDATA sections: <PatientName><![CDATA[Doe^John]]> never
+  // matched a value that stopped at the first "<", and the name stayed. A
+  // section runs to its first "]]>", so a match cannot reach into the next
+  // element. The value is read through the wrapper and the replacement goes
+  // in as escaped text, the same value to any XML reader, encoded by `esc` as
+  // it always was. Mirror of maps._ELEMENT / maps._CDATA.
   out = out.replace(
-    /(<(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)(?:\s[^<>]*)?>)([^<]*)(<\/(?:[\w.\-]+:)?\2\s*>)/g,
-    (m, open, name, content, close) => {
+    /(<(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)(?:\s[^<>]*)?>)([^<]*(?:<!\[CDATA\[(?:(?!\]\]>)[\s\S])*\]\]>[^<]*)*)(<\/(?:[\w.\-]+:)?\2\s*>)/g,
+    (m, open, name, raw, close) => {
+      const content = raw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
       const next = decide(name, content);
       if (next === null) return m;
       note(name, content, next);
       return open + esc(next) + close;
     });
 
-  // Both quote styles: XML permits either and vendors use both in one file.
+  // Every assignment once, in text order (sharedAttributeAssignments).
   if (opts.attrs !== false) {
-    out = out.replace(
-      /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)(\s*=\s*)(["'])([^"']*)\3/g,
-      (m, name, sep, quote, content) => {
-        const next = decide(name, content);
-        if (next === null) return m;
-        note(`${name}=…`, content, next);
-        return `${name}${sep}${quote}${esc(next)}${quote}`;
-      });
+    const pieces = [];
+    let done = 0;
+    for (const [start, name, content] of sharedAttributeAssignments(out)) {
+      // Inside a value already replaced: whatever it held went with it.
+      if (start < done) continue;
+      const next = decide(name, content);
+      if (next === null) continue;
+      note(`${name}=…`, content, next);
+      // Only the value is ours to change. Everything before it, namespace
+      // prefix included, stays as it was: rebuilding it from the name alone
+      // turned v:PatientName into PatientName, another attribute to a
+      // namespace-aware reader and a duplicate one where the element carried
+      // both.
+      pieces.push(out.slice(done, start), esc(next));
+      done = start + content.length;
+    }
+    pieces.push(out.slice(done));
+    out = pieces.join("");
   }
 
+  // The value is the whole rest of the line, every ";" in it included.
+  // Windows' INI reader takes no inline comment, so "Doe; John", "Doe ; John"
+  // and ";Doe" are each one value; read as value and comment, the scrub kept
+  // "; John", or all of ";Doe", and a second pass read the same comment. Only
+  // the trailing blanks are not the value. A comment line stays one: the key
+  // cannot hold a ";", and a key the table does not name is left as it was.
+  // The key starts with something other than a blank. Had it been allowed to
+  // start with one, a blank-led line without "=" was walked again for every
+  // split of its leading run between indent and key: right-justified numeric
+  // rows scrubbed at about 1 s/MB. Mirror of maps._ini_pattern.
   out = out.replace(
-    /^([ \t]*)([^=\r\n;[<]+?)([ \t]*=[ \t]*)([^\r\n;]*?)([ \t]*(?:;[^\r\n]*)?)$/gm,
+    /^([ \t]*)([^=\r\n;[< \t][^=\r\n;[<]*?)([ \t]*=[ \t]*)([^\r\n]*?)([ \t]*)$/gm,
     (m, indent, name, sep, content, trailer) => {
+      // A quoted value followed by nothing but the rest of a tag is replaced
+      // inside its quotes: on a tag written one attribute per line this pass
+      // sees `    LastName="Doe" />`, and taken whole the quotes, the "/>" and
+      // any attribute behind the first went. Written as the attribute pass
+      // writes it, so a value that pass replaced is left as it is. What stays
+      // behind the quotes is read too, never passed through: each attribute
+      // in it goes through the table whether or not the attribute pass ran.
+      // Any other tail is the value going on and is replaced whole. Mirror of
+      // maps._QUOTED_VALUE / maps._TAG_TAIL.
+      const quoted = content.match(/^(["'])((?:(?!\1)[^<\r\n])*)\1/);
+      const tail = quoted && content.slice(quoted[0].length).match(SHARED_TAG_TAIL);
+      if (tail) {
+        const [whole, quote, inner] = quoted;
+        const next = decide(name.trim(), inner);
+        let head = whole;
+        if (next !== null && inner !== esc(next)) {
+          note(name.trim(), inner.trim(), next);
+          head = `${quote}${esc(next)}${quote}`;
+        }
+        const attributes = tail[1].replace(SHARED_TAG_TAIL_ATTRIBUTE,
+          (a, before, attr, q, current) => {
+            const value = decide(attr, current);
+            if (value === null || current === esc(value)) return a;
+            note(`${attr}=…`, current, value);
+            return `${before}${q}${esc(value)}${q}`;
+          });
+        return `${indent}${name}${sep}${head}${attributes}${tail[3]}${trailer}`;
+      }
       const next = decide(name.trim(), content);
       if (next === null) return m;
       note(name.trim(), String(content).trim(), next);
@@ -1705,7 +2113,7 @@ function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
   for (const raw of (opts.customPatterns || "").split(/\r?\n/)) {
     const pattern = raw.trim();
     if (!pattern) continue;
-    const re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    const re = matcher(pattern);
     let count = 0;
     out = out.replace(re, () => { count++; return "[REDACTED]"; });
     if (count) note("(custom)", pattern, "[REDACTED]", count);
@@ -1742,6 +2150,27 @@ function sharedKnownResidueLines(items) {
   return [fill("anon.residue.title"),
           ...items.map(item => fill(`anon.residue.${item.id}`, item.names)),
           fill("anon.residue.action")];
+}
+
+// What an operator typed and nothing here read, as one line for the result —
+// from the German catalogue strings inlined as FREETEXT_TEXT. Mirror of
+// classic._note_free_text: the busiest six fields, then how many more, because
+// a setting repeated five hundred times would otherwise bury the field that
+// holds a sentence. Empty when nothing was kept.
+function sharedFreeTextLine(kept) {
+  if (!kept || !kept.size) return "";
+  const fill = (key, values) => {
+    const text = FREETEXT_TEXT[key] !== undefined ? FREETEXT_TEXT[key] : `⟦${key}⟧`;
+    return Object.entries(values).reduce(
+      (out, [name, value]) => out.split(`{${name}}`).join(String(value)), text);
+  };
+  // Stable, so fields with equal counts keep the order they were met in, as
+  // Python's sorted() keeps them.
+  const top = [...kept].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  let fields = top.map(([field, count]) => `${count} × <${field}>`).join(", ");
+  const more = kept.size - top.length;
+  if (more > 0) fields += " " + fill("anon.freetext.more", { count: more });
+  return fill("anon.freetext.kept", { fields });
 }
 
 /* PROFILES:END */
@@ -1851,6 +2280,26 @@ function setText(parent, tag, value) {
   }
 }
 
+/* Comments, processing instructions and the DOCTYPE go, in both XML
+ * scrubbers. ElementTree drops all three on parse, so the application never
+ * writes one back; a DOM keeps them, and an export tool's "exported for Last,
+ * First [MRN]" note — as a comment, as a <?export-note …?>, or as a DTD named
+ * after the patient — was serialised verbatim into a copy the page reported
+ * clean. Started at the document, so what sits before the root element goes
+ * too. The XML declaration is not a node in the DOM and is not touched. */
+const DROPPED_NODE_TYPES = new Set([
+  7,      // processing instruction
+  8,      // comment
+  10,     // document type, a child of the document only
+]);
+
+function dropNonElementMarkup(node) {
+  for (const child of Array.from(node.childNodes || [])) {
+    if (DROPPED_NODE_TYPES.has(child.nodeType)) node.removeChild(child);
+    else if (child.nodeType === 1) dropNonElementMarkup(child);
+  }
+}
+
 // --- Boston Scientific LabSystem PRO anonymizer ---------------------------
 
 function anonymizeXml(xmlText, last, first, pid) {
@@ -1859,6 +2308,7 @@ function anonymizeXml(xmlText, last, first, pid) {
   if (doc.getElementsByTagName("parsererror").length) {
     throw new Error("XML konnte nicht geparst werden");
   }
+  dropNonElementMarkup(doc);
   const root = doc.documentElement;
   const fullName = `${last}, ${first}`;
   const dirName = `${last}, ${first} [${pid}]`;
@@ -1992,26 +2442,38 @@ function demographicReplacement(name, pseudo) {
   }
 }
 
-function scrubAttributes(el, pseudo) {
+// Keys that are a patient's inside a patient container and anything's
+// elsewhere: a catheter, an amplifier and a protocol each have a Name and an
+// ID. Outside the containers only the unambiguous keys are replaced, or the
+// whole-tree pass below would write the pseudonym over device configuration.
+// Mirror of classic._AMBIGUOUS_KEYS.
+const AMBIGUOUS_KEYS = new Set(["name", "id", "displayname"]);
+
+function scrubAttributes(el, pseudo, inPatient = true) {
   for (const attr of Array.from(el.attributes || [])) {
+    if (!inPatient && AMBIGUOUS_KEYS.has(normKey(attr.name))) continue;
     const repl = demographicReplacement(attr.name, pseudo);
     if (repl !== null) el.setAttribute(attr.name, repl);
   }
 }
 
-function scrubElement(el, pseudo) {
-  scrubAttributes(el, pseudo);
+// `inPatient` says whether `el` lies inside a patient container; it turns true
+// at the first one on the way down.
+function scrubElement(el, pseudo, inPatient = true) {
+  inPatient = inPatient || PATIENT_CONTAINERS.has(normKey(el.localName || el.tagName));
+  scrubAttributes(el, pseudo, inPatient);
   for (let child = el.firstElementChild; child; child = child.nextElementSibling) {
     const tag = normKey(child.localName || child.tagName);
     if (DATA_CONTAINERS.has(tag)) continue;  // never touch signal config
-    const repl = demographicReplacement(child.tagName, pseudo);
+    const repl = !inPatient && AMBIGUOUS_KEYS.has(tag)
+      ? null : demographicReplacement(child.tagName, pseudo);
     const isLeaf = child.firstElementChild === null;
     if (repl !== null && isLeaf) {
       while (child.firstChild) child.removeChild(child.firstChild);
       if (repl !== "") child.appendChild(child.ownerDocument.createTextNode(repl));
-      scrubAttributes(child, pseudo);
+      scrubAttributes(child, pseudo, inPatient);
     } else {
-      scrubElement(child, pseudo);
+      scrubElement(child, pseudo, inPatient);
     }
   }
 }
@@ -2022,6 +2484,7 @@ function anonymizeDemographicsXml(xmlText, last, first, pid) {
   if (doc.getElementsByTagName("parsererror").length) {
     throw new Error("XML konnte nicht geparst werden");
   }
+  dropNonElementMarkup(doc);
   const pseudo = { last, first, pid };
   const root = doc.documentElement;
 
@@ -2039,6 +2502,21 @@ function anonymizeDemographicsXml(xmlText, last, first, pid) {
     }
   }
   for (const c of containers) scrubElement(c, pseudo);
+
+  // And the rest of the tree, with the same rule and the same stop at data
+  // containers, as classic.anonymize_demographics_xml does. The pass above
+  // descends into recognised patient containers only, so a demographic leaf
+  // outside every one of them (a <PatientName> under a <WorkMate> root, a
+  // <PatientID> beside <Patient>) was never visited and the copy was called
+  // "XML anonymisiert" with the name in it. Outside a container the ambiguous
+  // keys are left alone; see AMBIGUOUS_KEYS.
+  scrubElement(root, pseudo, false);
+
+  // A GE or Abbott XML names its files by path too, and the patient directory
+  // in such a path carries the name, the record number and the study date. The
+  // directory itself is renamed on the way out; without this the path inside
+  // kept the original, where classic.anonymize_demographics_xml rewrites it.
+  scrubPaths(root, last, first, pid);
 
   const serializer = new XMLSerializer();
   const body = serializer.serializeToString(doc);
@@ -2100,6 +2578,15 @@ function geInfBaseKey(ku) {
   return ku.split(".", 1)[0];
 }
 
+/* A key as the scrubber compares it: upper case, only letters and digits on
+ * either side of each dot. Mirrors classic._ge_inf_key — compared after
+ * trim() and toUpperCase() alone, LAST_NAME and "Patient Name" were not
+ * LASTNAME and PATIENTNAME, and a file holding them kept the name. */
+function geInfKey(key) {
+  return key.toUpperCase().split(".")
+    .map(part => part.replace(/[^A-Z0-9]/g, "")).join(".");
+}
+
 /* True if any line is a key=value whose key this scrubber acts on.
  * Mirrors classic._looks_like_ge_inf. */
 function geInfKeyRecognized(ku) {
@@ -2108,11 +2595,25 @@ function geInfKeyRecognized(ku) {
       || GE_INI_WIPE_KEYS.has(base) || GE_INI_ID_KEYS.has(base);
 }
 
+/* The lines of a .inf, split where a Windows INI ends a line: at CRLF or LF,
+ * and at a CR alone only in a file that has no LF, where it is the line
+ * ending. Mirror of classic._inf_lines. Split at CRLF and LF alone, a file
+ * whose only line ending is CR was one line here and several to Python:
+ * behind a section header that line started with "[" and the file was
+ * refused, without one the first key took the rest of the file for its value
+ * and wiped it. Like splitlines(), no empty last element for a file that ends
+ * in a line ending; the caller puts that back itself. */
+function geInfLines(text) {
+  const lines = text.split(text.includes("\n") ? /\r?\n/ : /\r/);
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+  return lines;
+}
+
 function looksLikeGeInf(text) {
-  for (const raw of text.split(/\r?\n/)) {
+  for (const raw of geInfLines(text)) {
     const line = raw.trim();
     if (!line.includes("=") || /^[;#[]/.test(line)) continue;
-    if (geInfKeyRecognized(line.split("=", 1)[0].trim().toUpperCase())) return true;
+    if (geInfKeyRecognized(geInfKey(line.split("=", 1)[0]))) return true;
   }
   return false;
 }
@@ -2136,19 +2637,21 @@ function anonymizeGeInf(text, pseudo, newUid) {
    *
    * The rule is the one classic.py uses: this is a GE .inf if any key=value
    * line has a key we act on. Anything else — free text, JSON, binary — has
-   * none and is still refused. */
-  if (!looksLikeGeInf(text)) return null;
-  const nl = text.includes("\r\n") ? "\r\n" : "\n";
-  const lines = text.split(/\r?\n/);
-  // splitlines() in Python yields no trailing empty element; split() does, and
-  // joining it back added a second line ending on every file.
-  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+   * none and is still refused. So is text holding a NUL, as classic.py
+   * refuses it: an INI has none, and its keys only look like keys once the
+   * NULs are thrown away. */
+  if (text.includes("\0") || !looksLikeGeInf(text)) return null;
+  // A file whose only line ending is CR keeps it; see geInfLines.
+  const nl = text.includes("\r\n") ? "\r\n" : text.includes("\n") ? "\n" : "\r";
+  // No trailing empty element: joining it back added a second line ending on
+  // every file.
+  const lines = geInfLines(text);
   let changed = false;
   const out = lines.map(raw => {
     if (!raw.includes("=") || /^\s*[;#]/.test(raw)) return raw;
     const eq = raw.indexOf("=");
     const key = raw.slice(0, eq);
-    const ku = key.trim().toUpperCase();
+    const ku = geInfKey(key);
     const base = geInfBaseKey(ku);
     let newV = null;
     const dotSuffix = ku.includes(".") ? ku.slice(ku.lastIndexOf(".") + 1) : "";
@@ -2171,6 +2674,209 @@ function anonymizeGeInf(text, pseudo, newUid) {
   if (!changed) return null;
   const trailing = /[\r\n]$/.test(text) ? nl : "";
   return out.join(nl) + trailing;
+}
+
+/* A .inf as text, and back into the encoding it arrived in.
+ *
+ * file.text() decodes as UTF-8 and puts U+FFFD where a byte is not UTF-8, and
+ * TextEncoder wrote that back: a Windows .inf in cp1252 lost every umlaut and
+ * dash on the lines this scrubber leaves alone. Strict UTF-8 first; anything
+ * else is read byte for byte as latin-1 and written back the same way, so a
+ * line nobody touched keeps its bytes. What the scrubber writes in is ASCII,
+ * which every one of these encodings can spell.
+ *
+ * A byte-order mark is honoured before any of that. Windows writes an INI that
+ * has to hold Unicode as UTF-16 with a mark, and file.text() honoured that mark
+ * in Chromium and WebKit; strict UTF-8 does not, so such a patient.inf became
+ * text with a NUL between every letter, matched no key, and left the page as
+ * it came in. The mark is taken off here and put back by encodeGeInf, so the
+ * UUID-only study.inf, which is rewritten whole, keeps it too. A file whose
+ * body is not what a UTF-16 mark says is read by the rules above, mark and
+ * all, as classic._read_inf reads it; geInfKey drops the mark's characters
+ * from the first key as classic._ge_inf_key does, so both scrub that key.
+ *
+ * A UTF-8 mark over a body that is not UTF-8 (cp1252 behind an editor that
+ * puts the mark on whatever it saves) is the exception: the body is read as
+ * latin-1 without the mark, and the mark goes back on the way out. Read with
+ * the mark, the first key began with "ï»¿", which trim() and toUpperCase() do
+ * not take off, so a LASTNAME on line 1 of a header-less patient.inf was not
+ * recognised and stayed in a file reported as scrubbed — or, with the other
+ * keys already at their targets, copied with no note at all. classic._read_inf
+ * keeps the mark in the text, but its _ge_inf_key drops everything that is not
+ * a letter or digit, so it scrubs that line; reading the body without the mark
+ * here writes the same bytes it does. */
+const GE_INF_BOMS = [
+  { encoding: "utf-8", bom: [0xef, 0xbb, 0xbf] },
+  { encoding: "utf-16le", bom: [0xff, 0xfe] },
+  { encoding: "utf-16be", bom: [0xfe, 0xff] },
+];
+
+function decodeGeInf(bytes) {
+  for (const { encoding, bom } of GE_INF_BOMS) {
+    if (bytes.length < bom.length || !bom.every((b, i) => bytes[i] === b)) continue;
+    const body = bytes.subarray(bom.length);
+    try {
+      const decoder = new TextDecoder(encoding, { fatal: true, ignoreBOM: true });
+      return { text: decoder.decode(body), encoding, bom: Uint8Array.from(bom) };
+    } catch (e) {
+      if (encoding === "utf-8") {
+        return { text: dicomLatin1(body), encoding: "latin1", bom: Uint8Array.from(bom) };
+      }
+      break;
+    }
+  }
+  try {
+    const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+    return { text: utf8.decode(bytes), encoding: "utf-8", bom: null };
+  } catch (e) {
+    return { text: dicomLatin1(bytes), encoding: "latin1", bom: null };
+  }
+}
+
+function encodeGeInf(text, encoding, bom) {
+  let body;
+  if (encoding === "latin1") body = dicomBytesOf(text);
+  else if (encoding === "utf-16le" || encoding === "utf-16be") {
+    // TextEncoder writes UTF-8 only. charCodeAt gives UTF-16 code units, so a
+    // character outside the BMP comes out as its surrogate pair.
+    const le = encoding === "utf-16le";
+    body = new Uint8Array(text.length * 2);
+    for (let i = 0; i < text.length; i++) {
+      const unit = text.charCodeAt(i);
+      body[2 * i + (le ? 0 : 1)] = unit & 0xff;
+      body[2 * i + (le ? 1 : 0)] = unit >> 8;
+    }
+  } else body = new TextEncoder().encode(text);
+  if (!bom) return body;
+  const out = new Uint8Array(bom.length + body.length);
+  out.set(bom, 0);
+  out.set(body, bom.length);
+  return out;
+}
+
+/* Why anonymizeGeInf returned null: a GE .inf with nothing left to change, or
+ * a file it does not recognise as one. Python's anonymize_ge_inf tells the two
+ * apart ("clean" / "unrecognized") and warns about the second only; a warning
+ * on a clean file teaches people to skip the real ones.
+ *
+ * Text holding a NUL is neither, as classic._is_ge_inf has it: geInfKey drops
+ * everything that is not a letter or digit, so the keys of a UTF-16 .inf
+ * without a mark, read as UTF-8, look like keys again here, and that file was
+ * called clean and copied with the name in it. */
+function geInfIsClean(text, newUid) {
+  if (text.includes("\0")) return false;
+  return looksLikeGeInf(text)
+      || text.trim().toLowerCase() === String(newUid).toLowerCase();
+}
+
+const GE_INF_UNRECOGNISED = ".inf ohne bekannte GE-Felder";
+
+/* A .inf line the scrubber read differently from how it may be read.
+ *
+ * In a file that has an LF anonymizeGeInf splits at CRLF and LF only
+ * (geInfLines) and reads a line by its first key, so in
+ * "ARCHIVEVERSION=1\rLASTNAME=Mustermann" the name was the value of a key it
+ * keeps: the file went out with it under "INI anonymisiert (GE)", or,
+ * with nothing else left to change, was copied with no word at all.
+ * classic._verify_ge_inf_clean fails the run on the same file, so the two
+ * gave opposite verdicts. The scrubber is left as it is, as on the Python
+ * side; the check is what fails closed. Mirror of its line checks, over the
+ * text that is written, split as the scrubber and classic._inf_lines split it:
+ *
+ * - a line that still holds a CR is line structure this cannot read, whatever
+ *   follows the CR: an MRN there holds a number nobody can tell from the
+ *   pseudonym;
+ * - behind one of the other characters str.splitlines() ends a line at — in a
+ *   value far more often a cp1252 ellipsis read as latin-1 (U+0085) than a
+ *   line end — only a key the scrubber acts on, with a value, counts;
+ * - in a line the scrubber kept as it was, such a key anywhere, with a value
+ *   (geInfKeyInside).
+ *
+ * One note per line, naming the line and the key and never the value, which
+ * would put the identifier into the log. */
+const GE_INF_UNREAD = ".inf (GE) mit Zeilen, die hier nicht gelesen werden können";
+const GE_INF_OTHER_BREAKS = /[\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]/;
+// What Python's str.strip() takes off: its whitespace, which is not quite
+// JavaScript's (\x1c-\x1f and U+0085 are in it, U+FEFF is not).
+const PY_SPACE = "[\\t\\n\\x0b\\x0c\\r\\x1c-\\x1f \\x85\\xa0\\u1680\\u2000-\\u200a" +
+  "\\u2028\\u2029\\u202f\\u205f\\u3000]";
+const PY_STRIP = new RegExp(`^${PY_SPACE}+|${PY_SPACE}+$`, "g");
+
+// The longest key the scrubber acts on, as geInfKey spells it. No run of
+// words longer than this can spell one. As classic._GE_INF_LONGEST_KEY.
+const GE_INF_LONGEST_KEY = Math.max(
+  ...[...GE_INI_WIPE_KEYS, ...GE_INI_ID_KEYS, ...GE_INI_STRUCT_KEYS].map(k => k.length));
+
+/* Whether anonymizeGeInf writes this line back as it found it: no "=", a
+ * comment, or a first key it does not act on. Every line with a key it acts
+ * on it rewrites whole. Mirror of classic._ge_inf_kept; each side reads a
+ * comment the way its own scrubber does. */
+function geInfKept(raw) {
+  if (!raw.includes("=") || /^\s*[;#]/.test(raw)) return true;
+  return !geInfKeyRecognized(geInfKey(raw.slice(0, raw.indexOf("="))));
+}
+
+/* A key the scrubber acts on that stands anywhere in a line with a value
+ * behind its "=", as geInfKey spells it; null if there is none. Mirror of
+ * classic._ge_inf_key_inside.
+ *
+ * The scrubber reads a line by everything before its first "=" and keeps a
+ * line whose key that does not spell. So the name stayed, under
+ * "INI anonymisiert (GE)", wherever something stood in front of its key —
+ * "X LASTNAME=", "-[DEMO] LASTNAME=", a header behind a zero-width space, a
+ * soft hyphen or a byte-order mark in the middle of the file, a comment
+ * (";LASTNAME=") — or an index after it ("LASTNAME[1]="). The check before
+ * this one read a "[" at the start of the line and nothing else, so it
+ * caught the shapes it was written for and no others; and this page has no
+ * field sweep behind it, as Python's run has. No shape is assumed: the text
+ * before each "=", back to the "=" before it, is cut into words wherever
+ * geInfKey drops a character and wherever letters meet digits, and every
+ * run of consecutive words is asked whether it spells a key. Blanks alone,
+ * as Python strips them, are no value. */
+function geInfKeyInside(line) {
+  let before = 0;
+  for (let at = line.indexOf("="); at >= 0; before = at + 1, at = line.indexOf("=", before)) {
+    if (!line.slice(at + 1).replace(PY_STRIP, "")) continue;
+    const words = line.slice(before, at).toUpperCase().match(/[A-Z]+|[0-9]+/g) || [];
+    for (let first = 0; first < words.length; first++) {
+      let key = "";
+      for (const word of words.slice(first)) {
+        key += word;
+        if (key.length > GE_INF_LONGEST_KEY) break;
+        if (geInfKeyRecognized(key)) return key;
+      }
+    }
+  }
+  return null;
+}
+
+function geInfUnreadLines(text) {
+  const notes = [];
+  geInfLines(text).forEach((raw, i) => {
+    const named = notes.length;
+    if (raw.includes("\r")) {
+      notes.push(`Zeile ${i + 1}: Wagenrücklauf mitten in der Zeile — was ` +
+                 "dahinter steht, wurde nicht gelesen");
+      return;
+    }
+    const pieces = raw.split(GE_INF_OTHER_BREAKS);
+    for (const piece of pieces.slice(1)) {
+      const eq = piece.indexOf("=");
+      if (eq < 0) continue;
+      const ku = geInfKey(piece.slice(0, eq));
+      if (piece.slice(eq + 1).replace(PY_STRIP, "") && geInfKeyRecognized(ku)) {
+        notes.push(`Zeile ${i + 1}: ${geInfBaseKey(ku)} hinter einem Zeichen, ` +
+                   "an dem keine Zeile endet — nicht gelesen");
+      }
+    }
+    // One note a line is enough to fail the file and point at it.
+    const key = notes.length === named && geInfKept(raw) ? geInfKeyInside(raw) : null;
+    if (key !== null) {
+      notes.push(`Zeile ${i + 1}: ${key} in einer unverändert gelassenen Zeile, ` +
+                 "dort nicht als Feld erkannt — nicht gelesen");
+    }
+  });
+  return notes;
 }
 
 // --- Vendor content sniffing ----------------------------------------------
@@ -2199,11 +2905,19 @@ async function dirMatchesSignatures(fileList, profile) {
 
 // --- Lab system profiles --------------------------------------------------
 
+/* Beta or not is the profile's to say (profiles/*.json, inlined above), not
+ * this table's. Typed in here it went stale: the page went on calling GE
+ * "Beta … experimentell" after its profile had been checked against a real
+ * export, right under a detection report that read the profile. */
+const isBeta = profileId => PROFILES[profileId].verified !== true;
+const labelFor = (profileId, label) => (isBeta(profileId) ? `${label} (Beta)` : label);
+
 const LAB_SYSTEMS = {
   bostonScientific: {
     id: "bostonScientific",
-    label: "Boston Scientific LabSystem PRO",
-    beta: false,
+    profile: "boston",
+    label: labelFor("boston", "Boston Scientific LabSystem PRO"),
+    beta: isBeta("boston"),
     description:
       "Erkennt Patientenverzeichnisse anhand der Datei „PatientData " +
       "Export.xml“. Name, ID, Geburtsdatum und Befunde werden durch " +
@@ -2232,20 +2946,22 @@ const LAB_SYSTEMS = {
 
   geCardioLab: {
     id: "geCardioLab",
-    label: "GE CardioLab / Labsystem (Beta)",
-    beta: true,
+    profile: "ge",
+    label: labelFor("ge", "GE CardioLab / Labsystem"),
+    beta: isBeta("ge"),
     description:
-      "Erkennt Studienordner anhand typischer GE-Dateien (Study.xml, " +
-      "Patient.xml u. a.) sowie anhand von Inhalts-Signaturen. " +
-      "Patientendaten-Felder in allen XML-Dateien des Ordners werden " +
-      "ersetzt. Experimentell – Ergebnis bitte prüfen.",
-    betaHtml:
-      "<strong>GE CardioLab (Beta):</strong> Die Unterstützung für " +
-      "GE-Systeme ist experimentell. Patientendaten-Felder werden in " +
-      "<em>allen</em> XML-Dateien eines erkannten Studienordners ersetzt. " +
-      "Da der GE-Export nicht öffentlich dokumentiert ist, prüfen Sie das " +
-      "Ergebnis vor der Weitergabe sorgfältig auf verbliebene " +
-      "Patientendaten (auch in Binärdateien).",
+      "Erkennt Studienordner anhand typischer GE-Dateien (patient.inf, " +
+      "Study.xml u. a.) sowie anhand von Inhalts-Signaturen. Die " +
+      "patient.inf wird anonymisiert, Patientendaten-Felder in allen " +
+      "XML-Dateien des Ordners werden ersetzt.",
+    // What the check against a real export covered and what it left open,
+    // as profiles/ge.json records it: that export held no XML files.
+    noticeHtml:
+      "<strong>GE CardioLab:</strong> Gegen einen echten CardioLab-Export " +
+      "geprüft ist die Datei <code>patient.inf</code>. Die XML-Seite blieb " +
+      "ungeprüft, weil jener Export keine XML-Dateien enthielt. Enthält " +
+      "Ihr Export welche, prüfen Sie diese vor der Weitergabe auf " +
+      "verbliebene Patientendaten.",
     markerFiles: [
       "Study.xml", "StudyInfo.xml", "Patient.xml", "PatientInfo.xml",
       "PatientData.xml", "Demographics.xml", "Exam.xml", "ExamInfo.xml",
@@ -2272,12 +2988,33 @@ const LAB_SYSTEMS = {
         };
       }
       if (lower.endsWith(".inf")) {
-        const text = await file.text();
+        const { text, encoding, bom } =
+          decodeGeInf(new Uint8Array(await file.arrayBuffer()));
         ctx.geNewUid = ctx.geNewUid || newUuid();
         const anon = anonymizeGeInf(text, pseudo, ctx.geNewUid);
+        if (anon === null && !geInfIsClean(text, ctx.geNewUid)) {
+          // Copied as it came, as classic.py leaves it, and said so: a .inf
+          // in a patient folder is where GE keeps the demographics, and one
+          // this page cannot read went out unchanged under "Fertig".
+          return {
+            data: file,
+            note: `${GE_INF_UNRECOGNISED} — NICHT anonymisiert`,
+            unanonymisable: GE_INF_UNRECOGNISED,
+          };
+        }
+        // Asked of both exits: with nothing left to change, a name behind a
+        // stray CR left the page without a word.
+        const unread = geInfUnreadLines(anon === null ? text : anon);
+        if (unread.length) {
+          return {
+            data: anon === null ? file : encodeGeInf(anon, encoding, bom),
+            note: `${GE_INF_UNREAD}: ${unread.join("; ")} — NICHT anonymisiert`,
+            unanonymisable: GE_INF_UNREAD,
+          };
+        }
         if (anon === null) return null;
         return {
-          data: new TextEncoder().encode(anon),
+          data: encodeGeInf(anon, encoding, bom),
           note: "INI anonymisiert (GE)",
         };
       }
@@ -2287,14 +3024,15 @@ const LAB_SYSTEMS = {
 
   abbottClaris: {
     id: "abbottClaris",
-    label: "Abbott EP-WorkMate Claris (Beta)",
-    beta: true,
+    profile: "abbott",
+    label: labelFor("abbott", "Abbott EP-WorkMate Claris"),
+    beta: isBeta("abbott"),
     description:
       "Erkennt Studienordner anhand typischer Abbott-Dateien sowie " +
       "anhand von Inhalts-Signaturen (z. B. „WorkMate“, „Claris“). " +
       "Patientendaten-Felder in allen XML-Dateien des Ordners werden " +
       "ersetzt. Experimentell – Ergebnis bitte prüfen.",
-    betaHtml:
+    noticeHtml:
       "<strong>Abbott EP-WorkMate Claris (Beta):</strong> Die " +
       "Unterstützung für Abbott-Systeme ist experimentell. Studienordner " +
       "werden anhand von Markierungsdateien und Inhalts-Signaturen " +
@@ -2349,6 +3087,10 @@ const LAB_SYSTEMS = {
 let _activeProfile = LAB_SYSTEMS.bostonScientific;
 let _selectedFiles = [];
 let _plan = null;
+// Bumped by every rebuild. buildPlan awaits file reads, so two rebuilds in
+// flight finish in either order — and the stale one, the previous folder under
+// the newly chosen lab system, finished last and became the plan written.
+let _planGeneration = 0;
 
 function isExcluded(relPath, profile) {
   const parts = relPath.split("/");
@@ -2382,7 +3124,12 @@ async function buildPlan(files, profile) {
   }
 
   const subdirMap = new Map();
-  const outRoot = rootIsPatient ? "Anonymized" : `${rootName}_anon`;
+  // Never after the folder picked: whoever collected the exports often named
+  // it after the patient, and "<Ordner>_anon" carried that name into the ZIP's
+  // file name, every entry in it and the folder written. The patient
+  // directories below are pseudonymised for the same reason. The application
+  // derives nothing either; its output folder is the one the user names.
+  const outRoot = "Anonymized";
 
   if (rootIsPatient) {
     subdirMap.set(rootName, files.map(f => ({
@@ -2429,8 +3176,31 @@ async function buildPlan(files, profile) {
     profile, rootName, outRoot,
     subdirMap, patientDirs, dirRename, pseudonymMap, sortedSubs,
     rootIsPatient,
+    // Single files or a drop carry no folder path, and patient directories
+    // are recognised by nothing else.
+    withoutFolder: files.some(f => !f.webkitRelativePath),
     dirCtx: new Map(),
   };
+}
+
+// Why this plan must not be written, or null. Without a patient directory
+// every file went out unchanged under "<Ordner>_anon" and the run said
+// "Fertig" — a copy, not an anonymised one. The application refuses the same
+// case (classic.run_anonymization: "no patient directory was found").
+function planRefusal(plan) {
+  if (plan.withoutFolder) {
+    return "Nichts anonymisiert: die Dateien kamen ohne ihren Ordner an. " +
+      "Patientenverzeichnisse werden an der Ordnerstruktur erkannt — bitte " +
+      "den Ordner selbst wählen, nicht einzelne Dateien.";
+  }
+  if (plan.patientDirs.size === 0) {
+    return "Nichts anonymisiert: kein Patientenverzeichnis erkannt — keine " +
+      "Markierungsdatei des gewählten Lab-Systems direkt im gewählten Ordner " +
+      "oder in einem seiner Unterordner. Eine Kopie wäre unverändert. Bitte " +
+      "den Ordner wählen, der die Patientenverzeichnisse enthält (z. B. " +
+      "Backup/), oder ein Patientenverzeichnis selbst.";
+  }
+  return null;
 }
 
 // Dateiarten, die dieses Werkzeug nicht anonymisieren kann und die trotzdem
@@ -2517,19 +3287,220 @@ function dicomBytesOf(text) {
 const TS_IMPLICIT_LE = "1.2.840.10008.1.2";
 const TS_EXPLICIT_LE = "1.2.840.10008.1.2.1";
 const TS_EXPLICIT_BE = "1.2.840.10008.1.2.2";
+// Deflated Explicit VR LE: hinter der Meta-Gruppe steht ein zlib-Strom. Die
+// Kennungen sind in der Datei, komprimiert — und kein einziger Element-Kopf.
+const TS_DEFLATED_LE = "1.2.840.10008.1.2.1.99";
 
-const DICOM_LONG_VR = new Set(["OB", "OW", "OF", "SQ", "UT", "UN"]);
+// Jede VR, deren Explicit-VR-Kopf zwei reservierte Bytes und eine 32-Bit-Länge
+// trägt (PS3.5 §7.1.2) — nicht nur die sechs, die der Walker zuerst kannte.
+// Eine hier fehlende VR wird mit einer 16-Bit-Länge aus ihren reservierten
+// Null-Bytes gelesen: der Walker gerät aus dem Tritt, findet danach kein Ziel
+// mehr und meldet „0 Felder" über einer Datei, in der der Name noch steht.
+// Dieselben dreizehn wie velocity._LONG_VR; der Konformanztest hält beide fest.
+const DICOM_LONG_VR = new Set(["OB", "OD", "OF", "OL", "OV", "OW", "SQ", "SV",
+                               "UC", "UN", "UR", "UT", "UV"]);
 
 // Bei Implicit VR steht die VR nicht in der Datei. Für die Tags, die hier
 // überhaupt angefasst werden, ist sie bekannt.
 const DICOM_IMPLICIT_VR = new Map([
   [0x00080020, "DA"], [0x00080021, "DA"], [0x00080022, "DA"], [0x00080023, "DA"],
+  // The rest of the profile's date_tags. Read as the LO default, a time of
+  // day would be overwritten with the pseudonym instead of 000000.
+  [0x00080012, "DA"], [0x00080013, "TM"], [0x00080030, "TM"], [0x00080031, "TM"],
+  [0x00080032, "TM"], [0x00080033, "TM"], [0x00181200, "DA"], [0x00400002, "DA"],
+  [0x00400003, "TM"], [0x00400244, "DA"], [0x00400245, "TM"],
   [0x00100030, "DA"], [0x00100032, "TM"], [0x00100040, "CS"], [0x00102160, "SH"],
   [0x00100020, "LO"], [0x00101000, "LO"], [0x00101040, "LO"], [0x00102154, "SH"],
-  [0x00104000, "LT"],
+  [0x00104000, "LT"], [0x00101010, "AS"],
 ]);
 
 function dicomTagKey(group, element) { return (group << 16) | element; }
+
+// Die VRs, die Text tragen. Ein privates Element einer davon sagt, dass es Text
+// ist, nicht wessen: das Etikett des Herstellers, oder der überweisende Arzt in
+// einem Feld des Herstellers. PN fehlt hier, weil jedes PN ersetzt wird, gleich
+// wem das Tag gehört. Dieselbe Liste wie dicom._TEXT_VR.
+const DICOM_TEXT_VR = new Set(["AE", "CS", "LO", "LT", "SH", "ST", "UC", "UR", "UT"]);
+
+// Bytes that can hold text all the same: a vendor writes its own record, or a
+// plain name, into an OB or an OW. Most of what they hold is binary, so they
+// are asked the question an element of unknown type is asked in Python
+// (dicomMayBeAName), not the one a text VR is. Left out of both, a private OB
+// or OW holding "Mueller^Hans" was called clean here as in Python. All six of
+// bytes: an OF, OD, OL or OV holding one passed after OB and OW no longer did.
+// And SV and UV, eight bytes a value, left out of the six the same way. The
+// same list as dicom._BINARY_VR.
+const DICOM_BINARY_VR = new Set(["OB", "OD", "OF", "OL", "OV", "OW", "SV", "UV"]);
+
+// The characters a value of each of these types may hold (PS3.5 Table 6.2-1),
+// with the backslash between values; "." in a DA and ":" in a TM are the forms
+// before DICOM 3.0, "-" a range. Neither text nor bytes, so a private DS, IS,
+// UI, AS, DA, DT or TM holding a name passed here as in Python. A value with
+// any other character is not of its type and is reported whatever it holds,
+// as an element of no stated type is. Tested without the padding (NUL and
+// blanks at either end). The same sets as dicom._CHARSET_VR.
+const DICOM_CHARSET_VR = new Map([
+  ["AS", /^[0-9DWMY\\]*$/],
+  ["DA", /^[0-9.\-\\]*$/],
+  ["DS", /^[0-9+\-.eE \\]*$/],
+  ["DT", /^[0-9+\-. \\]*$/],
+  ["IS", /^[0-9+\- \\]*$/],
+  ["TM", /^[0-9.:\- \\]*$/],
+  ["UI", /^[0-9.\\\x00]*$/],
+]);
+
+// Whether a value outside its type's character set: see DICOM_CHARSET_VR.
+function dicomNotInCharset(vr, raw) {
+  let from = 0, to = raw.length;
+  while (from < to && (raw[from] === 0x00 || raw[from] === 0x20)) from++;
+  while (to > from && (raw[to - 1] === 0x00 || raw[to - 1] === 0x20)) to--;
+  return !DICOM_CHARSET_VR.get(vr).test(dicomLatin1(raw.subarray(from, to)));
+}
+
+// Windows-1252 for 0x80-0x9F (WHATWG index-windows-1252); null where Python's
+// cp1252 codec has no character and fails, as dicom._may_be_a_name then
+// tries the next reading.
+const DICOM_CP1252_80_9F = [
+  0x20ac, null, 0x201a, 0x0192, 0x201e, 0x2026, 0x2020, 0x2021,
+  0x02c6, 0x2030, 0x0160, 0x2039, 0x0152, null, 0x017d, null,
+  null, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014,
+  0x02dc, 0x2122, 0x0161, 0x203a, 0x0153, null, 0x017e, 0x0178,
+];
+
+// Control characters a text value may hold: TAB, LF, FF and CR separate
+// lines, ESC opens every ISO 2022 code extension. As dicom._TEXT_CONTROLS.
+const DICOM_TEXT_CONTROLS = new Set(["\t", "\n", "\f", "\r", "\x1b"]);
+
+// Only characters a text value can hold, two of them letters or more. Python
+// takes what is printable, the controls above, blanks above 0x9F and format
+// characters (Cf); what that leaves out is a control (Cc), a surrogate (Cs),
+// a private-use (Co) or an unassigned (Cn) character.
+function dicomReadsAsText(text) {
+  let letters = 0;
+  for (const ch of text) {
+    if (/\p{L}/u.test(ch)) letters++;
+    else if (/[\p{Cc}\p{Cs}\p{Co}\p{Cn}]/u.test(ch) && !DICOM_TEXT_CONTROLS.has(ch)) {
+      return false;
+    }
+  }
+  return letters >= 2;
+}
+
+// Whether bytes of no reliable type could be text with a name: read as
+// UTF-8, as Windows-1252 or as Latin-1, only text characters and two letters
+// or more; failing that, the rule that reads no character set (two ASCII
+// letters or more, half the bytes ASCII letters, no byte below 0x20 and no
+// DEL). Mirror of dicom._may_be_a_name without the file's own character set,
+// as the path without pydicom calls it. NUL and blanks at either end are
+// padding, as dicom._private_values strips them.
+function dicomMayBeAName(raw) {
+  let from = 0, to = raw.length;
+  while (from < to && (raw[from] === 0x00 || raw[from] === 0x20)) from++;
+  while (to > from && (raw[to - 1] === 0x00 || raw[to - 1] === 0x20)) to--;
+  const body = raw.subarray(from, to);
+  // A control byte that text does not use is a control in every reading and
+  // fails the rule without one: settled before a vendor's megabyte of binary
+  // is decoded three times over.
+  for (const b of body) {
+    if ((b < 0x20 && b !== 0x09 && b !== 0x0a && b !== 0x0c && b !== 0x0d
+         && b !== 0x1b) || b === 0x7f) return false;
+  }
+  try {
+    const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(body);
+    if (dicomReadsAsText(utf8)) return true;
+  } catch (e) { /* not UTF-8 */ }
+  let cp1252 = "";
+  for (const b of body) {
+    const cp = b >= 0x80 && b <= 0x9f ? DICOM_CP1252_80_9F[b - 0x80] : b;
+    if (cp === null) { cp1252 = null; break; }
+    cp1252 += String.fromCharCode(cp);
+  }
+  if (cp1252 !== null && dicomReadsAsText(cp1252)) return true;
+  if (dicomReadsAsText(dicomLatin1(body))) return true;
+  let letters = 0;
+  for (const b of body) {
+    if (b < 0x20 || b === 0x7f) return false;
+    if ((b >= 0x41 && b <= 0x5a) || (b >= 0x61 && b <= 0x7a)) letters++;
+  }
+  return letters >= 2 && 2 * letters >= body.length;
+}
+
+// Numbers, and the bytes one value takes. None of the rules above asked them,
+// so a private US, SS, UL, SL, FL, FD or AT holding "Mustermann^Erika" went
+// out clean here as in Python. Any bit pattern is a number, and
+// dicomMayBeAName reports a quarter of random US and three in five FL, so
+// they are asked dicomNumberHoldsAName; a length that is no whole number of
+// values is not of the type at all (pydicom refuses to read one). The same
+// table as dicom._NUMBER_VR.
+const DICOM_NUMBER_VR = new Map([
+  ["AT", 4], ["FD", 8], ["FL", 4], ["SL", 4], ["SS", 2], ["UL", 4], ["US", 2],
+]);
+
+// Every VR PS3.5 defines. A private element of any other is reported whatever
+// it holds: "ZZ" with a name in it passed here, as without pydicom, while
+// pydicom refused the file. As dicom._KNOWN_VR.
+const DICOM_KNOWN_VR = new Set([
+  ...DICOM_TEXT_VR, ...DICOM_BINARY_VR, ...DICOM_CHARSET_VR.keys(),
+  ...DICOM_NUMBER_VR.keys(), "PN", "SQ", "UN",
+]);
+
+// The marks between the words of a name, and a word's cased letters as U and
+// l: all capitals, none, or one or two capitalised parts (McDonald).
+const DICOM_NAME_SPLIT = /[\^ \-'.,]/;
+function dicomNameCased(word) {
+  let shape = "";
+  for (const ch of word) {
+    if (/[\p{Lu}\p{Lt}]/u.test(ch)) shape += "U";
+    else if (/\p{Ll}/u.test(ch)) shape += "l";
+  }
+  return /^(?:U*|l*|Ul+(?:Ul+)?)$/.test(shape);
+}
+
+// Whether the bytes of a private number, without padding, spell a name: read
+// as UTF-8, or as Latin-1 where that fails, nothing but letters and name
+// marks, five letters or more, every word cased as a name is, and as Latin-1
+// two letters in three ASCII ones. Mirror of dicom._number_holds_a_name,
+// which says what it does not report.
+function dicomNumberHoldsAName(body) {
+  let text, eightBit = false;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(body);
+  } catch (e) {
+    text = dicomLatin1(body);
+    eightBit = true;
+  }
+  let letters = 0, ascii = 0, chars = 0;
+  for (const ch of text) {
+    chars++;
+    if (/\p{L}/u.test(ch)) {
+      letters++;
+      if (/[A-Za-z]/.test(ch)) ascii++;
+    } else if (!DICOM_NAME_SPLIT.test(ch)) {
+      return false;
+    }
+  }
+  if (letters < 5 || (eightBit && 3 * ascii < 2 * chars)) return false;
+  return text.split(DICOM_NAME_SPLIT).every(dicomNameCased);
+}
+
+// Whether a private number is not what its type says: no whole number of
+// values, or bytes that spell a name. As dicom._not_its_type for _NUMBER_VR.
+function dicomNumberNotItsType(vr, raw) {
+  if (raw.length % DICOM_NUMBER_VR.get(vr)) return true;
+  let from = 0, to = raw.length;
+  while (from < to && (raw[from] === 0x00 || raw[from] === 0x20)) from++;
+  while (to > from && (raw[to - 1] === 0x00 || raw[to - 1] === 0x20)) to--;
+  return dicomNumberHoldsAName(raw.subarray(from, to));
+}
+
+function dicomTagText(group, element) {
+  return `(${group.toString(16).padStart(4, "0")},${element.toString(16).padStart(4, "0")})`;
+}
+
+function dicomShown(tags) {
+  return tags.slice(0, 5).join(", ")
+    + (tags.length > 5 ? ` und ${tags.length - 5} weitere` : "");
+}
 
 // Ein DICOM ist ein DICOM, gleich welches Labsystem den Export geschrieben hat.
 // Die Tag-Liste steht im EnSite-Profil, weil dort die Archiv-Regeln stehen, gilt
@@ -2553,6 +3524,26 @@ function dicomTargets(profile, withDates) {
   return out;
 }
 
+// The whole DICOM step for one file, inside the tested block. processFile used
+// to wire it up itself and handed dicomTargets the archive rules where it reads
+// `profile.archive`: the target map came back empty, every DICOM left the page
+// with "0 Feld(er) ersetzt", and nothing counted it as not anonymised. The
+// conformance test built the right shape by hand and so never saw it.
+function anonymizeDicomFile(bytes, withDates) {
+  const rules = dicomArchiveRules();
+  const targets = dicomTargets({ archive: rules }, withDates);
+  return anonymizeDicomBytes(bytes, (rules && rules.replacement) || "Anonymous",
+                             targets, withDates);
+}
+
+// Ob zwischen `from` und `to` etwas anderes steht als NUL und Leerzeichen.
+function dicomHolds(bytes, from, to) {
+  for (let i = from; i < to; i++) {
+    if (bytes[i] !== 0x00 && bytes[i] !== 0x20) return true;
+  }
+  return false;
+}
+
 function isDicomBytes(bytes) {
   return bytes.length >= 132 && bytes[128] === 0x44 && bytes[129] === 0x49
       && bytes[130] === 0x43 && bytes[131] === 0x4d;      // "DICM"
@@ -2561,6 +3552,14 @@ function isDicomBytes(bytes) {
 // Die File-Meta-Gruppe ist immer Explicit VR LE. Ohne (0002,0010) läuft der
 // Walker bei Implicit VR sofort aus dem Tritt und meldet still "0 Felder" —
 // die Datei sähe sauber aus und wäre es nicht.
+//
+// datasetAt is null where the group length (0002,0000) ends the group
+// somewhere its elements do not end. pydicom reads meta elements until the
+// group number changes; this walker started where the group length said; a
+// reader at the other end may do either. An element header is eight bytes,
+// and a group length eight off made a header of one reading a value of the
+// other: the PatientName hid behind a description only this walker read, and
+// the file was called clean. As velocity.read_dicom_meta.
 function readDicomMeta(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let o = 132, groupEnd = null, ts = null;
@@ -2585,7 +3584,68 @@ function readDicomMeta(bytes) {
     }
     o = start + len;
   }
-  return { transferSyntax: ts, datasetAt: groupEnd === null ? o : groupEnd };
+  return { transferSyntax: ts,
+           datasetAt: groupEnd === null || groupEnd === o ? o : null };
+}
+
+// Whether the element at `at` looks written in explicit VR, as pydicom asks
+// it (filereader._is_implicit_vr): bytes 4 and 5, where an explicit VR stands,
+// both capital letters. null where fewer than six bytes are left, and pydicom
+// keeps the mode it assumed. As velocity.looks_explicit.
+function dicomLooksExplicit(bytes, at) {
+  if (at + 6 > bytes.length) return null;
+  return bytes[at + 4] >= 0x41 && bytes[at + 4] <= 0x5a
+      && bytes[at + 5] >= 0x41 && bytes[at + 5] <= 0x5a;
+}
+
+// How pydicom reads what follows the meta group: { commands, at, explicit } —
+// whether group 0000 command elements open it and look explicit (null if there
+// are none), where the dataset starts behind them (null where a command
+// element cannot be stepped over), and whether its first element looks
+// explicit. pydicom does not take the VR mode from the transfer syntax alone:
+// it reads command elements first, implicit VR unless the first looks
+// explicit, then reads the dataset in the mode its first element looks
+// written in. As velocity.dataset_mode.
+function dicomDatasetMode(bytes, start) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const n = bytes.length;
+  let o = start, commands = null;
+  if (o + 8 <= n && view.getUint16(o, true) === 0x0000) {
+    commands = dicomLooksExplicit(bytes, o);
+    while (o + 8 <= n && view.getUint16(o, true) === 0x0000) {
+      let len, hdr;
+      if (commands) {
+        if (!dicomLooksExplicit(bytes, o)) return { commands, at: null, explicit: null };
+        const vr = String.fromCharCode(bytes[o + 4], bytes[o + 5]);
+        if (DICOM_LONG_VR.has(vr)) {
+          if (o + 12 > n) return { commands, at: null, explicit: null };
+          len = view.getUint32(o + 8, true); hdr = 12;
+        } else {
+          len = view.getUint16(o + 6, true); hdr = 8;
+        }
+      } else {
+        len = view.getUint32(o + 4, true); hdr = 8;
+      }
+      if (len === 0xffffffff || o + hdr + len > n) return { commands, at: null, explicit: null };
+      o += hdr + len;
+    }
+  }
+  return { commands, at: o, explicit: dicomLooksExplicit(bytes, o) };
+}
+
+// Where pydicom reads the dataset at `start` in another VR mode than the walk
+// takes from the transfer syntax: { at, explicit } of the element that decides
+// it (explicit null: command elements that cannot be stepped over), or null.
+// Read in the stated mode, a file written in the other does not always lose
+// the walk its place: Implicit VR reads an explicit "LO" and a length of 0 as
+// 20300 bytes, and a dataset written inside them was one value nobody looked
+// into, while pydicom read the names in it. As velocity.vr_mode_disagreement.
+function dicomVrModeDisagreement(bytes, start, implicit) {
+  const { commands, at, explicit } = dicomDatasetMode(bytes, start);
+  if (at === null) return { at: start, explicit: null };
+  if (commands !== null && commands === implicit) return { at: start, explicit: commands };
+  if (explicit !== null && explicit === implicit) return { at, explicit };
+  return null;
 }
 
 function padReplacement(vr, length, replacement) {
@@ -2594,6 +3654,7 @@ function padReplacement(vr, length, replacement) {
   if (vr === "DA") base = "20000101";
   else if (vr === "TM") base = "000000";
   else if (vr === "CS") base = "O";                // Geschlecht "other"
+  else if (vr === "AS") base = "000Y";             // ein Alter, nie ein Name
   else base = replacement;
   const bytes = dicomBytesOf(base);
   if (bytes.length >= length) return bytes.subarray(0, length);
@@ -2603,13 +3664,44 @@ function padReplacement(vr, length, replacement) {
   return out;
 }
 
+// Wo ein PixelData innerhalb einer Sequenz endet, oder null hinter dem
+// Dateiende. Definierte Länge wird ganz übersprungen; undefinierte ist
+// gekapselt — Items definierter Länge (Offset-Tabelle, Fragmente), die ein
+// Sequenz-Delimiter schließt. Wie eine Sequenz betreten, würden komprimierte
+// Pixel als Element-Köpfe gelesen.
+function dicomPastPixelData(view, n, start, len) {
+  if (len !== 0xffffffff) return start + len <= n ? start + len : null;
+  let o = start;
+  while (o + 8 <= n) {
+    const g = view.getUint16(o, true), e = view.getUint16(o + 2, true);
+    const itemLen = view.getUint32(o + 4, true);
+    if (g === 0xfffe && e === 0xe0dd) return o + 8;
+    if (g !== 0xfffe || e !== 0xe000 || o + 8 + itemLen > n) return null;
+    o += 8 + itemLen;
+  }
+  return null;
+}
+
 // Gibt { changes, notes } zurück und verändert `bytes` an Ort und Stelle.
 function anonymizeDicomBytes(bytes, replacement, targets, withDates) {
   const notes = [];
   if (!isDicomBytes(bytes)) {
     return { changes: 0, notes: ["kein DICM-Magic — NICHT geprüft"] };
   }
+  // Without targets nothing can be replaced, and a walk that then finds
+  // nothing reads as success. A wiring error upstream has to surface here.
+  if (!targets || targets.size === 0) {
+    return { changes: 0, notes: ["keine Zielfelder im Profil — NICHT anonymisiert"] };
+  }
   let { transferSyntax, datasetAt } = readDicomMeta(bytes);
+  if (datasetAt === null) {
+    // Zwei Lesarten, wo der Datensatz beginnt; was hier gefunden würde, wären
+    // die Kennungen nur einer davon.
+    return { changes: 0,
+             notes: ["Gruppenlänge (0002,0000) endet nicht, wo die Meta-Elemente "
+                     + "enden — Beginn des Datensatzes mehrdeutig, NICHT anonymisiert"] };
+  }
+  const assumed = transferSyntax === null;
   if (transferSyntax === null) {
     // Rohes Dataset ohne Meta-Gruppe: Explicit VR LE annehmen, aber sichtbar
     // machen, dass geraten wurde.
@@ -2622,15 +3714,70 @@ function anonymizeDicomBytes(bytes, replacement, targets, withDates) {
     return { changes: 0,
              notes: ["Explicit VR Big Endian wird nicht unterstützt — NICHT anonymisiert"] };
   }
-  const implicit = transferSyntax === TS_IMPLICIT_LE;
+  if (transferSyntax === TS_DEFLATED_LE) {
+    // Beim Namen abgelehnt statt dem Walker überlassen: er läse den zlib-Strom
+    // als Elemente, und ob das laut endet, entschieden die Bytes.
+    return { changes: 0,
+             notes: ["Deflated Explicit VR LE wird nicht unterstützt — NICHT anonymisiert"] };
+  }
+  const implicitFile = transferSyntax === TS_IMPLICIT_LE;
+  const mismatch = dicomVrModeDisagreement(bytes, datasetAt, implicitFile);
+  if (mismatch) {
+    // Refused like Big Endian: read in the stated mode, the file may hand the
+    // walker its whole dataset as one value and come out "0 Felder".
+    notes.push(mismatch.explicit === null
+      ? `bei Byte ${mismatch.at} Command-Elemente (0000,eeee), hinter denen der `
+        + `Datensatz nicht zu finden ist — NICHT anonymisiert`
+      : `bei Byte ${mismatch.at} ein Element in `
+        + `${mismatch.explicit ? "Explicit" : "Implicit"} VR, `
+        + `${assumed ? "angenommen ist" : "die Transfer-Syntax sagt"} `
+        + `${mismatch.explicit ? "Implicit" : "Explicit"} VR — VR-Kodierung `
+        + `uneindeutig, NICHT anonymisiert`);
+    return { changes: 0, notes };
+  }
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const n = bytes.length;
   let o = datasetAt, changes = 0;
+  // Erst am Ende geschrieben: gerät der Walker weiter hinten aus dem Tritt,
+  // darf ein vorher gefundenes Ziel nicht als „1 Feld ersetzt" in der Datei
+  // landen, hinter der niemand mehr lesen konnte.
+  const pending = [];
+  // Kein Element-Kopf mehr: weiterlesen hieße in zufälligen Schritten durch die
+  // Bytes zu laufen, kein Ziel zu finden und die Datei sauber zu melden. Hier
+  // anhalten, nichts schreiben, und es sagen.
+  const lost = (at, what) => {
+    notes.push(`bei Byte ${at} ${what} — Walker aus dem Tritt, NICHT anonymisiert`);
+    return { changes: 0, notes };
+  };
+  // Die Sequenzen, in denen der Walker steht, innerste zuletzt: das Offset, an
+  // dem jede endet — null bei undefinierter Länge, die ihr Delimiter schließt —
+  // und ob ihre Items Implicit VR sind. Nur PixelData außerhalb jeder Sequenz
+  // beendet die Metadaten: eine Icon Image Sequence trägt ihr eigenes
+  // PixelData, und dort anzuhalten ließ jede Kennung dahinter ungelesen — etwa
+  // den ursprünglichen PatientName in Original Attributes (0400,0561) —, ohne
+  // ein Wort im Bericht.
+  const inside = [];
+  // Private Elemente, die ein Name sein können und die nichts hier ändert —
+  // ohne angegebenen Typ (Implicit VR, UN) oder mit einem Text-Typ. Dieselbe
+  // Regel wie dicom._undeclared_private und dicom._private_text in Python:
+  // nicht geändert, aber auch nicht sauber genannt.
+  const untyped = [], privateText = [];
+  // Wo das PixelData auf oberster Ebene endet, sobald der Walker dort anhält.
+  let pixelEnd;
 
   while (o + 8 <= n) {
+    while (inside.length && inside[inside.length - 1].end !== null
+           && o >= inside[inside.length - 1].end) inside.pop();
+    const implicit = inside.length ? inside[inside.length - 1].implicit : implicitFile;
     const g = view.getUint16(o, true), e = view.getUint16(o + 2, true);
-    if (g === 0x7fe0 && e === 0x0010) break;        // ab PixelData keine PII
-    if (g === 0xfffe) { o += 8; continue; }         // Item / Delimiter
+    const pixelData = g === 0x7fe0 && e === 0x0010;
+    if (g === 0xfffe) {                             // Item / Delimiter
+      // Der Sequenz-Delimiter schließt die innerste Sequenz undefinierter
+      // Länge und jede definierte darin, die ihr Ende nicht erreicht hat.
+      if (e === 0xe0dd) { while (inside.length && inside.pop().end !== null) { /* weiter */ } }
+      o += 8;
+      continue;
+    }
     let vr, len, hdr, isSeq;
     if (implicit) {
       len = view.getUint32(o + 4, true);
@@ -2644,8 +3791,12 @@ function anonymizeDicomBytes(bytes, replacement, targets, withDates) {
       }
     } else {
       vr = String.fromCharCode(bytes[o + 4], bytes[o + 5]);
+      if (!/^[A-Z]{2}$/.test(vr)) {
+        const hex = ((bytes[o + 4] << 8) | bytes[o + 5]).toString(16).padStart(4, "0");
+        return lost(o, `keine VR (${hex})`);
+      }
       if (DICOM_LONG_VR.has(vr)) {
-        if (o + 12 > n) break;
+        if (o + 12 > n) return lost(o, "Elementkopf über das Dateiende");
         len = view.getUint32(o + 8, true); hdr = 12;
       } else {
         len = view.getUint16(o + 6, true); hdr = 8;
@@ -2653,21 +3804,94 @@ function anonymizeDicomBytes(bytes, replacement, targets, withDates) {
       isSeq = vr === "SQ" || len === 0xffffffff;
     }
     const start = o + hdr;
-    if (isSeq) { o = start; continue; }   // hineinlaufen, nicht überspringen
-    if (start + len > n) break;
+    if (pixelData) {
+      const past = dicomPastPixelData(view, n, start, len);
+      if (!inside.length) {
+        // Auf oberster Ebene enden hier die Metadaten für diesen Walker, wie
+        // für den in velocity.py. Die Python-Prüfung liest bis zum Dateiende,
+        // und der Python-Scrub ersetzt einen Namen dahinter; dieser hier sagt,
+        // dass dahinter etwas steht, statt die Datei sauber zu nennen. So hält
+        // es tests/conformance/test_dicom_check_conformance.py fest
+        // (PAST_PIXEL_DATA).
+        pixelEnd = past;
+        break;
+      }
+      // Verschachtelt, also Pixel statt Items: überspringen und weiterlesen.
+      if (past === null) return lost(o, "PixelData über das Dateiende");
+      o = past;
+      continue;
+    }
+    if (isSeq) {                          // hineinlaufen, nicht überspringen
+      // UN mit undefinierter Länge ist eine Sequenz, deren Items Implicit VR
+      // sind, gleich welche Transfer-Syntax (PS3.5 §6.2.2). Explizit gelesen
+      // hat ihr erstes Element keine VR, und der Walker verliert den Faden.
+      inside.push({ end: len === 0xffffffff ? null : start + len,
+                    implicit: implicit || vr === "UN" });
+      o = start;
+      continue;
+    }
+    if (start + len > n) return lost(o, `Länge ${len} über das Dateiende`);
     const key = dicomTagKey(g, e);
-    if (targets.has(key) && len > 0) {
+    // Jedes Element mit VR PN, gelistet oder nicht: ein privates Tag des
+    // Herstellers mit dem überweisenden Arzt ist PN und steht in keiner Liste —
+    // derselbe Schwung wie im pydicom-Pfad. Bei Implicit VR sagt die Datei
+    // nicht, was PN ist; dort bleibt die Liste des Profils, jedes PN des
+    // DICOM-Wörterbuchs.
+    if ((targets.has(key) || vr === "PN") && len > 0) {
       const repl = padReplacement(vr, len, replacement);
       if (repl) {
         let differs = false;
         for (let i = 0; i < len; i++) {
           if (bytes[start + i] !== repl[i]) { differs = true; break; }
         }
-        if (differs) { bytes.set(repl, start); changes++; }
+        if (differs) pending.push([start, repl]);
+      }
+    }
+    // Privat, nicht die Gruppenlänge und nicht der Private Creator, dessen VR
+    // und Inhalt der Standard festlegt (PS3.5 §7.8.1). Leer trägt nichts.
+    if ((g & 1) && e !== 0 && !(e >= 0x0010 && e <= 0x00ff)
+        && dicomHolds(bytes, start, start + len)) {
+      if (implicit || vr === "UN") {
+        untyped.push(dicomTagText(g, e));
+      } else if ((DICOM_TEXT_VR.has(vr)
+                  && (dicomLatin1(bytes.subarray(start, start + len))
+                        .match(/\p{L}/gu) || []).length >= 2)
+                 || (DICOM_BINARY_VR.has(vr)
+                     && dicomMayBeAName(bytes.subarray(start, start + len)))
+                 || (DICOM_NUMBER_VR.has(vr)
+                     && dicomNumberNotItsType(vr, bytes.subarray(start, start + len)))
+                 || (DICOM_CHARSET_VR.has(vr)
+                     && dicomNotInCharset(vr, bytes.subarray(start, start + len)))
+                 // A type PS3.5 does not define: reported, whatever it holds.
+                 || !DICOM_KNOWN_VR.has(vr)) {
+        privateText.push(dicomTagText(g, e));
       }
     }
     o = start + len;
   }
+  if (untyped.length) {
+    notes.push(`private Element(e) ${dicomShown(untyped)} ohne angegebenen Typ — `
+             + `jedes kann einen Namen tragen und wurde weder geändert noch geprüft: `
+             + `NICHT geprüft`);
+  }
+  if (privateText.length) {
+    notes.push(`private Text-Element(e) ${dicomShown(privateText)} — jedes kann `
+             + `einen Namen tragen und wurde weder geändert noch geprüft: NICHT geprüft`);
+  }
+  // Was hinter dem Gelesenen steht: Bytes hinter dem PixelData, oder ein Rest,
+  // zu kurz für einen Elementkopf — sieben Byte fassen "Mueller". Polster aus
+  // NUL und Leerzeichen trägt nichts.
+  if (pixelEnd === null) {
+    notes.push("PixelData läuft über das Dateiende — dahinter NICHT geprüft");
+  } else {
+    const rest = pixelEnd === undefined ? o : pixelEnd;
+    if (dicomHolds(bytes, rest, n)) {
+      notes.push(`${n - rest} Byte ${pixelEnd === undefined ? "am Dateiende"
+                                                            : "hinter dem PixelData"} `
+               + `nicht gelesen — NICHT geprüft`);
+    }
+  }
+  for (const [start, repl] of pending) { bytes.set(repl, start); changes++; }
   return { changes, notes };
 }
 
@@ -2797,7 +4021,94 @@ function sqliteCells(bytes, header, page) {
   return rows;
 }
 
-/** Table name -> {root, columns} out of sqlite_master. */
+/* The columns of a CREATE TABLE as `{ names, generated }`, or null.
+ *
+ * Split at every comma, a type such as DECIMAL(5,2), a DEFAULT 'a,b' or a
+ * CHECK (kind IN (1,2)) made columns that do not exist, and every column after
+ * it was read under its neighbour's name: the scrub overwrote the wrong value,
+ * left the name standing and reported nothing. Python asks SQLite itself
+ * (PRAGMA table_info). So only commas outside brackets, quotes and comments
+ * separate columns here, and a statement this cannot follow to its closing
+ * bracket is null — the table is reported, not guessed at. Table constraints
+ * (PRIMARY KEY (a, b), CHECK …) follow the columns and are not columns.
+ *
+ * `names` is statement order, which is record order only while no column is
+ * generated. A VIRTUAL generated column has no slot in the record, so every
+ * column after it would be read one value too late, the scrub would overwrite
+ * the neighbour and leave the name. A STORED one has its slot, but it holds a
+ * copy computed from other columns — "Mustermann, Erika" out of last_name and
+ * first_name — that an overwrite in place never recomputes. Python's UPDATE
+ * has SQLite recompute it; this page cannot. So `generated` names every such
+ * column, found by GENERATED ALWAYS or by a bare AS (…) at the column's own
+ * level (its short form, which needs no type), and anonymizeSqliteBytes leaves
+ * the table alone. A CAST(x AS …) inside a CHECK or DEFAULT is a level down,
+ * and quoted or commented text is blanked before looking. */
+const SQLITE_TABLE_CONSTRAINT = /^(constraint|primary|unique|check|foreign)\b/i;
+const SQLITE_GENERATED = /\bGENERATED\s+ALWAYS\b|\bAS\s*\(/i;
+
+function sqliteColumnNames(sql) {
+  const parts = [];
+  let part = null;               // null until the column list opens
+  // The same part at its own bracket level only: quoted and commented text
+  // blanked, whatever is inside a bracket left out.
+  let level = "";
+  let depth = 0, closed = false;
+  for (let i = 0; i < sql.length; i++) {
+    const c = sql[i];
+    let skipped = null;
+    if (c === "'" || c === '"' || c === "`" || c === "[") {
+      const end = sql.indexOf(c === "[" ? "]" : c, i + 1);
+      if (end < 0) return null;
+      skipped = sql.slice(i, end + 1);
+      i = end;
+    } else if (c === "-" && sql[i + 1] === "-") {
+      const end = sql.indexOf("\n", i);
+      if (end < 0) return null;
+      skipped = " ";
+      i = end;
+    } else if (c === "/" && sql[i + 1] === "*") {
+      const end = sql.indexOf("*/", i + 2);
+      if (end < 0) return null;
+      skipped = " ";
+      i = end + 1;
+    }
+    if (part === null) {
+      if (skipped === null && c === "(") part = "";
+      continue;
+    }
+    if (skipped !== null) {
+      part += skipped;
+      if (depth === 0) level += " ";
+      continue;
+    }
+    if (c === "(") {
+      if (depth === 0) level += c;
+      depth++;
+    } else if (c === ")") {
+      if (depth === 0) { parts.push({ part, level }); closed = true; break; }
+      depth--;
+      if (depth === 0) level += c;
+    } else if (c === "," && depth === 0) {
+      parts.push({ part, level }); part = ""; level = ""; continue;
+    } else if (depth === 0) {
+      level += c;
+    }
+    part += c;
+  }
+  if (!closed) return null;
+  const columns = parts
+    .map(p => ({ part: p.part.trim(), level: p.level }))
+    .filter(p => p.part && !SQLITE_TABLE_CONSTRAINT.test(p.part))
+    .map(p => ({
+      name: p.part.split(/[\s(]/)[0].replace(/^["'`\[]|["'`\]]$/g, ""),
+      generated: SQLITE_GENERATED.test(p.level),
+    }));
+  return { names: columns.map(c => c.name),
+           generated: columns.filter(c => c.generated).map(c => c.name) };
+}
+
+/** Table name -> {root, columns, generated} out of sqlite_master; columns null
+ *  when the statement could not be read. */
 function sqliteSchema(bytes, header) {
   const tables = {};
   for (const page of sqliteLeafPages(bytes, header, 1, new Set())) {
@@ -2809,26 +4120,40 @@ function sqliteSchema(bytes, header) {
       }
       const text = sql.isText
         ? dicomLatin1(bytes.subarray(sql.at, sql.at + sql.size)) : "";
-      const inside = text.slice(text.indexOf("(") + 1, text.lastIndexOf(")"));
-      const columns = inside.split(",")
-        .map(part => part.trim().split(/[\s(]/)[0].replace(/^["'`\[]|["'`\]]$/g, ""))
-        .filter(Boolean);
+      const parsed = sqliteColumnNames(text);
       let rootPage = 0;
       if (root.serial >= 1 && root.serial <= 6) {
         for (let i = 0; i < root.size; i++) rootPage = (rootPage << 8) | bytes[root.at + i];
       }
       tables[dicomLatin1(bytes.subarray(name.at, name.at + name.size))] =
-        { root: rootPage, columns };
+        { root: rootPage, columns: parsed ? parsed.names : null,
+          generated: parsed ? parsed.generated : [] };
     }
   }
   return tables;
+}
+
+// Wie registry.normalise_field: klein, ohne Trennzeichen. Exakt verglichen fing
+// `patientname` die Spalte PatientName und ließ patient_name durch — und die
+// Selbstprüfung, dieselbe Regel, nannte das sauber.
+function sqliteNormalise(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function sqliteListed(list, column) {
+  const n = sqliteNormalise(column);
+  return (list || []).some(entry => sqliteNormalise(entry) === n);
 }
 
 function sqliteIsPii(rules, table, column) {
   const t = table.toLowerCase(), c = column.toLowerCase();
   if (t.startsWith("sqlite_")) return false;
   if ((rules.column_allowlist || []).some(a => c === a || c.endsWith(a))) return false;
-  if ((rules.pii_columns || []).includes(c)) return true;
+  if (sqliteListed(rules.pii_columns, column)) return true;
+  // Ein Prozedurdatum ist eine Kennung, nur eine optionale. Es muss hier
+  // durchkommen, damit das withDates-Tor in sqliteReplacement entscheidet —
+  // hier abgewiesen, blieb es auch mit withDates stehen.
+  if (sqliteListed(rules.date_columns, column)) return true;
   return (rules.table_keywords || []).some(k => t.includes(k))
       && (c === "value" || c === "name");
 }
@@ -2961,7 +4286,7 @@ function sqliteIndexText(bytes, header, root) {
 function sqliteReplacement(rules, column, value, replacement, withDates, bytes) {
   if (!value || !value.isText || value.size === 0) return null;
   const c = column.toLowerCase();
-  const isDate = (rules.date_columns || []).includes(c);
+  const isDate = sqliteListed(rules.date_columns, column);
   if (isDate && !withDates && !/birth/.test(c)) return null;
   const base = (isDate && !/time/.test(c)) ? "20000101" : replacement;
   const out = new Uint8Array(value.size).fill(0x20);
@@ -3132,11 +4457,25 @@ function anonymizeSqliteBytes(bytes, rules, replacement, withDates) {
 
   for (const [table, info] of Object.entries(schema)) {
     if (!info.root) continue;
+    // Without its column list nothing says which value is which: a guess
+    // overwrites the wrong one and leaves the name.
+    if (!info.columns) {
+      notes.push(`Spaltenliste von ${table} nicht verstanden — Tabelle NICHT geändert`);
+      continue;
+    }
     const wanted = info.columns
       .map((c, i) => ({ c, i }))
       .filter(({ c }) => sqliteIsPii(rules, table, c));
     if (!wanted.length) continue;
     tables++;
+    // Statement order is not record order past a VIRTUAL generated column, and
+    // a STORED one keeps its copy of the name: see sqliteColumnNames.
+    if (info.generated.length) {
+      const which = info.generated.join(", ");
+      notes.push(`Tabelle ${table} hat eine generierte Spalte (${which}) `
+               + `— Tabelle NICHT geändert`);
+      continue;
+    }
     // A WITHOUT ROWID table is stored as an index b-tree. sqliteLeafPages
     // follows table pages only, so its rows would come back as none — nothing
     // replaced and nothing said.
@@ -3177,12 +4516,13 @@ function anonymizeSqliteBytes(bytes, rules, replacement, withDates) {
 }
 
 // === SCRUB-CORE END ===
-// === SCRUB-CORE EXPORTS: ANON_DOB, ANON_STARTTIME, ANON_PHYSICIAN, ANON_HOST, ANON_INI, FIXED_PSEUDONYMS, COMMON_EXCLUDED_NAMES, getPseudonym, PATIENT_CONTAINERS, DATA_CONTAINERS, normKey, demographicReplacement, DEMOGRAPHIC_RULES, anonymizeXml, anonymizeDemographicsXml, scrubPaths, anonymizeWmMaster, anonymizeGeInf, WM_MASTER_ID_START, WM_MASTER_ID_END, GE_INI_WIPE_KEYS, GE_INI_ID_KEYS, GE_INI_STRUCT_KEYS, GE_INI_ENC_SUFFIXES, PASSTHROUGH_MAGIC,
+// === SCRUB-CORE EXPORTS: ANON_DOB, ANON_STARTTIME, ANON_PHYSICIAN, ANON_HOST, ANON_INI, FIXED_PSEUDONYMS, COMMON_EXCLUDED_NAMES, getPseudonym, PATIENT_CONTAINERS, DATA_CONTAINERS, AMBIGUOUS_KEYS, normKey, demographicReplacement, DEMOGRAPHIC_RULES, anonymizeXml, anonymizeDemographicsXml, scrubPaths, anonymizeWmMaster, anonymizeGeInf, geInfKey, WM_MASTER_ID_START, WM_MASTER_ID_END, GE_INI_WIPE_KEYS, GE_INI_ID_KEYS, GE_INI_STRUCT_KEYS, GE_INI_ENC_SUFFIXES, PASSTHROUGH_MAGIC,
 //     unanonymisableKind, isDicomBytes, readDicomMeta, padReplacement,
-//     anonymizeDicomBytes, dicomTargets, dicomTagKey, dicomLatin1,
-//     dicomBytesOf, dicomArchiveRules, sqliteHeader, sqliteSchema,
+//     anonymizeDicomBytes, anonymizeDicomFile, dicomTargets, dicomTagKey, dicomLatin1,
+//     dicomBytesOf, dicomArchiveRules, dicomNumberNotItsType, sqliteHeader, sqliteSchema,
 //     sqliteVarint, sqliteIsPii, anonymizeSqliteBytes, PASSTHROUGH_NAMES,
-//     sqliteTreePages, sqliteIndexes, sqliteIndexText, sqliteWipeFreeSpace ===
+//     sqliteTreePages, sqliteIndexes, sqliteIndexText, sqliteWipeFreeSpace,
+//     decodeGeInf, encodeGeInf, geInfUnreadLines, LAB_SYSTEMS ===
 
 function logLine(msg) {
   const el = document.getElementById("log");
@@ -3225,11 +4565,19 @@ function renderPreview(plan) {
   document.getElementById("action-card").classList.remove("hidden");
   document.getElementById("log-card").classList.remove("hidden");
 
+  const refusal = planRefusal(plan);
+  setActionsEnabled(!refusal);
+  setStatus(refusal || "");
   if (!window.showDirectoryPicker) {
-    document.getElementById("btn-folder").disabled = true;
     document.getElementById("btn-folder").title =
       "Erfordert Chrome/Edge oder Opera. Bitte ZIP nutzen.";
   }
+}
+
+function setActionsEnabled(enabled) {
+  document.getElementById("btn-zip").disabled = !enabled;
+  document.getElementById("btn-folder").disabled =
+    !enabled || !window.showDirectoryPicker;
 }
 
 function escapeHtml(s) {
@@ -3253,7 +4601,8 @@ async function processFile(entry, plan) {
     if (!plan.dirCtx.has(sub)) plan.dirCtx.set(sub, {});
     const ctx = plan.dirCtx.get(sub);
     const out = await plan.profile.anonymizeFile(subPath, file, pseudo, ctx);
-    if (out) return { outPath, data: out.data, note: out.note };
+    if (out) return { outPath, data: out.data, note: out.note,
+                      unanonymisable: out.unanonymisable || null };
   }
 
   // DICOM: byte-weise, längenerhaltend. Auch außerhalb eines Patientenordners,
@@ -3265,10 +4614,7 @@ async function processFile(entry, plan) {
   // SQLite-Kopf in den ersten 100.
   if (isDicomBytes(head)) {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    const rules = dicomArchiveRules();
-    const targets = dicomTargets(rules, true);
-    const r = anonymizeDicomBytes(bytes, (rules && rules.replacement) || "Anonymous",
-                                  targets, true);
+    const r = anonymizeDicomFile(bytes, true);
     const note = r.notes.length ? `DICOM: ${r.notes.join("; ")}`
                                 : `DICOM: ${r.changes} Feld(er) ersetzt`;
     return { outPath, data: new Blob([bytes]), note,
@@ -3311,7 +4657,15 @@ function* iterEntries(plan) {
 }
 
 async function runWriter(writer, plan) {
+  // Checked here as well as on the buttons: this is the one place every
+  // write goes through.
+  const refusal = planRefusal(plan);
+  if (refusal) throw new Error(refusal);
   const all = [...iterEntries(plan)];
+  if (writer.expect) {
+    await writer.expect(all.map(e => ({ outPath: `${plan.dirRename.get(e.sub)}/${e.subPath}`,
+                                        size: e.file.size })));
+  }
   const total = all.length;
   let done = 0;
   const progress = document.getElementById("progress");
@@ -3341,12 +4695,36 @@ async function runWriter(writer, plan) {
   // unter; diese hier steht am Ende, wo der Blick landet.
   if (untouched.size) {
     const what = [...untouched].map(([k, n]) => `${n}× ${k}`).join(", ");
+    // A .inf with lines this cannot read is written as far as it was scrubbed,
+    // not unchanged, so it gets a line of its own.
+    const copied = [...untouched].filter(([k]) => k !== GE_INF_UNREAD);
     logLine("");
-    logLine(`⚠ ACHTUNG: ${what} wurden unverändert übernommen. Sie tragen `
-          + `typischerweise Patienten- und Arztnamen und können hier nicht `
-          + `anonymisiert werden.`);
-    logLine(`  Die Anwendung (epcore anonymize) behandelt beide. Diese Ausgabe `
-          + `nicht weitergeben, bevor das geschehen ist.`);
+    if (copied.length) {
+      logLine(`⚠ ACHTUNG: ${copied.map(([k, n]) => `${n}× ${k}`).join(", ")} `
+            + `wurden unverändert übernommen. Sie tragen `
+            + `typischerweise Patienten- und Arztnamen und können hier nicht `
+            + `anonymisiert werden.`);
+    }
+    // The application refuses an unrecognised .inf as well (classic.py warns
+    // and leaves it), so the line promising it would take over is not said
+    // about one.
+    if (copied.some(([k]) => k !== GE_INF_UNRECOGNISED)) {
+      logLine(`  Die Anwendung (epcore anonymize) behandelt beide. Diese Ausgabe `
+            + `nicht weitergeben, bevor das geschehen ist.`);
+    }
+    if (untouched.has(GE_INF_UNRECOGNISED)) {
+      logLine(`  Eine ${GE_INF_UNRECOGNISED} lässt auch die Anwendung `
+            + `unverändert. Diese Ausgabe nicht weitergeben, bevor sie von `
+            + `Hand geprüft ist.`);
+    }
+    // Nor does the application read such a file: it fails the run on it.
+    if (untouched.has(GE_INF_UNREAD)) {
+      logLine(`⚠ ACHTUNG: ${untouched.get(GE_INF_UNREAD)}× ${GE_INF_UNREAD}: `
+            + `Was hinter dem Zeilenbruch steht, ist NICHT anonymisiert, auch `
+            + `nicht in der Anwendung, die die Datei ebenso als nicht geprüft `
+            + `meldet. Diese Ausgabe nicht weitergeben, bevor sie von Hand `
+            + `geprüft ist.`);
+    }
     setStatus(`Fertig — aber ${what} sind NICHT anonymisiert.`);
   }
 }
@@ -3356,6 +4734,25 @@ class FsWriter {
     this.root = rootHandle;
     this.rootName = rootFolderName;
     this._dirCache = new Map();
+  }
+  // Every run writes "Anonymized/Patient_A, Anna [000001]/…", so a second run
+  // into the same folder merged into the first: the second patient's files
+  // beside the first one's under one pseudonym, the first one's XML
+  // overwritten, and both runs said "Fertig". classic.run_anonymization
+  // refuses an existing output directory for the same reason.
+  async expect() {
+    try {
+      await this.root.getDirectoryHandle(this.rootName);
+    } catch (err) {
+      if (err.name === "NotFoundError") return;
+      if (err.name !== "TypeMismatchError") throw err;   // a file of that name
+    }
+    throw new Error(
+      `„${this.rootName}“ gibt es im gewählten Ordner schon. Hineinschreiben ` +
+      `würde diesen Lauf mit dem früheren mischen — zwei Patienten unter einem ` +
+      `Pseudonym. Bitte einen anderen Ordner wählen oder den vorhandenen ` +
+      `vorher verschieben. Nichts wurde geschrieben.`
+    );
   }
   async _ensureDir(pathParts) {
     let h = this.root;
@@ -3414,34 +4811,68 @@ function crc32OfBytes(bytes) {
   return ((c ^ 0xFFFFFFFF) >>> 0);
 }
 
+/* Standard ZIP keeps every offset and size in 32 bits and the entry count in
+ * 16, and an all-ones value means "see ZIP64", which this writer does not write.
+ * DataView stores a larger number modulo 2^32 without a word: past 4 GB the
+ * end record pointed into the middle of the data, most extractors found no
+ * directory, and the page said "Fertig". */
+const ZIP_MAX_BYTES = 0xFFFFFFFF;
+const ZIP_MAX_ENTRIES = 0xFFFE;
+
 class ZipWriter {
   constructor(rootFolderName) {
     this.parts = [];
     this.entries = [];
     this.offset = 0;
+    this.directorySize = 0;
     this.rootName = rootFolderName;
     this._maxFileSize = 0;
+  }
+  // The archive these would make — data, central directory, end record —
+  // refused if standard ZIP cannot address it.
+  _refuseBeyond(dataBytes, directoryBytes, count) {
+    if (count > ZIP_MAX_ENTRIES) {
+      throw new Error(
+        `${count} Dateien sind mehr, als Standard-ZIP fasst (${ZIP_MAX_ENTRIES}). ` +
+        `Bitte "In Ordner speichern" verwenden.`
+      );
+    }
+    const total = dataBytes + directoryBytes + 22;
+    if (total > ZIP_MAX_BYTES) {
+      throw new Error(
+        `Das ZIP würde ${formatBytes(total)} groß und überschreitet das ` +
+        `4-GB-Limit von Standard-ZIP. Bitte "In Ordner speichern" verwenden.`
+      );
+    }
+  }
+  // The same check over the whole selection, before anything is read: in
+  // write() alone it fired only after the gigabytes before it had been read
+  // and checksummed. The sizes are the sources'; a scrub changes a text file
+  // by a few bytes at most.
+  expect(entries) {
+    let dataBytes = 0, directoryBytes = 0;
+    for (const { outPath, size } of entries) {
+      const name = new TextEncoder().encode(`${this.rootName}/${outPath}`).length;
+      dataBytes += 30 + name + size;
+      directoryBytes += 46 + name;
+    }
+    this._refuseBeyond(dataBytes, directoryBytes, entries.length);
   }
   async write(outPath, data) {
     const fullPath = `${this.rootName}/${outPath}`;
     const nameBytes = new TextEncoder().encode(fullPath);
-    let bytes, size, crc;
-    if (data instanceof Uint8Array) {
-      bytes = data;
-      size = data.length;
-      crc = crc32OfBytes(data);
-    } else {
-      const blob = data;
-      size = blob.size;
-      crc = await crc32OfBlob(blob);
-      bytes = blob;
-    }
+    const size = data instanceof Uint8Array ? data.length : data.size;
     if (size > 0xFFFFFFFE) {
       throw new Error(
         `Datei ${fullPath} ist ${formatBytes(size)} groß und überschreitet das ` +
         `4-GB-Limit von Standard-ZIP. Bitte "In Ordner speichern" verwenden.`
       );
     }
+    this._refuseBeyond(this.offset + 30 + nameBytes.length + size,
+                       this.directorySize + 46 + nameBytes.length,
+                       this.entries.length + 1);
+    const bytes = data;
+    const crc = data instanceof Uint8Array ? crc32OfBytes(data) : await crc32OfBlob(data);
     this._maxFileSize = Math.max(this._maxFileSize, size);
 
     const lh = new ArrayBuffer(30);
@@ -3463,6 +4894,7 @@ class ZipWriter {
       nameBytes, crc, size, localOffset: this.offset,
     });
     this.offset += 30 + nameBytes.length + size;
+    this.directorySize += 46 + nameBytes.length;
   }
   async close() {
     const cdStart = this.offset;
@@ -3517,24 +4949,118 @@ function triggerDownload(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
+/* The served page with everything it loads written into it.
+ *
+ * As served, the page fetches its stylesheet, its fonts and (the one-picker
+ * page) its translations from directories beside it. Saved like that, the copy
+ * opened on the offline workstation it was downloaded for with none of them:
+ * blank, because every heading and label there is filled in by the
+ * translations, or unstyled. So this does in the browser what
+ * tools/build_standalone_tools.mjs does for the release: stylesheets inline,
+ * their fonts as data: URIs, scripts inline, a module's sibling imports spliced
+ * in where they stand. A copy that would still fetch something is refused. */
+async function selfContained(html, base) {
+  const get = async (url) => {
+    const resp = await fetch(url, { cache: "no-store" });
+    if (!resp.ok) throw new Error(`${url}: HTTP ${resp.status}`);
+    return resp;
+  };
+  const dataUri = async (url) => {
+    const blob = await (await get(url)).blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  };
+  const replaceAsync = async (text, re, fn) => {
+    let out = "", last = 0;
+    for (const m of text.matchAll(re)) {
+      out += text.slice(last, m.index) + await fn(...m);
+      last = m.index + m[0].length;
+    }
+    return out + text.slice(last);
+  };
+  const splice = (code, url, seen) => replaceAsync(code,
+    /^[ \t]*import\s*(?:(\{[^}]*\})\s*from\s*)?['"](\.{1,2}\/[^'"]+)['"][ \t]*;?[ \t]*$/gm,
+    async (whole, names, ref) => {
+      // A renamed binding needs a real module boundary; leave it to be refused.
+      if (names && /\bas\b/.test(names)) return whole;
+      const target = new URL(ref, url).href;
+      if (seen.has(target)) return `/* ${ref}: inlined above */`;
+      seen.add(target);
+      const text = (await splice(await (await get(target)).text(), target, seen))
+        .replace(/^export\s+(?=(?:const|let|var|function|async\s+function|class)\b)/gm, "")
+        .replace(/^export\s*\{[^}]*\}[ \t]*;?[ \t]*$/gm, "");
+      // Any other export (default, re-export) needs the boundary too.
+      if (/^[ \t]*export\b/m.test(text)) return whole;
+      return `/* inlined from ${ref} */\n${text}`;
+    });
+
+  html = await replaceAsync(html, /<link\b[^>]*?href="([^"]+\.css(?:\?[^"]*)?)"[^>]*>/g,
+    async (whole, href) => {
+      const url = new URL(href, base).href;
+      const css = await replaceAsync(await (await get(url)).text(),
+        /url\(\s*(['"]?)([^'")]+)\1\s*\)/g,
+        async (ref, quote, target) => (/^(data:|#)/.test(target)
+          ? ref : `url(${await dataUri(new URL(target, url).href)})`));
+      return `<style>\n/* inlined from ${href} */\n${css}\n</style>`;
+    });
+  html = await replaceAsync(html, /<script\b[^>]*?\ssrc="([^"]+)"[^>]*><\/script>/g,
+    async (whole, src) => {
+      const url = new URL(src, base).href;
+      const code = await splice(await (await get(url)).text(), url, new Set([url]));
+      const type = /type="module"/.test(whole) ? ' type="module"' : "";
+      // "<\/" so that this page's own script element does not end here.
+      return `<script${type}>\n/* inlined from ${src} */\n${code}\n<\/script>`;
+    });
+
+  const left = [
+    ...html.matchAll(/<(?:link|script)\b[^>]*?\s(?:href|src)="(?!data:|https?:)([^"]+)"/g),
+    ...html.matchAll(/\b(?:from|import)\s*\(?\s*['"](\.{1,2}\/[^'"]+)['"]/g),
+  ].map(m => m[1]);
+  if (left.length) throw new Error(`lädt noch ${[...new Set(left)].join(", ")}`);
+  return html;
+}
+
 // Download this page itself as a standalone HTML file for offline use.
 async function downloadSelf() {
+  const own = window.location.pathname.split("/").pop() || "anonymize.html";
+  const name = own.startsWith("epcore-") ? own : `epcore-${own}`;
+  const status = document.getElementById("download-status");
+  let source;
   try {
     const resp = await fetch(window.location.href, { cache: "no-store" });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    triggerDownload(await resp.blob(), "eptrace-anonymizer.html");
+    source = await resp.text();
   } catch (err) {
-    // Fallback (e.g. opened via file://): serialize the current document.
-    const html = "<!DOCTYPE html>\n" + document.documentElement.outerHTML;
-    triggerDownload(new Blob([html], { type: "text/html" }), "eptrace-anonymizer.html");
+    // Opened from disk the page cannot fetch itself. It used to serialise the
+    // live document instead, and with a study chosen that held the mapping
+    // table and the log: the copy handed on as the tool carried the original
+    // patient folder names beside their pseudonyms. A page opened from disk
+    // already is the offline copy.
+    status.textContent =
+      window.location.protocol === "file:"
+        ? "Keine Kopie erstellt: Diese Seite ist bereits als Datei geöffnet. " +
+          "Für die Nutzung ohne Internet genügt es, diese Datei zu kopieren."
+        : `Keine Kopie erstellt: Die Seite ließ sich nicht laden (${err.message}).`;
+    return;
+  }
+  try {
+    const html = await selfContained(source, window.location.href);
+    status.textContent = "";
+    triggerDownload(new Blob([html], { type: "text/html" }), name);
+  } catch (err) {
+    status.textContent = `Keine Offline-Kopie erstellt: ${err.message}`;
   }
 }
 
 function applyProfileUi() {
   document.getElementById("system-desc").textContent = _activeProfile.description;
   const warn = document.getElementById("beta-warning");
-  if (_activeProfile.beta && _activeProfile.betaHtml) {
-    warn.innerHTML = _activeProfile.betaHtml;
+  if (_activeProfile.noticeHtml) {
+    warn.innerHTML = _activeProfile.noticeHtml;
     warn.classList.remove("hidden");
   } else {
     warn.innerHTML = "";
@@ -3544,18 +5070,20 @@ function applyProfileUi() {
 
 async function rebuildPlan() {
   if (!_selectedFiles.length) return;
-  _plan = await buildPlan(_selectedFiles, _activeProfile);
+  const generation = ++_planGeneration;
+  // Until the new plan stands, the buttons would write the previous one.
+  _plan = null;
+  setActionsEnabled(false);
+  const plan = await buildPlan(_selectedFiles, _activeProfile);
+  if (generation !== _planGeneration) return;
+  _plan = plan;
   if (!_plan) return;
   document.getElementById("log").textContent = "";
   logLine(`Lab-System: ${_activeProfile.label}`);
   logLine(`Quellordner: ${_plan.rootName}`);
   logLine(`${_plan.patientDirs.size} Patientenverzeichnis(se) erkannt.`);
-  if (_plan.patientDirs.size === 0) {
-    logLine(
-      "Hinweis: keine Patientenverzeichnisse erkannt – keine " +
-      "Markierungsdatei des gewählten Lab-Systems gefunden."
-    );
-  }
+  const refusal = planRefusal(_plan);
+  if (refusal) logLine(refusal);
   for (const sub of _plan.sortedSubs) {
     if (_plan.patientDirs.has(sub)) {
       logLine(`  ${sub}  →  ${_plan.dirRename.get(sub)}`);
@@ -3604,6 +5132,12 @@ document.getElementById("btn-zip").addEventListener("click", async () => {
 });
 
 document.getElementById("btn-download").addEventListener("click", downloadSelf);
+
+// The choices carry the table's labels, so "(Beta)" follows the profile here
+// too and not a second copy in the markup.
+for (const option of document.getElementById("lab-system").options) {
+  if (LAB_SYSTEMS[option.value]) option.textContent = LAB_SYSTEMS[option.value].label;
+}
 
 // Initialise the lab-system description and beta warning on first load.
 applyProfileUi();

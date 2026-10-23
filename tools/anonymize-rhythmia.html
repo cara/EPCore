@@ -5,7 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rhythmia Anonymisierer</title>
 <link href="../vendor/fonts/fonts.css" rel="stylesheet">
+<!-- Before the stylesheet, or the page paints dark and turns light a frame
+     later. Classic and inline because a module runs deferred; the shared
+     version is shared/theme.js. -->
+<script>
+  try {
+    var t = localStorage.getItem('epcore.theme') || localStorage.getItem('eptrace-theme');
+    if (t === 'light') document.documentElement.dataset.theme = 'light';
+  } catch (e) { /* storage disabled */ }
+</script>
 <link href="../shared/epcore.css" rel="stylesheet">
+<script type="module" src="../shared/theme.js?v=7ab3e6d427ee"></script>
 <style>
   body {
     max-width: 920px;
@@ -55,6 +65,10 @@
     font-family: monospace;
   }
   textarea {
+    /* Painted here: epcore.css themes inputs, not textareas, and the
+       browser's dark default put the example text at 2.43:1. */
+    background: var(--bg-2);
+    color: var(--text);
     width: 100%;
     box-sizing: border-box;
     padding: 0.5em;
@@ -62,6 +76,10 @@
     border-radius: 3px;
     font-family: monospace;
     font-size: 0.9em;
+  }
+  textarea::placeholder {
+    color: var(--text-faint);
+    opacity: 1;
   }
   button {
     padding: 0.7em 1.5em;
@@ -72,10 +90,15 @@
     background: var(--bg-3);
     margin-right: 0.5em;
   }
-  button:hover { background: #d6dbdf; }
+  button:hover {
+    /* Tokens: the light page's grey hover sat under the dark theme's light
+       label at 1.07:1. Same hover as the hub's secondary button. */
+    background: var(--bg-2);
+    border-color: var(--accent-dim);
+  }
   button.primary {
     background: #2ecc71;
-    color: var(--bg-1);
+    color: #0a1016;
     border-color: #27ae60;
   }
   button.primary:hover { background: #27ae60; }
@@ -87,16 +110,34 @@
     overflow: auto;
     max-height: 18em;
     font-size: 0.85em;
-    var(--bg-1)-space: pre-wrap;
+    white-space: pre-wrap;
     word-break: break-all;
   }
   table { border-collapse: collapse; width: 100%; margin-top: 0.5em; font-size: 0.9em; }
   th, td { padding: 0.4em 0.6em; text-align: left; border-bottom: 1px solid var(--line); }
+  td.file, td.long {
+    /* A path, an ID or a hash has no break opportunity of its own: unbroken,
+       it sized the table past the page and pushed "Ersatz" off-screen. Only
+       such cells, which renderPreview marks, break anywhere. A cell that may
+       break anywhere has next to no minimum width, and automatic table layout
+       hands its share to a long column, until "PatientName" breaks mid-word
+       in the column the operator reads. */
+    overflow-wrap: anywhere;
+  }
   th { background: var(--bg-2); }
   td.field { font-family: monospace; color: var(--accent); }
   td.original, td.replacement { font-family: monospace; }
   td.original { color: var(--bad); }
-  td.replacement { color: #27ae60; }
+  td.replacement { color: var(--accent); }
+  @media (max-width: 48em) {
+    td {
+      /* Narrower than this, a field name, a name and its replacement no
+         longer fit whole side by side: 18, 22 and 16 characters beside a
+         CARTO path already need 600 px. A word broken in two beats a table
+         that runs off the page. */
+      overflow-wrap: anywhere;
+    }
+  }
   ul.files { padding-left: 1.5em; }
   ul.files li { font-family: monospace; }
   .row { display: flex; gap: 1em; flex-wrap: wrap; }
@@ -134,6 +175,7 @@
 <input type="file" id="files" multiple>
 <div class="dropzone" id="dropzone">Oder Dateien hier ablegen</div>
 <div id="fileList"></div>
+<div id="skipped" class="warn" hidden></div>
 
 <h2>2. Ersatzwerte konfigurieren</h2>
 <div class="row">
@@ -153,19 +195,19 @@
       Klinik- &amp; Standortnamen</label>
     <label><input type="checkbox" id="opt-comments" checked>
       Kommentare &amp; Notizen leeren</label>
-    <label><input type="checkbox" id="opt-dates">
+    <label><input type="checkbox" id="opt-dates" checked>
       Datum/Zeitstempel auf Jahr kürzen</label>
   </fieldset>
 </div>
 
 <fieldset>
   <legend>Eigene zu ersetzende Begriffe</legend>
-  <p style="margin: 0.2em 0; font-size: 0.9em; color: #7f8c8d;">
+  <p style="margin: 0.2em 0; font-size: 0.9em; color: var(--text-dim);">
     Eine Zeichenkette pro Zeile (z.&nbsp;B. Patientenname, Geburtsdatum-Variante,
     Studienkennung). Wird im gesamten XML &ndash; ohne Beachtung der Tags &ndash; durch
     <code>[REDACTED]</code> ersetzt. Case-insensitive. Binärdaten werden NIE verändert.
   </p>
-  <textarea id="custom-patterns" rows="3"
+  <textarea id="custom-patterns" rows="3" aria-label="Eigene zu ersetzende Begriffe"
     placeholder="Müller, Hans&#10;1965-03-15&#10;Smith_Mapping_2024"></textarea>
 </fieldset>
 
@@ -241,8 +283,36 @@ function partNumber(name) {
  * mistake into a likely one. */
 const PART_NAME = /\.\d{3,}$/;
 
+// A dot file is never a part, whatever its suffix: macOS writes ._Study.000
+// beside Study.000 on a foreign volume (see checkParts).
 function isArchivePart(name) {
-  return PART_NAME.test(name);
+  return PART_NAME.test(name) && !name.startsWith(".");
+}
+
+function skippedLine(name) {
+  return name + (/patient_?info/i.test(name)
+    ? " — enthält die Patientenkennung. Nicht mitkopieren."
+    : "");
+}
+
+// Named, not silently dropped: the user has to know that this file was not
+// processed and is still sitting in the original folder. Beside the file list
+// and not only in the log, because either button empties the log first — the
+// patient_info warning was gone by the time the result was on screen.
+function showSkipped(rejected) {
+  const box = $("skipped");
+  box.replaceChildren();
+  box.hidden = !rejected.length;
+  if (!rejected.length) return;
+  const head = document.createElement("strong");
+  head.textContent = "Übersprungen (kein Archivteil):";
+  const list = document.createElement("ul");
+  for (const f of rejected) {
+    const li = document.createElement("li");
+    li.textContent = skippedLine(f.name);
+    list.appendChild(li);
+  }
+  box.append(head, list);
 }
 
 function setFiles(files) {
@@ -251,13 +321,9 @@ function setFiles(files) {
   const rejected = all.filter(f => !isArchivePart(f.name));
   selectedFiles = parts.sort((a, b) => partNumber(a.name) - partNumber(b.name));
   fileList.innerHTML = "";
+  showSkipped(rejected);
   for (const f of rejected) {
-    // Named, not silently dropped: the user has to know that this file was not
-    // processed and is still sitting in the original folder.
-    log(`Übersprungen (kein Archivteil): ${f.name}` +
-        (/patient_?info/i.test(f.name)
-          ? " — enthält die Patientenkennung. Nicht mitkopieren."
-          : ""));
+    log(`Übersprungen (kein Archivteil): ${skippedLine(f.name)}`);
   }
   if (!selectedFiles.length) return;
   const ul = document.createElement("ul");
@@ -277,6 +343,22 @@ function setFiles(files) {
   ).toFixed(1)} MB`;
   fileList.appendChild(ul);
   fileList.appendChild(summary);
+
+  // Said when the files are chosen, not only when the run refuses them: a set
+  // with a hole or a second study in it is never processed (checkParts).
+  try {
+    checkParts(selectedFiles);
+  } catch (err) {
+    const w = document.createElement("div");
+    w.className = "warn";
+    w.setAttribute("role", "alert");
+    w.style.marginTop = "0.6em";
+    const head = document.createElement("strong");
+    head.textContent = "Abgelehnt: ";
+    w.append(head, err.message);
+    fileList.appendChild(w);
+    log(`Abgelehnt: ${err.message}`);
+  }
 
   if (
     selectedFiles.length === 1 &&
@@ -822,6 +904,7 @@ const PROFILES = {
             "birthday",
             "date_of_birth",
             "dateofbirth",
+            "dob",
             "email",
             "family_name",
             "familyname",
@@ -839,6 +922,8 @@ const PROFILES = {
             "labname",
             "last_name",
             "lastname",
+            "medical_record_number",
+            "medicalrecordnumber",
             "middle_initial",
             "middle_name",
             "middleinitial",
@@ -856,6 +941,8 @@ const PROFILES = {
             "performingphysician",
             "perfphysician",
             "phone",
+            "phone_number",
+            "phonenumber",
             "physicianname",
             "referringphysician",
             "refphysician",
@@ -920,6 +1007,11 @@ const PROFILES = {
             },
             {
               "group": 8,
+              "element": 156,
+              "name": "ConsultingPhysicianName"
+            },
+            {
+              "group": 8,
               "element": 4112,
               "name": "StationName"
             },
@@ -960,6 +1052,11 @@ const PROFILES = {
             },
             {
               "group": 16,
+              "element": 33,
+              "name": "IssuerOfPatientID"
+            },
+            {
+              "group": 16,
               "element": 48,
               "name": "PatientBirthDate"
             },
@@ -985,8 +1082,33 @@ const PROFILES = {
             },
             {
               "group": 16,
+              "element": 4101,
+              "name": "PatientBirthName"
+            },
+            {
+              "group": 16,
+              "element": 4112,
+              "name": "PatientAge"
+            },
+            {
+              "group": 16,
               "element": 4160,
               "name": "PatientAddress"
+            },
+            {
+              "group": 16,
+              "element": 4192,
+              "name": "PatientMotherBirthName"
+            },
+            {
+              "group": 16,
+              "element": 4224,
+              "name": "MilitaryRank"
+            },
+            {
+              "group": 16,
+              "element": 4240,
+              "name": "MedicalRecordLocator"
             },
             {
               "group": 16,
@@ -1000,13 +1122,133 @@ const PROFILES = {
             },
             {
               "group": 16,
+              "element": 8576,
+              "name": "Occupation"
+            },
+            {
+              "group": 16,
+              "element": 8624,
+              "name": "AdditionalPatientHistory"
+            },
+            {
+              "group": 16,
+              "element": 8855,
+              "name": "ResponsiblePerson"
+            },
+            {
+              "group": 16,
               "element": 16384,
               "name": "PatientComments"
+            },
+            {
+              "group": 20,
+              "element": 260,
+              "name": "SecondaryReviewerName"
+            },
+            {
+              "group": 20,
+              "element": 8198,
+              "name": "EvaluatorName"
+            },
+            {
+              "group": 50,
+              "element": 4146,
+              "name": "RequestingPhysician"
             },
             {
               "group": 56,
               "element": 768,
               "name": "CurrentPatientLocation"
+            },
+            {
+              "group": 64,
+              "element": 6,
+              "name": "ScheduledPerformingPhysicianName"
+            },
+            {
+              "group": 64,
+              "element": 4112,
+              "name": "NamesOfIntendedRecipientsOfResults"
+            },
+            {
+              "group": 64,
+              "element": 8200,
+              "name": "OrderEnteredBy"
+            },
+            {
+              "group": 64,
+              "element": 16439,
+              "name": "HumanPerformerName"
+            },
+            {
+              "group": 64,
+              "element": 41063,
+              "name": "DocumentAuthorTrial"
+            },
+            {
+              "group": 64,
+              "element": 41077,
+              "name": "VerifyingObserverName"
+            },
+            {
+              "group": 64,
+              "element": 41251,
+              "name": "PersonName"
+            },
+            {
+              "group": 64,
+              "element": 41735,
+              "name": "CurrentObserverTrial"
+            },
+            {
+              "group": 64,
+              "element": 41810,
+              "name": "VerbalSourceTrial"
+            },
+            {
+              "group": 112,
+              "element": 132,
+              "name": "ContentCreatorName"
+            },
+            {
+              "group": 114,
+              "element": 106,
+              "name": "SelectorPNValue"
+            },
+            {
+              "group": 12294,
+              "element": 166,
+              "name": "ROIInterpreter"
+            },
+            {
+              "group": 12302,
+              "element": 8,
+              "name": "ReviewerName"
+            },
+            {
+              "group": 16392,
+              "element": 258,
+              "name": "InterpretationRecorder"
+            },
+            {
+              "group": 16392,
+              "element": 266,
+              "name": "InterpretationTranscriber"
+            },
+            {
+              "group": 16392,
+              "element": 268,
+              "name": "InterpretationAuthor"
+            },
+            {
+              "group": 16392,
+              "element": 276,
+              "name": "PhysicianApprovingInterpretation"
+            },
+            {
+              "group": 16392,
+              "element": 281,
+              "name": "DistributionName"
             }
           ],
           "date_tags": [
@@ -1029,6 +1271,61 @@ const PROFILES = {
               "group": 8,
               "element": 35,
               "name": "ContentDate"
+            },
+            {
+              "group": 8,
+              "element": 18,
+              "name": "InstanceCreationDate"
+            },
+            {
+              "group": 64,
+              "element": 580,
+              "name": "PerformedProcedureStepStartDate"
+            },
+            {
+              "group": 64,
+              "element": 2,
+              "name": "ScheduledProcedureStepStartDate"
+            },
+            {
+              "group": 24,
+              "element": 4608,
+              "name": "DateOfLastCalibration"
+            },
+            {
+              "group": 8,
+              "element": 48,
+              "name": "StudyTime"
+            },
+            {
+              "group": 8,
+              "element": 49,
+              "name": "SeriesTime"
+            },
+            {
+              "group": 8,
+              "element": 50,
+              "name": "AcquisitionTime"
+            },
+            {
+              "group": 8,
+              "element": 51,
+              "name": "ContentTime"
+            },
+            {
+              "group": 8,
+              "element": 19,
+              "name": "InstanceCreationTime"
+            },
+            {
+              "group": 64,
+              "element": 581,
+              "name": "PerformedProcedureStepStartTime"
+            },
+            {
+              "group": 64,
+              "element": 3,
+              "name": "ScheduledProcedureStepStartTime"
             }
           ]
         }
@@ -1687,6 +1984,10 @@ const RESIDUE_TEXT = {
   "anon.residue.title": "BEKANNTER REST — diese Ausgabe ist NICHT vollständig anonymisiert. Datum und Uhrzeit der Prozedur stehen weiterhin darin:",
   "anon.residue.xml_time_fields": "in XML-Zeitfeldern, die nicht ersetzt werden: {names}"
 };
+const FREETEXT_TEXT = {
+  "anon.freetext.kept": "Von Hand eingegebener Text wurde nicht verändert: {fields}. Solche Beschriftungen tippt der Bediener; sie können einen Namen enthalten, und nichts hier hat sie gelesen. Vor dem Weitergeben prüfen.",
+  "anon.freetext.more": "und {count} weitere(s) Feld(er)"
+};
 // The scrub itself, so the three mapping pages cannot carry three versions of
 // it. They did, and they had drifted: measured over the union of every field
 // any of them knew, CARTO left 7 identifiers in place, EnSite 8, Rhythmia 14 —
@@ -1729,19 +2030,119 @@ const SHARED_ENCRYPTED_ELEMENT =
   /(<(?:[\w.\-]+:)?(Encrypted\w*Info)\b[^>]*>)([^<]*)(<\/(?:[\w.\-]+:)?\2\s*>)/gi;
 const SHARED_REDACTED_ENCRYPTED = "[ENCRYPTED RECORD REMOVED BY EPCORE]";
 
+// What may stand behind a quoted INI value for its quotes to close it: the
+// rest of a tag and nothing else — more quoted attributes, then the end of the
+// tag, optionally with element text closed on the same line. Anything else is
+// the value going on: `"Roe" PatientID=98765`, `"Doe" >John Smith`. A check
+// that looked only at how the tail began wrote these back unread, and a second
+// pass called the copy clean. Group 1 is the attributes, group 3 the end of
+// the tag. Mirror of maps._TAG_TAIL and maps._TAG_TAIL_ATTRIBUTE.
+const SHARED_TAG_TAIL =
+  /^((?:[ \t]+(?:[\w.\-]+:)?[A-Za-z_][\w.\-]*[ \t]*=[ \t]*(["'])(?:(?!\2)[^<\r\n])*\2)*)([ \t]*(?:\/?>(?:[^<\r\n]*<\/[\w.:\-]+[ \t]*>)?)?[ \t]*)$/;
+const SHARED_TAG_TAIL_ATTRIBUTE =
+  /((?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)[ \t]*=[ \t]*)(["'])((?:(?!\3)[^<\r\n])*)\3/g;
+
+// Both quote styles: XML permits either, and vendors use both in one file.
+// Three rules, because each finds assignments the others cannot, and every
+// assignment any of them finds is decided, once. The first allows no quote at
+// all in a value: it cannot see PatientName="O'Connor, Sean", but it is the only
+// one that never swallows an assignment written inside another value,
+// Msg="Set PatientName='Mustermann'". The second lets a value hold the other
+// quote and stops it at "<", so a stray quote in element text cannot run on into
+// the next tag. The third takes the values that hold a "<", as a contact line in
+// a .txt or .log file does: PatientName="Muster <muster@klinik.example>".
+// The rules overlap, and one rule's match may hold an assignment only another
+// finds. Run one after another, a later rule would decide again what an
+// earlier one had, counting it twice as kept, and nothing reached an
+// assignment inside a value already matched whole. So all three read the same
+// text, and their finds are merged by where the value starts. Mirror of
+// maps._ATTRIBUTE_RULES and maps._attribute_assignments.
+const SHARED_ATTRIBUTE_RULES = [
+  /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)\s*=\s*(?:"([^"']*)"|'([^"']*)')/g,
+  /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)\s*=\s*(?:"([^"<]*)"|'([^'<]*)')/g,
+  /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)\s*=\s*(?:"([^"<]*<[^"]*)"|'([^'<]*<[^']*)')/g,
+];
+
+// A fourth rule, read overlapping: after each find the search goes on from
+// where the value starts, not from where it ends. A stray quote of the
+// identifier's own kind, Kind=" unbalanced PatientName="Doe, John", makes
+// every rule above take the identifier's opening quote for the end of Kind's
+// value; the search went on behind it, and the name stayed while a second
+// pass found nothing either. Its value stays on one line and holds no "<", so
+// it adds no reach the rules above lack. Mirror of maps._ATTRIBUTE_OVERLAPPING.
+const SHARED_ATTRIBUTE_OVERLAPPING =
+  /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)\s*=\s*(?:"([^"<\r\n]*)"|'([^'<\r\n]*)')/g;
+
+// [value start, name, value] for every assignment a rule finds, once each and
+// in text order. A value runs to the next quote of its own kind under every
+// rule, so where it starts names it. The first rule's find is kept, so what it
+// decided before the other two existed it decides the same way now, and the
+// overlapping rule, read last, only adds an assignment none of the others
+// reached.
+function sharedAttributeAssignments(text) {
+  const found = new Map();
+  const keep = m => {
+    // Tested against undefined, not for truth: an empty value matched too.
+    const value = m[2] !== undefined ? m[2] : m[3];
+    // The match ends with the value and its closing quote.
+    const start = m.index + m[0].length - 1 - value.length;
+    if (!found.has(start)) found.set(start, [start, m[1], value]);
+    return start;
+  };
+  for (const rule of SHARED_ATTRIBUTE_RULES) {
+    for (const m of text.matchAll(rule)) keep(m);
+  }
+  const overlapping = new RegExp(SHARED_ATTRIBUTE_OVERLAPPING);
+  let m;
+  while ((m = overlapping.exec(text)) !== null) {
+    // The value starts behind the name and its "=", so this moves on.
+    overlapping.lastIndex = keep(m);
+  }
+  return [...found.values()].sort((a, b) => a[0] - b[0]);
+}
+
 function sharedEscapeXml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+// What "somebody typed this" looks like: letters, long enough to be a word,
+// and not a time or a number. Mirror of maps.looks_hand_typed; the counts it
+// gives are compared with Python's in tests/conformance.
+const SHARED_HAND_TYPED = /[A-Za-zÄÖÜäöüßÀ-ÿ]/;
+const SHARED_ONLY_NUMBERS = /^[\d:.\-\s/]+$/;
+
+function sharedLooksHandTyped(value) {
+  const stripped = String(value == null ? "" : value).trim();
+  // Counted in code points, as Python's len() counts them.
+  if (Array.from(stripped).length < 3 || !SHARED_HAND_TYPED.test(stripped)) {
+    return false;
+  }
+  return !SHARED_ONLY_NUMBERS.test(stripped);
 }
 
 /** Replace every known identifier in one file's text.
  *
  *  `escapeValue` lets a page that works in another encoding convert the
  *  replacement before it is written; Rhythmia scrubs latin-1 strings.
+ *  `customMatcher` does the same for a custom pattern: it turns the typed
+ *  text into the global RegExp that finds it. Rhythmia needs it because the
+ *  "i" flag cannot pair "Ü" with "ü" once each is two UTF-8 bytes read as
+ *  latin-1.
+ *
+ *  `kept`, a Map, counts per field name the hand-typed values this pass left
+ *  as they were — a map's labels, kept on purpose because they make it
+ *  readable, but written by the operator and read by nothing here. Without it
+ *  a study whose only names sit in labels showed "no personal fields found".
+ *  A Map rather than an object: an object puts integer-like keys first, and
+ *  the note lists fields in the order Python's dict does.
  */
-function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
+function scrubKnownFields(text, opts, found, fileLabel, escapeValue,
+                          customMatcher, kept) {
   const repMap = sharedReplacementMap(opts);
   const esc = escapeValue || sharedEscapeXml;
+  const matcher = customMatcher || (pattern =>
+    new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"));
   // `count` matters for custom patterns: one entry can stand for many
   // occurrences, and countReplacements sums it. Leaving it off made a report
   // that said "1 replacement" where three strings had gone.
@@ -1754,6 +2155,11 @@ function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
   const decide = (name, current) => {
     const key = normaliseFieldName(name);
     const stripped = String(current).trim();
+    // Before the date rule, where Python counts too: the same input has to
+    // name the same fields on both sides.
+    if (kept && !repMap.has(key) && sharedLooksHandTyped(stripped)) {
+      kept.set(name, (kept.get(name) || 0) + 1);
+    }
     if (opts.dates !== false && SHARED_DATE_FIELDS.has(key)) {
       const year = String(current).match(/\b(19|20)\d{2}\b/);
       const next = `${year ? year[0] : SHARED.fallback_year}-01-01`;
@@ -1789,30 +2195,86 @@ function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
   // and a namespace prefix is what a vendor adds when their schema grows. The
   // prefix is outside the backreference: a closing tag may legally carry a
   // different one.
+  //
+  // The text may hold CDATA sections: <PatientName><![CDATA[Doe^John]]> never
+  // matched a value that stopped at the first "<", and the name stayed. A
+  // section runs to its first "]]>", so a match cannot reach into the next
+  // element. The value is read through the wrapper and the replacement goes
+  // in as escaped text, the same value to any XML reader, encoded by `esc` as
+  // it always was. Mirror of maps._ELEMENT / maps._CDATA.
   out = out.replace(
-    /(<(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)(?:\s[^<>]*)?>)([^<]*)(<\/(?:[\w.\-]+:)?\2\s*>)/g,
-    (m, open, name, content, close) => {
+    /(<(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)(?:\s[^<>]*)?>)([^<]*(?:<!\[CDATA\[(?:(?!\]\]>)[\s\S])*\]\]>[^<]*)*)(<\/(?:[\w.\-]+:)?\2\s*>)/g,
+    (m, open, name, raw, close) => {
+      const content = raw.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1");
       const next = decide(name, content);
       if (next === null) return m;
       note(name, content, next);
       return open + esc(next) + close;
     });
 
-  // Both quote styles: XML permits either and vendors use both in one file.
+  // Every assignment once, in text order (sharedAttributeAssignments).
   if (opts.attrs !== false) {
-    out = out.replace(
-      /\b(?:[\w.\-]+:)?([A-Za-z_][\w.\-]*)(\s*=\s*)(["'])([^"']*)\3/g,
-      (m, name, sep, quote, content) => {
-        const next = decide(name, content);
-        if (next === null) return m;
-        note(`${name}=…`, content, next);
-        return `${name}${sep}${quote}${esc(next)}${quote}`;
-      });
+    const pieces = [];
+    let done = 0;
+    for (const [start, name, content] of sharedAttributeAssignments(out)) {
+      // Inside a value already replaced: whatever it held went with it.
+      if (start < done) continue;
+      const next = decide(name, content);
+      if (next === null) continue;
+      note(`${name}=…`, content, next);
+      // Only the value is ours to change. Everything before it, namespace
+      // prefix included, stays as it was: rebuilding it from the name alone
+      // turned v:PatientName into PatientName, another attribute to a
+      // namespace-aware reader and a duplicate one where the element carried
+      // both.
+      pieces.push(out.slice(done, start), esc(next));
+      done = start + content.length;
+    }
+    pieces.push(out.slice(done));
+    out = pieces.join("");
   }
 
+  // The value is the whole rest of the line, every ";" in it included.
+  // Windows' INI reader takes no inline comment, so "Doe; John", "Doe ; John"
+  // and ";Doe" are each one value; read as value and comment, the scrub kept
+  // "; John", or all of ";Doe", and a second pass read the same comment. Only
+  // the trailing blanks are not the value. A comment line stays one: the key
+  // cannot hold a ";", and a key the table does not name is left as it was.
+  // The key starts with something other than a blank. Had it been allowed to
+  // start with one, a blank-led line without "=" was walked again for every
+  // split of its leading run between indent and key: right-justified numeric
+  // rows scrubbed at about 1 s/MB. Mirror of maps._ini_pattern.
   out = out.replace(
-    /^([ \t]*)([^=\r\n;[<]+?)([ \t]*=[ \t]*)([^\r\n;]*?)([ \t]*(?:;[^\r\n]*)?)$/gm,
+    /^([ \t]*)([^=\r\n;[< \t][^=\r\n;[<]*?)([ \t]*=[ \t]*)([^\r\n]*?)([ \t]*)$/gm,
     (m, indent, name, sep, content, trailer) => {
+      // A quoted value followed by nothing but the rest of a tag is replaced
+      // inside its quotes: on a tag written one attribute per line this pass
+      // sees `    LastName="Doe" />`, and taken whole the quotes, the "/>" and
+      // any attribute behind the first went. Written as the attribute pass
+      // writes it, so a value that pass replaced is left as it is. What stays
+      // behind the quotes is read too, never passed through: each attribute
+      // in it goes through the table whether or not the attribute pass ran.
+      // Any other tail is the value going on and is replaced whole. Mirror of
+      // maps._QUOTED_VALUE / maps._TAG_TAIL.
+      const quoted = content.match(/^(["'])((?:(?!\1)[^<\r\n])*)\1/);
+      const tail = quoted && content.slice(quoted[0].length).match(SHARED_TAG_TAIL);
+      if (tail) {
+        const [whole, quote, inner] = quoted;
+        const next = decide(name.trim(), inner);
+        let head = whole;
+        if (next !== null && inner !== esc(next)) {
+          note(name.trim(), inner.trim(), next);
+          head = `${quote}${esc(next)}${quote}`;
+        }
+        const attributes = tail[1].replace(SHARED_TAG_TAIL_ATTRIBUTE,
+          (a, before, attr, q, current) => {
+            const value = decide(attr, current);
+            if (value === null || current === esc(value)) return a;
+            note(`${attr}=…`, current, value);
+            return `${before}${q}${esc(value)}${q}`;
+          });
+        return `${indent}${name}${sep}${head}${attributes}${tail[3]}${trailer}`;
+      }
       const next = decide(name.trim(), content);
       if (next === null) return m;
       note(name.trim(), String(content).trim(), next);
@@ -1822,7 +2284,7 @@ function scrubKnownFields(text, opts, found, fileLabel, escapeValue) {
   for (const raw of (opts.customPatterns || "").split(/\r?\n/)) {
     const pattern = raw.trim();
     if (!pattern) continue;
-    const re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    const re = matcher(pattern);
     let count = 0;
     out = out.replace(re, () => { count++; return "[REDACTED]"; });
     if (count) note("(custom)", pattern, "[REDACTED]", count);
@@ -1859,6 +2321,27 @@ function sharedKnownResidueLines(items) {
   return [fill("anon.residue.title"),
           ...items.map(item => fill(`anon.residue.${item.id}`, item.names)),
           fill("anon.residue.action")];
+}
+
+// What an operator typed and nothing here read, as one line for the result —
+// from the German catalogue strings inlined as FREETEXT_TEXT. Mirror of
+// classic._note_free_text: the busiest six fields, then how many more, because
+// a setting repeated five hundred times would otherwise bury the field that
+// holds a sentence. Empty when nothing was kept.
+function sharedFreeTextLine(kept) {
+  if (!kept || !kept.size) return "";
+  const fill = (key, values) => {
+    const text = FREETEXT_TEXT[key] !== undefined ? FREETEXT_TEXT[key] : `⟦${key}⟧`;
+    return Object.entries(values).reduce(
+      (out, [name, value]) => out.split(`{${name}}`).join(String(value)), text);
+  };
+  // Stable, so fields with equal counts keep the order they were met in, as
+  // Python's sorted() keeps them.
+  const top = [...kept].sort((a, b) => b[1] - a[1]).slice(0, 6);
+  let fields = top.map(([field, count]) => `${count} × <${field}>`).join(", ");
+  const more = kept.size - top.length;
+  if (more > 0) fields += " " + fill("anon.freetext.more", { count: more });
+  return fill("anon.freetext.kept", { fields });
 }
 
 /* PROFILES:END */
@@ -1904,13 +2387,60 @@ function latin1ToUtf8(s) {
 // ===========================================================================
 // Wahlfreier Zugriff über alle Teildateien hinweg
 // ===========================================================================
+// The parts of one study in the order they concatenate, or a refusal that says
+// what is wrong with them. A study is one name with .000, .001, … and no gap.
+// Without this any mix of numbered files was sorted and scrubbed as one
+// stream: behind a missing part every framing tag is off by that part's size,
+// a block "ends" inside the XML behind the hole, and that XML went out byte for
+// byte as signal, unscrubbed. A second study was welded onto the first under
+// one pseudonym, and a truncated one ran on into its neighbour's head. Dot
+// files are never parts — macOS writes ._Study.000 beside Study.000 on a
+// foreign volume, and the profile ignores ._* — they sorted first and
+// renumbered every real part.
+const ARCHIVE_PART = /^(.*)\.(\d{3,})$/;
+
+function checkParts(files) {
+  const byStem = new Map();
+  for (const f of Array.from(files)) {
+    const name = String(f.name || "");
+    const m = ARCHIVE_PART.exec(name);
+    if (!m || name.startsWith(".")) {
+      throw new Error(`»${name}« ist kein Teil eines Rhythmia-Archivs ` +
+        `(Name.000, Name.001, …). Nichts wurde gelesen.`);
+    }
+    if (!byStem.has(m[1])) byStem.set(m[1], []);
+    byStem.get(m[1]).push({ file: f, number: parseInt(m[2], 10) });
+  }
+  if (byStem.size > 1) {
+    throw new Error(`Die Auswahl enthält ${byStem.size} verschiedene Studien ` +
+      `(${[...byStem.keys()].sort().join(", ")}). Bitte eine Studie nach der ` +
+      `anderen anonymisieren. Nichts wurde gelesen.`);
+  }
+  if (!byStem.size) return [];
+  const [[stem, parts]] = byStem;
+  parts.sort((a, b) => a.number - b.number);
+  const nr = n => "." + String(n).padStart(3, "0");
+  parts.forEach((p, expected) => {
+    if (p.number === expected) return;
+    if (p.number < expected) {
+      throw new Error(`${stem}${nr(p.number)} ist doppelt gewählt. ` +
+        `Nichts wurde gelesen.`);
+    }
+    throw new Error(`${stem}${nr(expected)} fehlt — ` +
+      (expected ? `auf ${nr(expected - 1)} folgt ${nr(p.number)}. `
+                : `die Auswahl beginnt bei ${nr(p.number)}. `) +
+      `Die Teile sind ein Bytestrom; eine Lücke verschiebt alles dahinter. ` +
+      `Nichts wurde gelesen.`);
+  });
+  return parts.map(p => p.file);
+}
+
 // Rhythmia-HDx-Archive sind regelmäßig mehrere GB groß. Das Archiv wird
 // deshalb NIE komplett gelesen und schon gar nicht in einen einzigen JS-String
 // gewandelt (V8 bricht bei 512 MiB mit "Invalid string length" ab). Gelesen
 // wird per File.slice(), Binärblöcke bleiben als Blob-Referenz stehen.
 function makeArchiveReader(files) {
-  const parts = Array.from(files).sort((a, b) =>
-    String(a.name || "").localeCompare(String(b.name || "")));
+  const parts = checkParts(files);
   if (!parts.length) throw new Error("Keine Teildateien gewählt.");
 
   const sizes = parts.map(f => f.size);
@@ -1986,13 +2516,14 @@ function escapeXml(s) {
 // string, so the replacement is converted back before it is written —
 // otherwise a name with an umlaut in it changes the chunk's byte length,
 // and the archive records that length elsewhere.
-function anonymizeXmlChunk(xml, repMap, customPatterns, opts, found) {
+function anonymizeXmlChunk(xml, repMap, customPatterns, opts, found, kept) {
   const withPatterns = Object.assign({}, opts, {
     customPatterns: Array.isArray(customPatterns)
       ? customPatterns.join('\n') : (customPatterns || ''),
   });
   return scrubKnownFields(xml, withPatterns, found, '',
-                          v => escapeXml(utf8ToLatin1(v)));
+                          v => escapeXml(utf8ToLatin1(v)), archivePattern,
+                          kept);
 }
 
 // ===========================================================================
@@ -2008,6 +2539,60 @@ const XML_FLUSH_LIMIT = 32 << 20;
 const XML_FLUSH_KEEP = 1 << 16;
 const OPEN_TAG = "<inlinedbin ";
 
+// Where a long run of XML may be cut: right after the last "</...>" or
+// "<.../>" that ends at or before `bound` and that only whitespace separates
+// from the next "<". 0 if there is no such place yet. Anywhere else the cut
+// can land inside a value, and then neither chunk holds the whole element and
+// neither scrubs it: after an opening tag (<PatientName>|Mustermann), after a
+// bare ">" in the text (Mustermann >|</PatientName>), after the "]]>" of a
+// CDATA value, or after a tag inside one. Mirror of `_flush_cut` in
+// core/anonymize/rhythmia.py. One call reads the run about once, however many
+// tags a CDATA section that is still open holds.
+function flushCut(text, bound) {
+  const toNextTag = /\s*</y;
+  let gt = text.lastIndexOf(">", bound);
+  while (gt > 0) {
+    toNextTag.lastIndex = gt + 1;
+    if (toNextTag.test(text) && endsAnElement(text, gt)) {
+      const opened = cdataAround(text, gt);
+      if (opened < 0) return gt + 1;
+      // Every ">" back to that open is in the same section. Tried one by one,
+      // each searched back to the open and on for its end again, and a
+      // "<![CDATA[" quoted in a comment, which nothing closes, made one cut
+      // of a 32 MiB run take hours.
+      gt = text.lastIndexOf(">", opened - 1);
+      continue;
+    }
+    gt = text.lastIndexOf(">", gt - 1);
+  }
+  return 0;
+}
+
+// Whether the ">" at `gt` ends a closing or a self-closing tag, as far as its
+// own tag shows; whether that tag is markup at all is cdataAround's to say.
+// "<" is never bare in text or in an attribute value, so the last one is where
+// this ">"'s tag began — unless another ">" closed that tag first, and this
+// one is text, a quoted attribute value or the end of "]]>".
+function endsAnElement(text, gt) {
+  const lt = text.lastIndexOf("<", gt - 1);
+  if (lt < 0) return false;
+  const inner = text.indexOf(">", lt + 1);
+  if (inner < gt) return false;
+  const kind = text.charAt(lt + 1);
+  return kind === "/" ||
+    (text.charAt(gt - 1) === "/" && kind !== "!" && kind !== "?");
+}
+
+// Where the CDATA section that holds the ">" at `gt` opens, -1 if none does.
+// Inside one "</x>" is text, and the value runs on past it. The search for
+// "]]>" stops at `gt`: unbounded, it read on to the end of the run for every
+// open it was asked about.
+function cdataAround(text, gt) {
+  const opened = text.lastIndexOf("<![CDATA[", gt - 1);
+  if (opened < 0) return -1;
+  return text.slice(opened + 9, gt).includes("]]>") ? -1 : opened;
+}
+
 // Der verschlüsselte Patientensatz — <EncryptedPatientInfo> und
 // <EncryptedStudyInfo> — trägt die ganze Identität, verschlüsselt mit einem
 // Schlüssel, den der Recorder hat. Auf einem echten Archiv ist das die
@@ -2020,17 +2605,47 @@ const OPEN_TAG = "<inlinedbin ";
 // Marker stehen. Was danach noch eine echte Nutzlast trägt, hat die Redaktion
 // nicht erreicht — das ist ein Befund, kein normaler Ausgang.
 
+// One custom pattern as the RegExp that finds it in the archive's text, in
+// every case of every letter. The stream is read one character per byte and
+// its XML is UTF-8, so "Müller" sits there as "MÃ¼ller" and "MÜLLER" as
+// "MÃ\x9cLLER". Escaping the typed text matched neither; adding its UTF-8
+// spelling under the "i" flag matched only the case that was typed, because
+// /i compares characters and "¼" (BC) and "\x9c" are no case pair — the label
+// kept "MÜLLER" while the report showed a hit. So each letter becomes its
+// lower- and upper-case form, each spelled out byte for byte, and the RegExp
+// carries no "i": that flag would also pair Ã (C3) with ã (E3), the lead byte
+// of a three-byte character, and cut one in half. A letter whose other case is
+// longer (ß, SS) stays as typed. The whole pattern is also tried as typed, for
+// text the archive holds in latin-1. Mirror of rhythmia._archive_pattern;
+// tests/conformance holds the two outputs byte for byte identical.
+function archivePattern(typed) {
+  const escape = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const spelling = encode => Array.from(typed, c => {
+    const lower = c.toLowerCase(), upper = c.toUpperCase();
+    const forms = Array.from(lower).length === 1 && Array.from(upper).length === 1
+      ? [c, lower, upper] : [c];
+    const alternatives = [...new Set(forms.map(f => escape(encode(f))))];
+    return alternatives.length === 1
+      ? alternatives[0] : `(?:${alternatives.join("|")})`;
+  }).join("");
+  const asTyped = spelling(c => c);
+  const inUtf8 = spelling(utf8ToLatin1);
+  return new RegExp(asTyped === inUtf8 ? asTyped : `${asTyped}|${inUtf8}`, "g");
+}
+
 async function processArchive(files, opts, onProgress) {
   const rd = makeArchiveReader(files);
   coreLog(`Lese ${rd.parts.length} Datei(en), gesamt ` +
     `${(rd.total / (1024 * 1024)).toFixed(2)} MB (streamend)...`);
 
   const repMap = buildReplacementMap(opts);
-  const customPatterns = (opts.customPatterns || "")
+  const customPatterns = [...new Set((opts.customPatterns || "")
     .split(/\r?\n/)
     .map(s => s.trim())
-    .filter(Boolean);
+    .filter(Boolean))];
   const found = [];
+  // Hand-typed values the scrub left as they were — Python's Result.free_text.
+  const freeText = new Map();
 
   // Ein Ausgabe-Eimer pro Eingabe-Teildatei: die Aufteilung des Archivs bleibt
   // erhalten (das Rhythmia-System erwartet sie), obwohl sich die XML-Teile
@@ -2045,7 +2660,8 @@ async function processArchive(files, opts, onProgress) {
   const encrypted = new Set();
   const flushXml = (text, gStart) => {
     if (!text.length) return;
-    const scrubbed = anonymizeXmlChunk(text, repMap, customPatterns, opts, found);
+    const scrubbed = anonymizeXmlChunk(text, repMap, customPatterns, opts, found,
+                                       freeText);
     // Scanned on the *scrubbed* chunk, not the input: a record whose payload is
     // still there after the redaction pass is a leftover it did not reach, and
     // that is the only thing worth warning about now.
@@ -2059,7 +2675,6 @@ async function processArchive(files, opts, onProgress) {
     emitBytes(latin1ToBytes(scrubbed), gStart);
   };
 
-  const dec = new TextDecoder("latin1");
   let g = 0;            // globaler Leseoffset
   let carry = "";       // gelesen, noch nicht verarbeitet
   let carryStart = 0;   // globaler Offset von carry[0]
@@ -2067,7 +2682,12 @@ async function processArchive(files, opts, onProgress) {
 
   while (g < rd.total) {
     const take = Math.min(SCAN_CHUNK, rd.total - g);
-    carry += dec.decode(await rd.readRange(g, take));
+    // Byte for byte, as Python reads it. Not TextDecoder("latin1"): browsers
+    // treat that label as windows-1252, so 0x80–0x9F come back as U+20AC,
+    // U+201E, … and latin1ToBytes wrote them out as other bytes — every UTF-8
+    // Ä, Ö, Ü, ß, – or € in the XML left the page corrupted. Node decodes the
+    // label as ISO-8859-1, which is why node --test never saw it.
+    carry += bytesToLatin1(await rd.readRange(g, take));
     g += take;
     if (onProgress) onProgress({ done: g, total: rd.total });
 
@@ -2114,7 +2734,7 @@ async function processArchive(files, opts, onProgress) {
       const bound = Math.min(
         openIdx >= 0 ? openIdx : carry.length,
         carry.length - XML_FLUSH_KEEP);
-      const cut = carry.lastIndexOf(">", bound) + 1;
+      const cut = flushCut(carry, bound);
       if (cut > 0) {
         flushXml(carry.slice(0, cut), carryStart);
         carry = carry.slice(cut);
@@ -2132,6 +2752,18 @@ async function processArchive(files, opts, onProgress) {
     );
   }
   coreLog(`  ${countReplacements(found)} Ersetzung(en) durchgeführt.`);
+  if (freeText.size) coreLog(`  ${sharedFreeTextLine(freeText)}`);
+  // A pattern that replaced nothing says so: it is the only way to remove a
+  // name from a hand-typed label, and a silent miss reads as done. A name
+  // written with an HTML entity (M&uuml;ller) is still not matched — this is
+  // where the operator learns that.
+  const unmatched = customPatterns.filter(p =>
+    !found.some(f => f.field === "(custom)" && f.original === p));
+  for (const pattern of unmatched) {
+    coreLog(`  HINWEIS: Eigener Begriff »${pattern}« hat nichts ersetzt. Steht ` +
+      `er anders geschrieben im Archiv (z. B. M&uuml;ller statt Müller), ` +
+      `ist er noch da.`);
+  }
   // Zuletzt und deutlich: hier steht nach der Redaktion noch eine Nutzlast im
   // verschlüsselten Satz. Nicht der Normalfall — die Redaktion hat ihn nicht
   // erreicht, und die Ausgabe darf nicht sauber aussehen.
@@ -2154,7 +2786,7 @@ async function processArchive(files, opts, onProgress) {
   const outTotal = blobs.reduce((s, b) => s + b.size, 0);
   coreLog(`  Ergebnisgröße: ${(outTotal / (1024 * 1024)).toFixed(2)} MB in ` +
     `${blobs.length} Teil(en) (Differenz: ${outTotal - rd.total} Bytes).`);
-  return { blobs, found, encrypted: [...encrypted].sort(),
+  return { blobs, found, freeText, encrypted: [...encrypted].sort(), unmatched,
            inputNames: rd.parts.map(f => f.name),
            names: partNames(opts, blobs.length),
            knownResidue,
@@ -2180,9 +2812,9 @@ function partNames(opts, count) {
 
 // === SCRUB-CORE END ===
 // === SCRUB-CORE EXPORTS: bytesToLatin1, latin1ToBytes, utf8ToLatin1,
-//     latin1ToUtf8, buildReplacementMap, anonymizeXmlChunk, processArchive,
+//     latin1ToUtf8, buildReplacementMap, anonymizeXmlChunk, processArchive, flushCut,
 //     makeArchiveReader, countReplacements, sharedKnownResidue,
-//     sharedKnownResidueLines, partNames ===
+//     sharedKnownResidueLines, partNames, checkParts, sharedFreeTextLine ===
 
 // ===========================================================================
 // Optionen aus dem Formular einsammeln
@@ -2204,12 +2836,26 @@ function getOptions() {
 // ===========================================================================
 // Vorschau-Tabelle
 // ===========================================================================
-function renderPreview(found) {
+// Under the table and under "nothing found" alike: an archive whose only
+// names sit in hand-typed labels otherwise reads as one with no names in it.
+function freeTextNote(kept) {
+  const line = sharedFreeTextLine(kept);
+  return line ? `<div class="warn">${escapeHtml(line)}</div>` : "";
+}
+
+// A run of 24 characters without a space is a path, an ID or a hash, not a
+// name or a field: only such a cell is marked to break anywhere (see the
+// td.long rule). Names stay whole, so a long column cannot squeeze them.
+function cellClass(name, value) {
+  return /\S{24,}/.test(String(value == null ? "" : value)) ? `${name} long` : name;
+}
+
+function renderPreview(found, kept) {
   if (!found.length) {
     preview.innerHTML =
-      '<p style="color:#7f8c8d">Keine personenbezogenen Felder gefunden. ' +
+      '<p style="color:var(--text-dim)">Keine personenbezogenen Felder gefunden. ' +
       "Falls die Datei trotzdem PII enthält, fügen Sie diese unter " +
-      '"Eigene zu ersetzende Begriffe" hinzu.</p>';
+      '"Eigene zu ersetzende Begriffe" hinzu.</p>' + freeTextNote(kept);
     return;
   }
 
@@ -2230,14 +2876,14 @@ function renderPreview(found) {
   for (const [, f] of agg) {
     html +=
       "<tr>" +
-      `<td class="field">${escapeHtml(f.field)}</td>` +
-      `<td class="original">${escapeHtml(f.original) || "<em>(leer)</em>"}</td>` +
-      `<td class="replacement">${escapeHtml(f.replacement) || "<em>(leer)</em>"}</td>` +
+      `<td class="${cellClass("field", f.field)}">${escapeHtml(f.field)}</td>` +
+      `<td class="${cellClass("original", f.original)}">${escapeHtml(f.original) || "<em>(leer)</em>"}</td>` +
+      `<td class="${cellClass("replacement", f.replacement)}">${escapeHtml(f.replacement) || "<em>(leer)</em>"}</td>` +
       `<td>${f.count}</td>` +
       "</tr>";
   }
   html += "</tbody></table>";
-  preview.innerHTML = html;
+  preview.innerHTML = html + freeTextNote(kept);
 }
 
 function escapeHtml(s) {
@@ -2325,8 +2971,8 @@ $("analyze").addEventListener("click", async () => {
   preview.innerHTML = "";
   renderResidue([]);
   try {
-    const { found, knownResidue } = await runPipeline();
-    renderPreview(found);
+    const { found, freeText, knownResidue } = await runPipeline();
+    renderPreview(found, freeText);
     renderResidue(knownResidue);
   } catch (e) {
     log("FEHLER: " + e.message);
@@ -2344,7 +2990,7 @@ $("process").addEventListener("click", async () => {
   renderResidue([]);
   try {
     const result = await runPipeline();
-    renderPreview(result.found);
+    renderPreview(result.found, result.freeText);
     renderResidue(result.knownResidue);
 
     // Die Namen kommen aus dem Kern (partNames): nur erlaubte Zeichen, und die
